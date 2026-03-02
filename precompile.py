@@ -62,7 +62,7 @@ def main():
     logger.info(f"Attn impl:     {attn_impl}")
     logger.info(f"Compile mode:  {args.mode}")
 
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR", "(default: system temp)")
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR", "./torch_compile_cache")
     autograd_cache = os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0")
     logger.info(f"Cache dir:     {cache_dir}")
     logger.info(f"AOTAutograd:   {autograd_cache}")

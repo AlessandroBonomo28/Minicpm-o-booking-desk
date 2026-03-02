@@ -123,7 +123,7 @@ footer { margin-top:60px; padding-top:16px; border-top:1px solid var(--border); 
 
 <h2 id="pre-compilation-recommended">Pre-compilation (Recommended)</h2>
 <p>The first-time compilation (cold start) takes approximately 15 minutes. To avoid this wait on the first service start, run the pre-compilation script ahead of time:</p>
-<div class="codehilite"><pre><span></span><code><span class="nv">CUDA_VISIBLE_DEVICES</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="nv">PYTHONPATH</span><span class="o">=</span>.<span class="w"> </span>.venv/base/bin/python<span class="w"> </span>precompile.py
+<div class="codehilite"><pre><span></span><code><span class="nv">CUDA_VISIBLE_DEVICES</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="nv">TORCHINDUCTOR_CACHE_DIR</span><span class="o">=</span>./torch_compile_cache<span class="w"> </span>.venv/base/bin/python<span class="w"> </span>precompile.py
 </code></pre></div>
 
 <p>The generated Triton kernel cache is saved to the <code>./torch_compile_cache</code> directory (configured via the <code>TORCHINDUCTOR_CACHE_DIR</code> environment variable in <code>start_all.sh</code>). The cache persists on disk and is automatically reused on all subsequent starts, with no need to recompile.</p>

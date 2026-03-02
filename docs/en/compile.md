@@ -23,7 +23,7 @@ Set in `config.json`:
 The first-time compilation (cold start) takes approximately 15 minutes. To avoid this wait on the first service start, run the pre-compilation script ahead of time:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 PYTHONPATH=. .venv/base/bin/python precompile.py
+CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=./torch_compile_cache .venv/base/bin/python precompile.py
 ```
 
 The generated Triton kernel cache is saved to the `./torch_compile_cache` directory (configured via the `TORCHINDUCTOR_CACHE_DIR` environment variable in `start_all.sh`). The cache persists on disk and is automatically reused on all subsequent starts, with no need to recompile.

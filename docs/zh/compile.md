@@ -23,7 +23,7 @@
 `torch.compile` 的首次编译（冷启动）耗时约 15 分钟。为避免首次启动服务时的长时间等待，建议提前运行预编译脚本：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 PYTHONPATH=. .venv/base/bin/python precompile.py
+CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=./torch_compile_cache .venv/base/bin/python precompile.py
 ```
 
 预编译生成的 Triton kernel 缓存保存在 `./torch_compile_cache` 目录下（由 `start_all.sh` 中的 `TORCHINDUCTOR_CACHE_DIR` 环境变量配置）。该缓存持久存储在磁盘上，后续所有启动都会自动复用，无需重复编译。

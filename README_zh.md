@@ -197,7 +197,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 bash start_all.sh
 **5b.** 运行预编译脚本（一次性，约 15 分钟）：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 PYTHONPATH=. .venv/base/bin/python precompile.py
+CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=./torch_compile_cache .venv/base/bin/python precompile.py
 ```
 
 预编译会生成优化后的 Triton kernel 并保存到 `./torch_compile_cache` 目录（`start_all.sh` 会从 `TORCHINDUCTOR_CACHE_DIR` 读取编译缓存）。该缓存持久存储在磁盘上，后续所有启动（包括进程重启）都会自动加载，无需重复编译。

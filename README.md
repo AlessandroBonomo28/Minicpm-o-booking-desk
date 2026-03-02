@@ -193,7 +193,7 @@ Three steps to enable:
 **5b.** Run the pre-compilation script (one-time, ~15 min):
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 PYTHONPATH=. .venv/base/bin/python precompile.py
+CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=./torch_compile_cache .venv/base/bin/python precompile.py
 ```
 
 Pre-compilation generates optimized Triton kernels and saves them to the `./torch_compile_cache` directory (`start_all.sh` reads the compilation cache from `TORCHINDUCTOR_CACHE_DIR`). The cache persists on disk and is automatically loaded on all subsequent starts (including process restarts), with no need to recompile.

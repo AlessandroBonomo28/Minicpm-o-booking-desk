@@ -25,11 +25,11 @@
 </div>
 
 <!-- ========== Notice Banner ========== -->
-<div class="notice-banner" id="noticeBanner">
+<!-- <div class="notice-banner" id="noticeBanner">
     <span class="notice-icon">&#x1F399;</span>
     <span>Half-Duplex Audio: speak naturally, the model responds when you finish. Server-side VAD detects your speech boundaries automatically.</span>
     <button class="notice-dismiss" onclick="this.parentElement.style.display='none'" title="Dismiss">&times;</button>
-</div>
+</div> -->
 
 <!-- ========== Two-Column Layout ========== -->
 <div class="main">
@@ -196,6 +196,10 @@
 <script type="module">
 import { initNav } from '/static/shared/app-nav.js';
 initNav('half_duplex_audio');
+</script>
+<script type="module">
+import { initFaqSidebar } from '/static/shared/faq-sidebar.js';
+initFaqSidebar('half-duplex');
 </script>
 </body>
 </html>

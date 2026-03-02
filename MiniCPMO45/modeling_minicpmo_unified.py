@@ -392,6 +392,7 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
         self,
         mode: str = "default",
         dynamic: bool = True,
+        skip_modules: Optional[List[str]] = None,
     ) -> "MiniCPMO":
         """Apply torch.compile to compute-intensive sub-modules.
 
@@ -424,32 +425,47 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
                 - "max-autotune": maximum optimization (very long compile time)
             dynamic: Enable dynamic shape support (recommended True to avoid
                 recompilation when shapes change).
+            skip_modules: Module names to skip (e.g. ["llm.model"] for AWQ
+                quantized LLM whose custom kernels are incompatible with compile).
 
         Returns:
             self (for method chaining).
         """
         import time as _time
-        logger.info(f"[torch.compile] Compiling sub-modules (mode={mode}, dynamic={dynamic})")
+        skip = set(skip_modules or [])
+        logger.info(
+            f"[torch.compile] Compiling sub-modules "
+            f"(mode={mode}, dynamic={dynamic}, skip={skip or 'none'})"
+        )
         t0 = _time.time()
 
         compile_kwargs = dict(mode=mode, dynamic=dynamic)
         compiled_modules: list = []
+        skipped_modules: list = []
 
-        if hasattr(self, "vpm"):
+        if hasattr(self, "vpm") and "vpm" not in skip:
             self.vpm = torch.compile(self.vpm, **compile_kwargs)
             compiled_modules.append("vpm")
+        elif "vpm" in skip:
+            skipped_modules.append("vpm")
 
-        if hasattr(self, "llm"):
+        if hasattr(self, "llm") and "llm.model" not in skip:
             self.llm.model = torch.compile(self.llm.model, **compile_kwargs)
             compiled_modules.append("llm.model")
+        elif "llm.model" in skip:
+            skipped_modules.append("llm.model")
 
-        if hasattr(self, "resampler"):
+        if hasattr(self, "resampler") and "resampler" not in skip:
             self.resampler = torch.compile(self.resampler, **compile_kwargs)
             compiled_modules.append("resampler")
+        elif "resampler" in skip:
+            skipped_modules.append("resampler")
 
-        if hasattr(self, "tts") and hasattr(self.tts, "model"):
+        if hasattr(self, "tts") and hasattr(self.tts, "model") and "tts.model" not in skip:
             self.tts.model = torch.compile(self.tts.model, **compile_kwargs)
             compiled_modules.append("tts.model")
+        elif "tts.model" in skip:
+            skipped_modules.append("tts.model")
 
         # Enable TF32 for faster matmul on Ampere+ GPUs
         torch.set_float32_matmul_precision("high")
@@ -458,7 +474,9 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
         self._compiled = True
         logger.info(
             f"[torch.compile] Wrapping done ({elapsed:.2f}s), "
-            f"compiled: {compiled_modules}. Actual compilation triggers on first forward."
+            f"compiled: {compiled_modules}"
+            + (f", skipped: {skipped_modules}" if skipped_modules else "")
+            + ". Actual compilation triggers on first forward."
         )
         return self
 

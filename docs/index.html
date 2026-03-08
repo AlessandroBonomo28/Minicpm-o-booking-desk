@@ -119,6 +119,61 @@
         }
         .card:hover .card-enter { color: #2d2d2d; }
 
+        /* SSL hint */
+        .ssl-hint {
+            max-width: 960px;
+            width: 100%;
+            margin-top: 4px;
+        }
+        .ssl-hint details {
+            background: #fffbeb;
+            border: 1px solid #f0e4c4;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .ssl-hint summary {
+            padding: 10px 16px;
+            font-size: 13px;
+            color: #96792f;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            list-style: none;
+            user-select: none;
+        }
+        .ssl-hint summary::-webkit-details-marker { display: none; }
+        .ssl-hint summary::before {
+            content: '▸';
+            font-size: 18px;
+            transition: transform 0.2s;
+        }
+        .ssl-hint details[open] summary::before { transform: rotate(90deg); }
+        .ssl-hint .ssl-steps {
+            padding: 4px 20px 20px;
+            display: flex;
+            gap: 20px;
+        }
+        .ssl-hint .ssl-step {
+            flex: 1;
+            min-width: 0;
+        }
+        .ssl-hint .ssl-step-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #96792f;
+            margin-bottom: 8px;
+        }
+        .ssl-hint .ssl-step img {
+            width: 100%;
+            border-radius: 8px;
+            border: 1px solid #e8dfc8;
+        }
+
+        @media (max-width: 600px) {
+            .ssl-hint .ssl-steps { flex-direction: column; }
+        }
+
         /* Secondary section */
         .secondary-section {
             max-width: 960px;
@@ -300,6 +355,22 @@
                 <div class="card-url">github.com/OpenBMB/MiniCPM-o-Demo</div>
                 <div class="card-enter">View on GitHub →</div>
             </a>
+        </div>
+
+        <div class="ssl-hint">
+            <details>
+                <summary>⚠️ Seeing a security warning?</summary>
+                <div class="ssl-steps">
+                    <div class="ssl-step">
+                        <div class="ssl-step-label">Step 1 — Click "Advanced"</div>
+                        <img src="assets/step1.png" alt="Click Advanced button" />
+                    </div>
+                    <div class="ssl-step">
+                        <div class="ssl-step-label">Step 2 — Click "Proceed to …"</div>
+                        <img src="assets/step2.png" alt="Click Proceed to link" />
+                    </div>
+                </div>
+            </details>
         </div>
 
         <div class="secondary-section">

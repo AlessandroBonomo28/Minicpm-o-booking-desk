@@ -5081,7 +5081,7 @@ class DuplexCapability:
                 if j != 0:
                     _test_ids = total_ids_in_unit + [last_id.item()]
                     _chunk_text = self.tokenizer.decode(_test_ids, skip_special_tokens=True)
-                    if len(_chunk_text) >= 22:
+                    if len(_chunk_text) >= 28:
                         self.total_ids.pop()
                         if self.ls_mode == "explicit":
                             _pending_terminator_id = self.chunk_eos_token_id

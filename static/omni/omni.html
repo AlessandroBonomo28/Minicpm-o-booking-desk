@@ -165,20 +165,35 @@
     <!-- Other Config -->
     <div class="panel-config">
         <details class="config-group" open>
-            <summary>Main Settings</summary>
+            <summary>Response Length Controls</summary>
             <div class="cg-body">
                 <div class="cg-row" data-tip="Controls AI response length, >1 = longer responses">
                     <div class="cg-row inline">
                         <span class="cg-label" style="flex:none;">Length Penalty</span>
-                        <input type="number" class="cg-input-sm" id="omniLengthPenalty" value="1.2" min="0.1" max="5.0" step="0.05">
+                        <input type="number" class="cg-input-sm" id="omniLengthPenalty" value="1.1" min="0.1" max="5.0" step="0.05">
                     </div>
-                    <span class="lp-presets">
-                        <button type="button" class="lp-preset-btn active" data-lp="1.2" title="Verbose — encourages longer, detailed responses">Verbose</button>
-                        <button type="button" class="lp-preset-btn" data-lp="1.05" title="Concise & Precise — shorter, focused replies">Concise</button>
-                    </span>
+                    <div class="lp-presets" style="display:flex;flex-direction:column;gap:4px;">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <button type="button" class="lp-preset-btn" data-lp="1.2" title="Verbose — encourages longer, detailed responses">Verbose</button>
+                            <span style="font-size:10px;color:#999;">Longer, detailed replies</span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <button type="button" class="lp-preset-btn active" data-lp="1.1" title="Balanced — moderate response length">Balanced</button>
+                            <span style="font-size:10px;color:#999;">Moderate length</span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <button type="button" class="lp-preset-btn" data-lp="1.05" title="Concise & Precise — shorter, focused replies">Concise</button>
+                            <span style="font-size:10px;color:#999;">Short, focused answers</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="cg-row inline" data-tip="HD vision: 1 source + 2 slices = 192 tok/frame, better for text/details, +100ms latency">
-                    <span class="cg-label" style="flex:none;">Vision HD</span>
+            </div>
+        </details>
+        <details class="config-group" open>
+            <summary>Vision Settings</summary>
+            <div class="cg-body">
+                <div class="cg-row inline" data-tip="High-Definition vision: 1 source + 2 slices = 192 tok/frame, better for text/details, +100ms latency">
+                    <span class="cg-label" style="flex:none;">High-Definition Vision</span>
                     <input type="checkbox" id="visionHD">
                     <span style="font-size:10px;color:#888;" id="visionHint">64 tok</span>
                 </div>

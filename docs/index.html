@@ -615,6 +615,7 @@
                                 <th scope="col">Model</th>
                                 <th scope="col" data-zh="边听边说（语音的全双工）">Simultaneously Listen<br>&amp; Speak (Speech Duplex)</th>
                                 <th scope="col" data-zh="边看边听边说（全模态的全双工）">Simultaneously See,<br>Listen &amp; Speak (Omni Duplex)</th>
+                                <th scope="col" data-zh="边看边说（视频入文本出）">Live Video<br>Captioning<br>(Video→Text)</th>
                                 <th scope="col" data-zh="全模态全双工下的问答能力">Omni-modal<br>Full-Duplex Q&amp;A</th>
                                 <th scope="col" data-zh="全模态全双工下的主动提醒">Omni-modal Full-Duplex<br>Proactive Reminders</th>
                                 <th scope="col" data-zh="半双工音频/视频通话">Half-Duplex<br>Audio Call/Video Call</th>
@@ -632,11 +633,13 @@
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
+                                <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-yes" aria-label="Supported">✓</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                             </tr>
                             <tr>
                                 <td>Qwen3-Omni</td>
+                                <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
@@ -649,7 +652,8 @@
                             <tr>
                                 <td>StreamingVLM</td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
-                                <td><span class="cmp-partial" title="Supported, but no speech output">✓ No speech output</span></td>
+                                <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
+                                <td><span class="cmp-yes" aria-label="Supported">✓</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
@@ -660,7 +664,8 @@
                             <tr>
                                 <td>LiveCC</td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
-                                <td><span class="cmp-partial" title="Supported, but no speech output">✓ No speech output</span></td>
+                                <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
+                                <td><span class="cmp-yes" aria-label="Supported">✓</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
@@ -674,6 +679,7 @@
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
+                                <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-yes" aria-label="Supported">✓</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-yes" aria-label="Supported">✓</span></td>
@@ -681,6 +687,7 @@
                             </tr>
                             <tr>
                                 <td>Gemini 2.5</td>
+                                <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
                                 <td><span class="cmp-no" aria-label="Not supported">✗</span></td>
@@ -700,9 +707,10 @@
                                 <td><span class="cmp-yes" aria-label="Supported">✓</span></td>
                                 <td><span class="cmp-yes" aria-label="Supported">✓</span></td>
                                 <td><span class="cmp-yes" aria-label="Supported">✓</span></td>
+                                <td><span class="cmp-yes" aria-label="Supported">✓</span></td>
                             </tr>
                         </tbody>
-                        <caption>Capability comparison of multimodal LLMs. ✓ = supported, ✗ = not supported. MiniCPM-o 4.5 is the only model that supports all capabilities simultaneously — full-duplex speech, omni-modal duplex streaming, Q&amp;A, proactive reminders, offline audio-video understanding, customizable voice, speech synthesis, and OCR.</caption>
+                        <caption>Capability comparison of multimodal LLMs. ✓ = supported, ✗ = not supported. MiniCPM-o 4.5 is the only model that supports all capabilities simultaneously — full-duplex speech, omni-modal duplex streaming, Q&amp;A, proactive reminders, offline audio-video understanding, customizable voice, live video captioning, speech synthesis, and OCR.</caption>
                     </table>
                 </div>
             </div>

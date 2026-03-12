@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python${PYTHON_VERSION}-dev \
         python3-pip \
         ffmpeg \
+        openssl \
         curl \
         git \
     && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/bin/python \

@@ -49,10 +49,20 @@ with open(p, 'w') as f: json.dump(c, f, indent=4, ensure_ascii=False)
         ln -sf "$WORKSPACE/config.json" /app/config.json
     fi
 
-    # certs/: symlink if present
-    if [ -d "$WORKSPACE/certs" ]; then
+    # certs/: symlink if present, else auto-generate self-signed certs
+    if [ -d "$WORKSPACE/certs" ] && [ -f "$WORKSPACE/certs/cert.pem" ] && [ -f "$WORKSPACE/certs/key.pem" ]; then
         ln -sfn "$WORKSPACE/certs" /app/certs
         echo "[Workspace] Using certs/ from workspace"
+    else
+        mkdir -p "$WORKSPACE/certs"
+        openssl req -x509 -newkey rsa:2048 \
+            -keyout "$WORKSPACE/certs/key.pem" \
+            -out "$WORKSPACE/certs/cert.pem" \
+            -days 365 -nodes \
+            -subj "/CN=minicpm-o-demo" \
+            2>/dev/null
+        ln -sfn "$WORKSPACE/certs" /app/certs
+        echo "[Workspace] Auto-generated self-signed TLS certs (valid 365 days)"
     fi
 
     # data/: persist to workspace
@@ -68,6 +78,18 @@ with open(p, 'w') as f: json.dump(c, f, indent=4, ensure_ascii=False)
     echo "[Workspace] torch_compile_cache/ -> workspace (persistent)"
 
     echo ""
+fi
+
+# Fallback: ensure certs exist even without workspace mount
+if [ ! -f /app/certs/cert.pem ] || [ ! -f /app/certs/key.pem ]; then
+    mkdir -p /app/certs
+    openssl req -x509 -newkey rsa:2048 \
+        -keyout /app/certs/key.pem \
+        -out /app/certs/cert.pem \
+        -days 365 -nodes \
+        -subj "/CN=minicpm-o-demo" \
+        2>/dev/null
+    echo "[Certs] Auto-generated self-signed TLS certs (valid 365 days)"
 fi
 
 export TORCHINDUCTOR_CACHE_DIR=/app/torch_compile_cache

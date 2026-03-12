@@ -28,10 +28,25 @@ WORKSPACE="/workspace"
 if [ -d "$WORKSPACE" ]; then
     echo "[Workspace] Detected /workspace mount"
 
-    # config.json: use workspace version if present
+    # config.json: use workspace version if present, else auto-create
     if [ -f "$WORKSPACE/config.json" ]; then
         ln -sf "$WORKSPACE/config.json" /app/config.json
         echo "[Workspace] Using config.json from workspace"
+    else
+        echo "[Workspace] config.json not found, auto-creating from template"
+        cp /app/config.example.json "$WORKSPACE/config.json"
+        # If local model exists, patch model_path to use workspace path
+        if [ -d "$WORKSPACE/models/MiniCPM-o-4_5" ]; then
+            python -c "
+import json
+p = '$WORKSPACE/config.json'
+with open(p) as f: c = json.load(f)
+c['model']['model_path'] = '/workspace/models/MiniCPM-o-4_5'
+with open(p, 'w') as f: json.dump(c, f, indent=4, ensure_ascii=False)
+"
+            echo "[Workspace] Set model_path to /workspace/models/MiniCPM-o-4_5 (local model detected)"
+        fi
+        ln -sf "$WORKSPACE/config.json" /app/config.json
     fi
 
     # certs/: symlink if present

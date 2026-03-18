@@ -1,20 +1,31 @@
-# iOS 触控滚动修复（Omni 页面）
+# iOS 触控滚动修复（全站）
 
 ## 问题
 
-在 iPhone / iPad 上访问 Omni Full-Duplex 页面时，页面无法通过触控上下滑动，导致最下方的控制按钮（Start、Stop 等）完全不可见、无法点击。
+在 iPhone / iPad 上访问各页面时，页面无法通过触控上下滑动，导致底部的控制按钮或输入区域不可见、无法操作。
 
 ## 根因分析
 
 | 原因 | 说明 |
 |------|------|
-| `body { height: 100vh }` | 来自 `duplex-shared.css`，把 body 锁死在一屏高度，内容溢出时无法滚动 |
+| `body { height: 100vh }` | 把 body 锁死在一屏高度，内容溢出时无法滚动。iOS Safari 的 `100vh` 还包含地址栏后面的区域，导致底部被遮挡 |
 | `.col-left, .col-right { overflow: hidden }` | 列容器裁切溢出内容，触控事件无法触发滚动 |
 | 媒体查询断点太小（768px） | iPad 竖屏 810px、横屏 1024px+，全部未命中 |
 
-## 修复方案
+## 涉及页面与修改文件
 
-修改文件：`static/omni/omni.css`（仅影响 Omni 页面，不影响其他页面）
+| 页面 | 修改文件 | 布局类型 |
+|------|----------|----------|
+| Omni Full-Duplex | `static/omni/omni.css` | 两列 grid + 底部控制栏 |
+| Audio Full-Duplex | `static/audio-duplex/audio-duplex.css` | 两列 grid + 底部控制栏 |
+| Half-Duplex Audio | `static/half-duplex/half-duplex.css` | 两列 grid + 底部控制栏 |
+| Turn-based Chat | `static/turnbased.html`（内联 style） | 单列 flex + 底部输入区 |
+
+---
+
+## 修复方案 A：Duplex 系列页面（Omni / Audio / Half-Duplex）
+
+这三个页面共享 `duplex-shared.css` 的两列布局，各自的页面 CSS 中添加了相同的覆盖规则。
 
 ### 1. 全局允许滚动（无媒体查询）
 
@@ -64,9 +75,53 @@ body {
 ```
 
 - 即使 iPad Pro 横屏宽度 > 1024px，该查询也能命中触控设备
-- 双重保障，确保所有触屏设备都可滚动
 
-## 断点层级总结
+---
+
+## 修复方案 B：Turn-based Chat 页面
+
+该页面使用内联 CSS，布局与 Duplex 系列不同（ChatGPT 风格单列布局）。
+
+### 1. body 高度改为 min-height
+
+```css
+html {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+body {
+    min-height: 100vh;
+    min-height: 100dvh;  /* 动态视口高度，解决 iOS 地址栏遮挡 */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+```
+
+- `100dvh`（Dynamic Viewport Height）在 iOS Safari 15.4+ 正确反映不含地址栏的实际可见高度
+- `100vh` 作为不支持 `dvh` 的浏览器的 fallback
+
+### 2. 初始视图允许滚动
+
+```css
+.initial-view {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+```
+
+- 初始视图包含系统配置卡片 + 输入区，在小屏设备上容易溢出
+
+### 3. 对话视图 flex 收缩
+
+```css
+.chat-view {
+    min-height: 0;  /* 确保 flex 子元素在父容器缩小时正确收缩 */
+}
+```
+
+---
+
+## 断点层级总结（Duplex 系列）
 
 | 断点 | 覆盖设备 | 效果 |
 |------|----------|------|
@@ -78,6 +133,6 @@ body {
 
 ## 注意事项
 
-- 仅修改了 `omni.css`，不影响 `audio-duplex` 或 `half-duplex` 页面
-- 如果其他 duplex 页面也有相同问题，可参照此方案在对应 CSS 中添加类似覆盖
+- Duplex 系列的修改仅在各自的页面 CSS 中，不修改共享的 `duplex-shared.css`，避免影响未来新增页面
+- Turn-based 页面的修改在内联 `<style>` 中
 - 全屏模式（video fullscreen）下控制栏有独立的固定定位逻辑，不受此修改影响

@@ -2,6 +2,12 @@
 
 MiniCPM-o 提供两种全双工实时对话模式，通过 WebSocket 协议通信。
 
+## API Host
+
+```
+https://minicpmo45.modelbest.cn
+```
+
 ## 连接端点
 
 ```

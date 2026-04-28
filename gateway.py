@@ -157,6 +157,8 @@ app = FastAPI(
     description="MiniCPMO45 多模态推理网关",
     version="1.0.0-alpha.2",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
 )
 
 

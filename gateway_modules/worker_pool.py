@@ -367,12 +367,23 @@ class WorkerPool:
 
     # ========== 路由策略 ==========
 
-    def _get_idle_worker(self) -> Optional[WorkerConnection]:
-        """获取任意空闲 Worker"""
+    def _gpu_busy_counts(self) -> Dict[int, int]:
+        """Count busy workers per GPU for load-aware scheduling."""
+        counts: Dict[int, int] = {}
         for w in self.workers.values():
-            if w.is_idle:
-                return w
-        return None
+            if w.is_busy:
+                counts[w.gpu_id] = counts.get(w.gpu_id, 0) + 1
+        return counts
+
+    def _get_idle_worker(self) -> Optional[WorkerConnection]:
+        """获取当前负载最低 GPU 上的空闲 Worker"""
+        gpu_busy = self._gpu_busy_counts()
+        idle_workers = (w for w in self.workers.values() if w.is_idle)
+        return min(
+            idle_workers,
+            key=lambda w: (gpu_busy.get(w.gpu_id, 0), w.worker_id),
+            default=None,
+        )
 
     # ========== FIFO 队列核心 ==========
 

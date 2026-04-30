@@ -50,6 +50,26 @@ echo "=================================================="
 cd "$PROJECT_DIR"
 mkdir -p tmp
 
+# ============ 构建移动端静态资源 ============
+# /mobile served by gateway reads from static/mobile/, so always refresh it
+# before starting the service. Set SKIP_MOBILE_BUILD=1 only for backend-only debug.
+if [ -f "$PROJECT_DIR/frontend/mobile/package.json" ]; then
+    if [ "${SKIP_MOBILE_BUILD:-0}" = "1" ]; then
+        echo "[Mobile] Skipping mobile build (SKIP_MOBILE_BUILD=1)"
+    else
+        echo "[Mobile] Building frontend/mobile -> static/mobile ..."
+        if command -v npm >/dev/null 2>&1; then
+            (cd "$PROJECT_DIR/frontend/mobile" && npm run build:static)
+        elif command -v bun >/dev/null 2>&1; then
+            (cd "$PROJECT_DIR/frontend/mobile" && bun run --bun build:static)
+        else
+            echo "[Mobile] ERROR: npm or bun is required to build frontend/mobile"
+            exit 1
+        fi
+        echo "[Mobile] Build complete ✓"
+    fi
+fi
+
 # ============ 启动 Workers ============
 WORKER_ADDRS=""
 GPU_IDX=0

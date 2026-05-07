@@ -6,6 +6,24 @@ import {
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { AudioDuplexScreen } from './duplex/AudioDuplexScreen'
 import { VideoDuplexScreen } from './duplex/VideoDuplexScreen'
 import { useDuplexSession } from './duplex/useDuplexSession'
@@ -34,7 +52,7 @@ type BackendContentItem =
     }
   | {
       type: 'audio'
-      data: string
+      data?: string
       path?: string
       name?: string
       duration?: number
@@ -167,6 +185,7 @@ type ModeSettings = {
   presetId: string | null
   systemPrompt: string
   refAudio: RefAudioState
+  systemContent: BackendContentItem[] | null
 }
 
 type SettingsState = {
@@ -192,23 +211,29 @@ const EMPTY_REF_AUDIO: RefAudioState = {
   base64: null,
 }
 
+const TURN_SYSTEM_PREFIX = '模仿音频样本的音色并生成新的内容。'
+const TURN_SYSTEM_SUFFIX =
+  '你的任务是用这种声音模式来当一个助手。请认真、高质量地回复用户的问题。请用高自然度的方式和用户聊天。你是由面壁智能开发的人工智能助手：面壁小钢炮。'
+
 const DEFAULT_SETTINGS: SettingsState = {
   turnbased: {
     presetId: null,
-    systemPrompt:
-      '你的任务是作为一个助手认真、高质量地回复用户的问题。请用高自然度的方式和用户聊天。',
+    systemPrompt: TURN_SYSTEM_SUFFIX,
     refAudio: EMPTY_REF_AUDIO,
+    systemContent: null,
   },
   audio_duplex: {
     presetId: null,
     systemPrompt:
       '请作为一个自然、口语化的语音助手与用户实时对话。你处于音频双工模式，可以一边听一边说。',
     refAudio: EMPTY_REF_AUDIO,
+    systemContent: null,
   },
   omni: {
     presetId: null,
     systemPrompt: 'Streaming Omni Conversation.',
     refAudio: EMPTY_REF_AUDIO,
+    systemContent: null,
   },
   maxNewTokens: 256,
   turnLengthPenalty: 1.1,
@@ -252,6 +277,7 @@ type UserPreset = {
   mode: PresetMode
   systemPrompt: string
   refAudio: RefAudioState
+  systemContent?: BackendContentItem[] | null
   createdAt: number
   updatedAt: number
 }
@@ -607,14 +633,29 @@ function cloneRefAudio(refAudio: RefAudioState): RefAudioState {
   }
 }
 
+function cloneSystemContent(
+  content: BackendContentItem[] | null | undefined,
+): BackendContentItem[] | null {
+  return content?.map((item) => ({ ...item })) ?? null
+}
+
 function buildModeSettings(
   previous: ModeSettings,
   next: Partial<ModeSettings>,
 ): ModeSettings {
+  const hasSystemContentPatch = Object.prototype.hasOwnProperty.call(next, 'systemContent')
+  const shouldClearSystemContent =
+    next.presetId === null && next.systemPrompt !== undefined && !hasSystemContentPatch
+
   return {
     ...previous,
     ...next,
     refAudio: next.refAudio ? cloneRefAudio(next.refAudio) : cloneRefAudio(previous.refAudio),
+    systemContent: hasSystemContentPatch
+      ? cloneSystemContent(next.systemContent)
+      : shouldClearSystemContent
+        ? null
+        : cloneSystemContent(previous.systemContent),
   }
 }
 
@@ -649,7 +690,7 @@ function extractRefAudioFromPreset(preset: PresetMetadata, tr: Translations): Re
   const systemAudio = preset.system_content?.find(
     (
       item,
-    ): item is Extract<BackendContentItem, { type: 'audio'; data: string }> =>
+    ): item is Extract<BackendContentItem, { type: 'audio' }> =>
       item.type === 'audio' && Boolean(item.data),
   )
 
@@ -663,6 +704,80 @@ function extractRefAudioFromPreset(preset: PresetMetadata, tr: Translations): Re
   }
 
   return cloneRefAudio(EMPTY_REF_AUDIO)
+}
+
+function extractSystemContentFromPreset(
+  preset: PresetMetadata,
+): BackendContentItem[] | null {
+  return cloneSystemContent(preset.system_content)
+}
+
+function summarizeSystemContent(content: BackendContentItem[] | null | undefined): string {
+  return (
+    content
+      ?.filter(
+        (item): item is Extract<BackendContentItem, { type: 'text'; text: string }> =>
+          item.type === 'text' && Boolean(item.text.trim()),
+      )
+      .map((item) => item.text.trim())
+      .join('\n\n') ?? ''
+  )
+}
+
+function ensureTurnSystemContent(settings: ModeSettings): BackendContentItem[] {
+  if (settings.systemContent?.length) {
+    return cloneSystemContent(settings.systemContent) ?? []
+  }
+
+  return [
+    { type: 'text', text: TURN_SYSTEM_PREFIX },
+    {
+      type: 'audio',
+      data: settings.refAudio.base64 || undefined,
+      name: settings.refAudio.name,
+      duration: settings.refAudio.duration,
+    },
+    { type: 'text', text: settings.systemPrompt || TURN_SYSTEM_SUFFIX },
+  ]
+}
+
+function compactSystemContent(
+  content: BackendContentItem[],
+  refAudio: RefAudioState,
+): BackendContentItem[] {
+  const items: BackendContentItem[] = []
+  const audioItemCount = content.filter((item) => item.type === 'audio').length
+
+  for (const item of content) {
+    if (item.type === 'text') {
+      const text = item.text.trim()
+      if (text) items.push({ type: 'text', text })
+      continue
+    }
+
+    if (item.type === 'audio') {
+      const data = item.data || (audioItemCount === 1 ? refAudio.base64 || undefined : undefined)
+      if (!data) continue
+      items.push({
+        type: 'audio',
+        data,
+        name: item.name || refAudio.name,
+        duration: item.duration || refAudio.duration,
+      })
+      continue
+    }
+
+    if (item.type === 'image' && item.data) {
+      items.push({ ...item })
+      continue
+    }
+
+    if (item.type === 'video' && item.data) {
+      items.push({ ...item })
+    }
+  }
+
+  return items
 }
 
 function PhoneIcon({ className }: IconProps) {
@@ -2122,16 +2237,393 @@ type SettingsSheetProps = {
   onSaveAsPreset: () => void
   onDeleteUserPreset: (presetId: string) => void
   onPromptChange: (value: string) => void
+  onSystemContentChange: (items: BackendContentItem[]) => void
   onLengthPenaltyChange: (value: number) => void
   onMaxTokensChange: (value: number) => void
   onTurnTtsEnabledChange: (value: boolean) => void
   onTurnStreamingEnabledChange: (value: boolean) => void
   refAudioRecording: boolean
-  onUseDefaultRefAudio: () => void
-  onClearRefAudio: () => void
-  onUploadRefAudio: () => void
-  onPlayRefAudio: () => void
-  onToggleRecordRefAudio: () => void
+  refAudioRecordingTargetIndex: number | null
+  onUseDefaultRefAudio: (index?: number) => void
+  onClearRefAudio: (index?: number) => void
+  onUploadRefAudio: (index?: number) => void
+  onPlayRefAudio: (index?: number) => void
+  onToggleRecordRefAudio: (index?: number) => void
+}
+
+type MobileSystemContentEditorProps = {
+  settings: ModeSettings
+  refAudioRecording: boolean
+  refAudioRecordingTargetIndex: number | null
+  defaultRefAudio: RefAudioState | null
+  onChange: (items: BackendContentItem[]) => void
+  onUseDefaultRefAudio: (index: number) => void
+  onUploadRefAudio: (index: number) => void
+  onToggleRecordRefAudio: (index: number) => void
+  onPlayRefAudio: (index: number) => void
+  onClearRefAudio: (index: number) => void
+}
+
+type SystemContentLabels = {
+  text: string
+  audio: string
+  addText: string
+  addAudio: string
+  moveUp: string
+  moveDown: string
+  remove: string
+  drag: string
+  emptyAudio: string
+}
+
+type SortableSystemContentItemProps = {
+  id: string
+  item: BackendContentItem
+  index: number
+  itemCount: number
+  labels: SystemContentLabels
+  i18n: Translations
+  refAudioRecording: boolean
+  refAudioRecordingTargetIndex: number | null
+  defaultRefAudio: RefAudioState | null
+  getAudioItemState: (item: BackendContentItem) => RefAudioState
+  updateAt: (index: number, patch: Partial<BackendContentItem>) => void
+  move: (index: number, delta: -1 | 1) => void
+  onRemove: (index: number) => void
+  onUseDefaultRefAudio: (index: number) => void
+  onUploadRefAudio: (index: number) => void
+  onToggleRecordRefAudio: (index: number) => void
+  onPlayRefAudio: (index: number) => void
+  onClearRefAudio: (index: number) => void
+}
+
+type SystemContentCardProps = Omit<SortableSystemContentItemProps, 'id'> & {
+  dragHandleProps?: {
+    ref?: (node: HTMLButtonElement | null) => void
+    attributes?: Record<string, unknown>
+    listeners?: Record<string, unknown>
+  }
+  interactive?: boolean
+}
+
+function SystemContentCard({
+  item,
+  index,
+  itemCount,
+  labels,
+  i18n,
+  refAudioRecording,
+  refAudioRecordingTargetIndex,
+  defaultRefAudio,
+  getAudioItemState,
+  updateAt,
+  move,
+  onRemove,
+  onUseDefaultRefAudio,
+  onUploadRefAudio,
+  onToggleRecordRefAudio,
+  onPlayRefAudio,
+  onClearRefAudio,
+  dragHandleProps,
+  interactive = true,
+}: SystemContentCardProps) {
+  const audioState = getAudioItemState(item)
+  const handleAttrs = (dragHandleProps?.attributes ?? {}) as React.HTMLAttributes<HTMLButtonElement>
+  const handleListeners = (dragHandleProps?.listeners ?? {}) as React.HTMLAttributes<HTMLButtonElement>
+
+  return (
+    <>
+      <div className="system-content-item-head">
+        <div className="system-content-item-type">
+          <button
+            ref={dragHandleProps?.ref}
+            type="button"
+            className="system-content-drag-handle"
+            aria-label={labels.drag}
+            disabled={!interactive}
+            {...handleAttrs}
+            {...handleListeners}
+          >
+            <span aria-hidden="true">⋮⋮</span>
+          </button>
+          <span className={`system-content-badge ${item.type}`}>
+            {item.type === 'audio' ? labels.audio : labels.text}
+          </span>
+        </div>
+        <div className="system-content-actions">
+          <button type="button" onClick={() => move(index, -1)} disabled={!interactive || index === 0}>
+            {labels.moveUp}
+          </button>
+          <button type="button" onClick={() => move(index, 1)} disabled={!interactive || index === itemCount - 1}>
+            {labels.moveDown}
+          </button>
+          <button type="button" className="danger" onClick={() => onRemove(index)} disabled={!interactive}>
+            {labels.remove}
+          </button>
+        </div>
+      </div>
+
+      {item.type === 'audio' ? (
+        <div className="system-content-audio-card">
+          <div className="ref-audio-title">
+            {audioState.base64 ? audioState.name : labels.emptyAudio}
+          </div>
+          <div className="ref-audio-meta">
+            {i18n.refAudioSource}{audioState.source}
+            {audioState.duration ? ` · ${audioState.duration.toFixed(1)}s` : ''}
+          </div>
+          <div className="ref-audio-actions">
+            <button className="secondary-btn compact" type="button" onClick={() => onUseDefaultRefAudio(index)} disabled={!interactive || !defaultRefAudio?.base64}>
+              {i18n.default_}
+            </button>
+            <button className="secondary-btn compact" type="button" onClick={() => onUploadRefAudio(index)} disabled={!interactive}>
+              {i18n.upload}
+            </button>
+            <button
+              className={`secondary-btn compact${refAudioRecording && refAudioRecordingTargetIndex === index ? ' ref-audio-recording-active' : ''}`}
+              type="button"
+              onClick={() => onToggleRecordRefAudio(index)}
+              disabled={!interactive || (refAudioRecording && refAudioRecordingTargetIndex !== index)}
+            >
+              {refAudioRecording && refAudioRecordingTargetIndex === index ? <><span className="rec-dot" />{i18n.stopRecording}</> : i18n.record}
+            </button>
+            <button className="secondary-btn compact" type="button" onClick={() => onPlayRefAudio(index)} disabled={!interactive || !audioState.base64}>
+              {i18n.play}
+            </button>
+            <button className="secondary-btn compact" type="button" onClick={() => onClearRefAudio(index)} disabled={!interactive}>
+              {i18n.clear}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <textarea
+          className="system-content-textarea"
+          value={item.type === 'text' ? item.text : ''}
+          onChange={(event) => updateAt(index, { type: 'text', text: event.target.value })}
+          disabled={!interactive}
+        />
+      )}
+    </>
+  )
+}
+
+function SortableSystemContentItem({
+  id,
+  item,
+  index,
+  itemCount,
+  labels,
+  i18n,
+  refAudioRecording,
+  refAudioRecordingTargetIndex,
+  defaultRefAudio,
+  getAudioItemState,
+  updateAt,
+  move,
+  onRemove,
+  onUseDefaultRefAudio,
+  onUploadRefAudio,
+  onToggleRecordRefAudio,
+  onPlayRefAudio,
+  onClearRefAudio,
+}: SortableSystemContentItemProps) {
+  const {
+    attributes,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 3 : undefined,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={[
+        'system-content-item',
+        isDragging ? 'is-dragging' : '',
+      ].filter(Boolean).join(' ')}
+      style={style}
+    >
+      <SystemContentCard
+        item={item}
+        index={index}
+        itemCount={itemCount}
+        labels={labels}
+        i18n={i18n}
+        refAudioRecording={refAudioRecording}
+        refAudioRecordingTargetIndex={refAudioRecordingTargetIndex}
+        defaultRefAudio={defaultRefAudio}
+        getAudioItemState={getAudioItemState}
+        updateAt={updateAt}
+        move={move}
+        onRemove={onRemove}
+        onUseDefaultRefAudio={onUseDefaultRefAudio}
+        onUploadRefAudio={onUploadRefAudio}
+        onToggleRecordRefAudio={onToggleRecordRefAudio}
+        onPlayRefAudio={onPlayRefAudio}
+        onClearRefAudio={onClearRefAudio}
+        dragHandleProps={{
+          ref: setActivatorNodeRef,
+          attributes: attributes as unknown as Record<string, unknown>,
+          listeners: listeners as Record<string, unknown>,
+        }}
+      />
+    </div>
+  )
+}
+
+function MobileSystemContentEditor({
+  settings,
+  refAudioRecording,
+  refAudioRecordingTargetIndex,
+  defaultRefAudio,
+  onChange,
+  onUseDefaultRefAudio,
+  onUploadRefAudio,
+  onToggleRecordRefAudio,
+  onPlayRefAudio,
+  onClearRefAudio,
+}: MobileSystemContentEditorProps) {
+  const { lang, t: i18n } = useI18n()
+  const labels = lang === 'zh'
+    ? {
+        text: '文本',
+        audio: '音频',
+        addText: '添加文本',
+        addAudio: '添加音频',
+        moveUp: '上移',
+        moveDown: '下移',
+        remove: '删除',
+        drag: '拖拽排序',
+        emptyAudio: '未设置参考音频',
+      }
+    : {
+        text: 'Text',
+        audio: 'Audio',
+        addText: 'Add Text',
+        addAudio: 'Add Audio',
+        moveUp: 'Up',
+        moveDown: 'Down',
+        remove: 'Delete',
+        drag: 'Drag to reorder',
+        emptyAudio: 'No reference audio set',
+      }
+  const items = ensureTurnSystemContent(settings)
+  const audioItemCount = items.filter((item) => item.type === 'audio').length
+  const itemIdsRef = useRef<string[]>([])
+  const idCounterRef = useRef(0)
+  if (itemIdsRef.current.length !== items.length) {
+    if (itemIdsRef.current.length < items.length) {
+      while (itemIdsRef.current.length < items.length) {
+        idCounterRef.current += 1
+        itemIdsRef.current.push(`system-content-${idCounterRef.current}`)
+      }
+    } else {
+      itemIdsRef.current = itemIdsRef.current.slice(0, items.length)
+    }
+  }
+  const sortableIds = itemIdsRef.current
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  function getAudioItemState(item: BackendContentItem): RefAudioState {
+    if (item.type !== 'audio') return cloneRefAudio(EMPTY_REF_AUDIO)
+    const useSingleFallback = !item.data && audioItemCount === 1
+    const base64 = item.data || (useSingleFallback ? settings.refAudio.base64 : null)
+    return {
+      source: base64
+        ? (item.data ? settings.refAudio.source === 'none' ? 'upload' : settings.refAudio.source : settings.refAudio.source)
+        : 'none',
+      name: item.name || (useSingleFallback ? settings.refAudio.name : labels.emptyAudio),
+      duration: item.duration || (useSingleFallback ? settings.refAudio.duration : 0),
+      base64,
+    }
+  }
+
+  function updateAt(index: number, patch: Partial<BackendContentItem>) {
+    onChange(items.map((item, i) => (i === index ? ({ ...item, ...patch } as BackendContentItem) : item)))
+  }
+
+  function move(index: number, delta: -1 | 1) {
+    const nextIndex = index + delta
+    if (nextIndex < 0 || nextIndex >= items.length) return
+    const next = items.slice()
+    const [item] = next.splice(index, 1)
+    if (!item) return
+    next.splice(nextIndex, 0, item)
+    itemIdsRef.current = arrayMove(itemIdsRef.current, index, nextIndex)
+    onChange(next)
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const oldIndex = sortableIds.indexOf(String(event.active.id))
+    const newIndex = event.over ? sortableIds.indexOf(String(event.over.id)) : -1
+    if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return
+    itemIdsRef.current = arrayMove(itemIdsRef.current, oldIndex, newIndex)
+    onChange(arrayMove(items, oldIndex, newIndex))
+  }
+
+  return (
+    <div className="system-content-editor">
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+          {items.map((item, index) => (
+            <SortableSystemContentItem
+              key={sortableIds[index]}
+              id={sortableIds[index] ?? String(index)}
+              item={item}
+              index={index}
+              itemCount={items.length}
+              labels={labels}
+              i18n={i18n}
+              refAudioRecording={refAudioRecording}
+              refAudioRecordingTargetIndex={refAudioRecordingTargetIndex}
+              defaultRefAudio={defaultRefAudio}
+              getAudioItemState={getAudioItemState}
+              updateAt={updateAt}
+              move={move}
+              onRemove={(removeIndex) => onChange(items.filter((_, i) => i !== removeIndex))}
+              onUseDefaultRefAudio={onUseDefaultRefAudio}
+              onUploadRefAudio={onUploadRefAudio}
+              onToggleRecordRefAudio={onToggleRecordRefAudio}
+              onPlayRefAudio={onPlayRefAudio}
+              onClearRefAudio={onClearRefAudio}
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
+      <div className="system-content-add-row">
+        <button type="button" onClick={() => onChange([...items, { type: 'text', text: '' }])}>
+          {labels.addText}
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange([...items, {
+            type: 'audio',
+            data: undefined,
+            name: '',
+            duration: 0,
+          }])}
+        >
+          {labels.addAudio}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function SettingsSheet({
@@ -2152,11 +2644,13 @@ function SettingsSheet({
   onSaveAsPreset,
   onDeleteUserPreset,
   onPromptChange,
+  onSystemContentChange,
   onLengthPenaltyChange,
   onMaxTokensChange,
   onTurnTtsEnabledChange,
   onTurnStreamingEnabledChange,
   refAudioRecording,
+  refAudioRecordingTargetIndex,
   onUseDefaultRefAudio,
   onClearRefAudio,
   onUploadRefAudio,
@@ -2244,6 +2738,7 @@ function SettingsSheet({
           )}
         </div>
 
+        {activeMode !== 'turnbased' ? (
         <div className="settings-section">
           <div className="settings-section-title">{i18n.refAudio}</div>
           <div className="ref-audio-card">
@@ -2260,7 +2755,7 @@ function SettingsSheet({
               <button
                 className="secondary-btn compact"
                 type="button"
-                onClick={onUseDefaultRefAudio}
+                onClick={() => onUseDefaultRefAudio()}
                 disabled={!defaultRefAudio?.base64}
               >
                 {i18n.default_}
@@ -2268,14 +2763,14 @@ function SettingsSheet({
               <button
                 className="secondary-btn compact"
                 type="button"
-                onClick={onUploadRefAudio}
+                onClick={() => onUploadRefAudio()}
               >
                 {i18n.upload}
               </button>
               <button
                 className={`secondary-btn compact${refAudioRecording ? ' ref-audio-recording-active' : ''}`}
                 type="button"
-                onClick={onToggleRecordRefAudio}
+                onClick={() => onToggleRecordRefAudio()}
               >
                 {refAudioRecording ? (
                   <>
@@ -2289,7 +2784,7 @@ function SettingsSheet({
               <button
                 className="secondary-btn compact"
                 type="button"
-                onClick={onPlayRefAudio}
+                onClick={() => onPlayRefAudio()}
                 disabled={!activeSettings.refAudio.base64}
               >
                 {i18n.play}
@@ -2297,26 +2792,47 @@ function SettingsSheet({
               <button
                 className="secondary-btn compact"
                 type="button"
-                onClick={onClearRefAudio}
+                onClick={() => onClearRefAudio()}
               >
                 {i18n.clear}
               </button>
             </div>
           </div>
         </div>
+        ) : null}
 
         <div className="settings-section">
-          <label className="settings-section-title" htmlFor="settings-system-prompt">
-            {i18n.systemPrompt}
-          </label>
-          <textarea
-            id="settings-system-prompt"
-            className="settings-textarea"
-            value={activeSettings.systemPrompt}
-            onChange={(event) => {
-              onPromptChange(event.target.value)
-            }}
-          />
+          {activeMode === 'turnbased' ? (
+            <>
+              <div className="settings-section-title">{i18n.systemPrompt}</div>
+              <MobileSystemContentEditor
+                settings={activeSettings}
+                refAudioRecording={refAudioRecording}
+                refAudioRecordingTargetIndex={refAudioRecordingTargetIndex}
+                defaultRefAudio={defaultRefAudio}
+                onChange={onSystemContentChange}
+                onUseDefaultRefAudio={onUseDefaultRefAudio}
+                onUploadRefAudio={onUploadRefAudio}
+                onToggleRecordRefAudio={onToggleRecordRefAudio}
+                onPlayRefAudio={onPlayRefAudio}
+                onClearRefAudio={onClearRefAudio}
+              />
+            </>
+          ) : (
+            <>
+              <label className="settings-section-title" htmlFor="settings-system-prompt">
+                {i18n.systemPrompt}
+              </label>
+              <textarea
+                id="settings-system-prompt"
+                className="settings-textarea"
+                value={activeSettings.systemPrompt}
+                onChange={(event) => {
+                  onPromptChange(event.target.value)
+                }}
+              />
+            </>
+          )}
         </div>
 
         <div className="settings-section">
@@ -2749,6 +3265,8 @@ function App() {
 
   // Ref-audio recording state (separate from press-to-talk mic)
   const [refAudioRecording, setRefAudioRecording] = useState(false)
+  const [refAudioRecordingTargetIndex, setRefAudioRecordingTargetIndex] =
+    useState<number | null>(null)
   const refRecStreamRef = useRef<MediaStream | null>(null)
   const refRecCtxRef = useRef<AudioContext | null>(null)
   const refRecWorkletRef = useRef<AudioWorkletNode | null>(null)
@@ -2814,6 +3332,7 @@ function App() {
   const recordingStartRef = useRef<number>(0)
   const recordingActionRef = useRef<'send' | 'cancel'>('send')
   const refAudioInputRef = useRef<HTMLInputElement | null>(null)
+  const refAudioTargetIndexRef = useRef<number | null>(null)
 
   const duplex = useDuplexSession({
     screen,
@@ -3288,6 +3807,9 @@ function App() {
               refAudio: extractedRefAudio.base64
                 ? extractedRefAudio
                 : cloneRefAudio(nextSettings[mode].refAudio),
+              systemContent: mode === 'turnbased'
+                ? extractSystemContentFromPreset(firstPreset)
+                : null,
             })
           }
 
@@ -3446,6 +3968,9 @@ function App() {
         refAudio: extractedRefAudio.base64
           ? extractedRefAudio
           : cloneRefAudio(EMPTY_REF_AUDIO),
+        systemContent: mode === 'turnbased'
+          ? extractSystemContentFromPreset(loadedPreset)
+          : null,
       })
     } catch (error) {
       reportSettingsMessage(i18n.requestFailedDetail(getErrorMessage(error)))
@@ -3465,6 +3990,9 @@ function App() {
       mode,
       systemPrompt: modeSettings.systemPrompt,
       refAudio: cloneRefAudio(modeSettings.refAudio),
+      systemContent: mode === 'turnbased'
+        ? cloneSystemContent(ensureTurnSystemContent(modeSettings))
+        : null,
       createdAt: now,
       updatedAt: now,
     }
@@ -3481,6 +4009,7 @@ function App() {
       presetId: `user:${preset.id}`,
       systemPrompt: preset.systemPrompt,
       refAudio: preset.refAudio.base64 ? cloneRefAudio(preset.refAudio) : cloneRefAudio(EMPTY_REF_AUDIO),
+      systemContent: cloneSystemContent(preset.systemContent),
     })
   }
 
@@ -3502,9 +4031,61 @@ function App() {
     })
   }
 
-  function handleUseDefaultRefAudio(mode: PresetMode) {
+  function handleSystemContentChange(mode: PresetMode, items: BackendContentItem[]) {
+    updateModeSettings(mode, {
+      presetId: null,
+      systemPrompt: summarizeSystemContent(items),
+      systemContent: items,
+    })
+  }
+
+  function updateTurnSystemAudioItem(index: number, refAudio: RefAudioState) {
+    const items = ensureTurnSystemContent(settings.turnbased).map((item, i) => {
+      if (i !== index || item.type !== 'audio') return item
+      return {
+        ...item,
+        data: refAudio.base64 || undefined,
+        name: refAudio.name,
+        duration: refAudio.duration,
+      }
+    })
+    updateModeSettings('turnbased', {
+      presetId: null,
+      refAudio,
+      systemPrompt: summarizeSystemContent(items),
+      systemContent: items,
+    })
+  }
+
+  function clearTurnSystemAudioItem(index: number) {
+    const items = ensureTurnSystemContent(settings.turnbased).map((item, i) => {
+      if (i !== index || item.type !== 'audio') return item
+      return { ...item, data: undefined, name: '', duration: 0 }
+    })
+    const remainingAudio = items.find((item) => item.type === 'audio' && item.data)
+    updateModeSettings('turnbased', {
+      presetId: null,
+      refAudio: remainingAudio?.type === 'audio'
+        ? {
+            source: 'upload',
+            name: remainingAudio.name || i18n.refAudioDefault,
+            duration: remainingAudio.duration || 0,
+            base64: remainingAudio.data || null,
+          }
+        : EMPTY_REF_AUDIO,
+      systemPrompt: summarizeSystemContent(items),
+      systemContent: items,
+    })
+  }
+
+  function handleUseDefaultRefAudio(mode: PresetMode, audioIndex?: number) {
     if (!defaultRefAudio?.base64) {
       reportSettingsMessage(i18n.refAudioNoDefault)
+      return
+    }
+
+    if (mode === 'turnbased' && audioIndex !== undefined) {
+      updateTurnSystemAudioItem(audioIndex, defaultRefAudio)
       return
     }
 
@@ -3514,7 +4095,12 @@ function App() {
     })
   }
 
-  function handleClearRefAudio(mode: PresetMode) {
+  function handleClearRefAudio(mode: PresetMode, audioIndex?: number) {
+    if (mode === 'turnbased' && audioIndex !== undefined) {
+      clearTurnSystemAudioItem(audioIndex)
+      return
+    }
+
     updateModeSettings(mode, {
       presetId: null,
       refAudio: EMPTY_REF_AUDIO,
@@ -3523,6 +4109,7 @@ function App() {
 
   async function handleRefAudioInputChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
+    const targetIndex = refAudioTargetIndexRef.current
 
     if (!file) {
       return
@@ -3533,35 +4120,46 @@ function App() {
       const durationAudio = new Audio(URL.createObjectURL(file))
 
       durationAudio.onloadedmetadata = () => {
-        updateModeSettings(activePresetMode, {
-          presetId: null,
-          refAudio: {
-            source: 'upload',
-            name: file.name,
-            duration: Number.isFinite(durationAudio.duration)
-              ? durationAudio.duration
-              : 0,
-            base64,
-          },
-        })
+        const refAudio: RefAudioState = {
+          source: 'upload',
+          name: file.name,
+          duration: Number.isFinite(durationAudio.duration)
+            ? durationAudio.duration
+            : 0,
+          base64,
+        }
+        if (activePresetMode === 'turnbased' && targetIndex !== null) {
+          updateTurnSystemAudioItem(targetIndex, refAudio)
+        } else {
+          updateModeSettings(activePresetMode, {
+            presetId: null,
+            refAudio,
+          })
+        }
         URL.revokeObjectURL(durationAudio.src)
       }
       durationAudio.onerror = () => {
-        updateModeSettings(activePresetMode, {
-          presetId: null,
-          refAudio: {
-            source: 'upload',
-            name: file.name,
-            duration: 0,
-            base64,
-          },
-        })
+        const refAudio: RefAudioState = {
+          source: 'upload',
+          name: file.name,
+          duration: 0,
+          base64,
+        }
+        if (activePresetMode === 'turnbased' && targetIndex !== null) {
+          updateTurnSystemAudioItem(targetIndex, refAudio)
+        } else {
+          updateModeSettings(activePresetMode, {
+            presetId: null,
+            refAudio,
+          })
+        }
         URL.revokeObjectURL(durationAudio.src)
       }
     } catch (error) {
       reportSettingsMessage(i18n.refAudioProcessFailed(getErrorMessage(error)))
     } finally {
       event.target.value = ''
+      refAudioTargetIndexRef.current = null
     }
   }
 
@@ -3586,12 +4184,16 @@ function App() {
       refRecStreamRef.current = null
 
       if (chunks.length === 0) {
+        refAudioTargetIndexRef.current = null
+        setRefAudioRecordingTargetIndex(null)
         reportSettingsMessage(i18n.refAudioRecordTooShort)
         return
       }
 
       const merged = concatFloat32(chunks)
       if (merged.length === 0) {
+        refAudioTargetIndexRef.current = null
+        setRefAudioRecordingTargetIndex(null)
         reportSettingsMessage(i18n.refAudioRecordFailed)
         return
       }
@@ -3599,27 +4201,38 @@ function App() {
       const resampled = resampleLinear(merged, sampleRate, 16000)
       const base64 = float32ToBase64(resampled)
       const durationSec = durationMs / 1000
+      const targetIndex = refAudioTargetIndexRef.current
+      const refAudio: RefAudioState = {
+        source: 'upload',
+        name: i18n.refAudioRecordDuration(new Date().toLocaleTimeString()),
+        duration: Math.round(durationSec * 10) / 10,
+        base64,
+      }
 
-      updateModeSettings(activePresetMode, {
-        presetId: null,
-        refAudio: {
-          source: 'upload',
-          name: i18n.refAudioRecordDuration(new Date().toLocaleTimeString()),
-          duration: Math.round(durationSec * 10) / 10,
-          base64,
-        },
-      })
-      reportSettingsMessage(i18n.refAudioRecorded(durationSec.toFixed(1)))
+      if (activePresetMode === 'turnbased' && targetIndex !== null) {
+        updateTurnSystemAudioItem(targetIndex, refAudio)
+      } else {
+        updateModeSettings(activePresetMode, {
+          presetId: null,
+          refAudio,
+        })
+      }
+      refAudioTargetIndexRef.current = null
+      setRefAudioRecordingTargetIndex(null)
       return
     }
 
     // ── Start recording ──
     if (!navigator.mediaDevices?.getUserMedia) {
+      refAudioTargetIndexRef.current = null
+      setRefAudioRecordingTargetIndex(null)
       reportSettingsMessage(i18n.refAudioMicUnsupported)
       return
     }
     const AudioContextCtor = getAudioContextCtor()
     if (!AudioContextCtor) {
+      refAudioTargetIndexRef.current = null
+      setRefAudioRecordingTargetIndex(null)
       reportSettingsMessage(i18n.refAudioRecordUnsupported)
       return
     }
@@ -3662,8 +4275,11 @@ function App() {
       refRecStreamRef.current = stream
       refRecCtxRef.current = ctx
       refRecStartRef.current = performance.now()
+      setRefAudioRecordingTargetIndex(refAudioTargetIndexRef.current)
       setRefAudioRecording(true)
     } catch (err) {
+      refAudioTargetIndexRef.current = null
+      setRefAudioRecordingTargetIndex(null)
       reportSettingsMessage(i18n.refAudioRecordError(getErrorMessage(err)))
     }
   }
@@ -3689,10 +4305,24 @@ function App() {
     refRecStreamRef.current = stream
     refRecCtxRef.current = ctx
     refRecStartRef.current = performance.now()
+      setRefAudioRecordingTargetIndex(refAudioTargetIndexRef.current)
     setRefAudioRecording(true)
   }
 
   function buildTurnSystemMessage(): string | BackendContentItem[] | null {
+    const presetItems = compactSystemContent(
+      ensureTurnSystemContent(settings.turnbased),
+      settings.turnbased.refAudio,
+    )
+
+    if (presetItems.length === 1 && presetItems[0]?.type === 'text') {
+      return presetItems[0].text
+    }
+
+    if (presetItems.length > 0) {
+      return presetItems
+    }
+
     const items: BackendContentItem[] = []
     const prompt = settings.turnbased.systemPrompt.trim()
     const refAudio = settings.turnbased.refAudio.base64
@@ -3751,13 +4381,23 @@ function App() {
     })
   }
 
-  function handlePlayActiveRefAudio() {
-    if (!activeModeSettings.refAudio.base64) {
+  function handlePlayActiveRefAudio(audioIndex?: number) {
+    let base64 = activeModeSettings.refAudio.base64
+    if (activePresetMode === 'turnbased' && audioIndex !== undefined) {
+      const item = ensureTurnSystemContent(settings.turnbased)[audioIndex]
+      base64 = item?.type === 'audio'
+        ? item.data || (ensureTurnSystemContent(settings.turnbased).filter((it) => it.type === 'audio').length === 1
+          ? settings.turnbased.refAudio.base64
+          : null)
+        : null
+    }
+
+    if (!base64) {
       reportSettingsMessage(i18n.refAudioNoPlayable)
       return
     }
 
-    playPcmBase64(activeModeSettings.refAudio.base64, 16000)
+    playPcmBase64(base64, 16000)
   }
 
   function coldDownMic() {
@@ -5274,6 +5914,9 @@ function App() {
         onPromptChange={(value) => {
           handleChangePrompt(activePresetMode, value)
         }}
+        onSystemContentChange={(items) => {
+          handleSystemContentChange(activePresetMode, items)
+        }}
         onLengthPenaltyChange={(value) => {
           handleLengthPenaltyChange(activePresetMode, value)
         }}
@@ -5295,18 +5938,26 @@ function App() {
             turnStreamingEnabled: value,
           }))
         }}
-        onUseDefaultRefAudio={() => {
-          handleUseDefaultRefAudio(activePresetMode)
+        onUseDefaultRefAudio={(index) => {
+          handleUseDefaultRefAudio(activePresetMode, index)
         }}
-        onClearRefAudio={() => {
-          handleClearRefAudio(activePresetMode)
+        onClearRefAudio={(index) => {
+          handleClearRefAudio(activePresetMode, index)
         }}
         refAudioRecording={refAudioRecording}
-        onUploadRefAudio={() => {
+        refAudioRecordingTargetIndex={refAudioRecordingTargetIndex}
+        onUploadRefAudio={(index) => {
+          refAudioTargetIndexRef.current = index ?? null
           refAudioInputRef.current?.click()
         }}
         onPlayRefAudio={handlePlayActiveRefAudio}
-        onToggleRecordRefAudio={handleToggleRecordRefAudio}
+        onToggleRecordRefAudio={(index) => {
+          if (!refAudioRecording) {
+            refAudioTargetIndexRef.current = index ?? null
+            setRefAudioRecordingTargetIndex(index ?? null)
+          }
+          void handleToggleRecordRefAudio()
+        }}
       />
       {screen === 'turn' ? (
         <div className="turn-screen">

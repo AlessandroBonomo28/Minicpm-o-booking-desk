@@ -8,5 +8,5 @@ The system supports four interaction modes (Turn-based Chat, Half-Duplex, Omnimo
 
 - [Architecture](architecture/index.md) — System architecture, mode topology, and request flow
 - [Model](model.md) — Multimodal model internals and data flow
-- [API Reference](api.md) — Interface definitions and usage
+- [API Reference](https://minicpmo45.modelbest.cn/docs/overview) — Interface definitions and usage
 - [Deployment](deployment.md) — Requirements, configuration, and deployment steps

@@ -57,6 +57,40 @@
             color: #666;
             margin-bottom: 32px;
         }
+        .reference-section {
+            max-width: 960px;
+            width: 100%;
+            margin-top: -24px;
+            margin-bottom: 40px;
+            padding-top: 28px;
+            border-top: 1px solid #e5e5e0;
+        }
+        .reference-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2d2d2d;
+            margin-bottom: 14px;
+        }
+        .reference-list {
+            margin: 0;
+            padding-left: 20px;
+            color: #666;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        .reference-list li {
+            margin: 4px 0;
+        }
+        .reference-list a {
+            color: #2563eb;
+            font-weight: 500;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(37, 99, 235, 0.28);
+        }
+        .reference-list a:hover {
+            color: #1d4ed8;
+            border-bottom-color: rgba(29, 78, 216, 0.6);
+        }
 
         .mode-cards {
             display: flex;
@@ -368,6 +402,24 @@
                     </table>
                 </div>
             </div>
+        </section>
+
+        <section class="reference-section" aria-labelledby="reference-heading">
+            <h2 class="reference-title" id="reference-heading">References</h2>
+            <ul class="reference-list">
+                <li>
+                    <a href="https://github.com/OpenBMB/MiniCPM-o" target="_blank" rel="noopener">MiniCPM-o model repository</a>
+                    - official MiniCPM-o 4.5 model code and usage examples for vision, speech, and full-duplex multimodal live streaming.
+                </li>
+                <li>
+                    <a href="https://github.com/OpenBMB/MiniCPM-o-Demo" target="_blank" rel="noopener">MiniCPM-o-Demo web demo repository</a>
+                    - official PyTorch + CUDA web demo for deploying and trying the MiniCPM-o 4.5 interaction modes.
+                </li>
+                <li>
+                    <a href="https://huggingface.co/papers/2604.27393" target="_blank" rel="noopener">MiniCPM-o 4.5 technical report</a>
+                    - paper describing the real-time full-duplex omni-modal interaction framework and model architecture.
+                </li>
+            </ul>
         </section>
     </main>
 

@@ -1450,7 +1450,7 @@ async def realtime_page():
 
 _DOCS_DIR = os.path.join(os.path.dirname(__file__), "docs")
 _DOCS_HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{html_lang}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1471,6 +1471,10 @@ nav a {{ display: block; padding: 6px 10px; margin: 2px 0; border-radius: 6px;
          text-decoration: none; color: var(--muted); font-size: 13px; transition: all .15s; }}
 nav a:hover {{ color: var(--fg); background: rgba(255,255,255,.05); }}
 nav a.active {{ color: var(--link); background: rgba(56,139,253,.1); font-weight: 600; }}
+.lang-switch {{ display: flex; gap: 6px; margin: -8px 0 16px; padding-bottom: 14px;
+                border-bottom: 1px solid var(--border); }}
+.lang-switch a {{ display: inline-block; margin: 0; padding: 4px 8px; font-size: 12px; }}
+.lang-switch a.lang-active {{ color: var(--fg); background: rgba(255,255,255,.08); font-weight: 600; }}
 main {{ flex: 1; max-width: 900px; padding: 32px 48px 64px; }}
 article h1 {{ font-size: 28px; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 20px; }}
 article h2 {{ font-size: 20px; margin-top: 32px; margin-bottom: 12px; padding-bottom: 6px;
@@ -1509,6 +1513,7 @@ article hr {{ border: none; border-top: 1px solid var(--border); margin: 24px 0;
 <body>
 <nav>
   <div class="logo">MiniCPM-o Docs</div>
+  <div class="lang-switch">{lang_switch}</div>
   {nav_links}
 </nav>
 <main><article>
@@ -1518,28 +1523,31 @@ article hr {{ border: none; border-top: 1px solid var(--border); margin: 24px 0;
 </html>"""
 
 _DOCS_PAGES = [
-    ("overview", "realtime-protocol-overview.md", "Overview"),
-    ("video", "video-duplex-protocol.md", "Video Duplex"),
-    ("audio", "audio-duplex-protocol.md", "Audio Duplex"),
+    ("overview", "realtime-protocol-overview.md", "en/realtime-protocol-overview.md", "概览", "Overview"),
+    ("video", "video-duplex-protocol.md", "en/video-duplex-protocol.md", "视频双工", "Video Duplex"),
+    ("audio", "audio-duplex-protocol.md", "en/audio-duplex-protocol.md", "音频双工", "Audio Duplex"),
 ]
 
 
-def _render_doc(slug: str) -> str:
+def _render_doc(slug: str, lang: str = "zh") -> str:
     import markdown
 
     page = next((p for p in _DOCS_PAGES if p[0] == slug), None)
     if page is None:
         return None
 
-    md_path = os.path.join(_DOCS_DIR, page[1])
+    is_en = lang == "en"
+    md_path = os.path.join(_DOCS_DIR, page[2] if is_en else page[1])
     if not os.path.exists(md_path):
         return None
 
     with open(md_path, "r", encoding="utf-8") as f:
         md_text = f.read()
 
-    for s, fname, _ in _DOCS_PAGES:
-        md_text = md_text.replace(f"]({fname})", f"](/docs/{s})")
+    doc_prefix = "/docs/en" if is_en else "/docs"
+    for s, zh_fname, en_fname, _, _ in _DOCS_PAGES:
+        md_text = md_text.replace(f"]({zh_fname})", f"]({doc_prefix}/{s})")
+        md_text = md_text.replace(f"]({en_fname})", f"]({doc_prefix}/{s})")
     md_text = md_text.replace("](realtime-protocol-schema.json)", "](/docs/realtime-protocol-schema.json)")
 
     html_content = markdown.markdown(
@@ -1548,13 +1556,21 @@ def _render_doc(slug: str) -> str:
         extension_configs={"codehilite": {"css_class": "codehilite", "guess_lang": False}},
     )
 
+    title = page[4] if is_en else page[3]
     nav_links = "\n  ".join(
-        f'<a href="/docs/{s}" class="{"active" if s == slug else ""}">{title}</a>'
-        for s, _, title in _DOCS_PAGES
+        f'<a href="{doc_prefix}/{s}" class="{"active" if s == slug else ""}">'
+        f'{en_title if is_en else zh_title}</a>'
+        for s, _, _, zh_title, en_title in _DOCS_PAGES
+    )
+    lang_switch = (
+        f'<a href="/docs/{slug}" class="{"lang-active" if not is_en else ""}">中文</a>'
+        f'<a href="/docs/en/{slug}" class="{"lang-active" if is_en else ""}">English</a>'
     )
 
     return _DOCS_HTML_TEMPLATE.format(
-        title=f"{page[2]} — MiniCPM-o Docs",
+        html_lang="en" if is_en else "zh-CN",
+        title=f"{title} — MiniCPM-o Docs",
+        lang_switch=lang_switch,
         nav_links=nav_links,
         content=html_content,
     )
@@ -1566,6 +1582,26 @@ async def docs_index():
     return RedirectResponse(url="/docs/overview", status_code=302)
 
 
+@app.get("/docs/en", response_class=HTMLResponse)
+async def docs_en_index():
+    """Redirect /docs/en to /docs/en/overview"""
+    return RedirectResponse(url="/docs/en/overview", status_code=302)
+
+
+@app.get("/docs/en/{slug}")
+async def docs_en_page(slug: str):
+    """Render an English Markdown doc as a styled HTML page, or serve raw files"""
+    if slug.endswith(".json"):
+        file_path = os.path.join(_DOCS_DIR, slug)
+        if os.path.exists(file_path):
+            return FileResponse(file_path, media_type="application/json")
+        raise HTTPException(status_code=404, detail=f"File not found: {slug}")
+    html = _render_doc(slug, lang="en")
+    if html is None:
+        raise HTTPException(status_code=404, detail=f"Doc page not found: en/{slug}")
+    return HTMLResponse(html)
+
+
 @app.get("/docs/{slug}")
 async def docs_page(slug: str):
     """Render a Markdown doc as a styled HTML page, or serve raw files"""
@@ -1574,7 +1610,7 @@ async def docs_page(slug: str):
         if os.path.exists(file_path):
             return FileResponse(file_path, media_type="application/json")
         raise HTTPException(status_code=404, detail=f"File not found: {slug}")
-    html = _render_doc(slug)
+    html = _render_doc(slug, lang="zh")
     if html is None:
         raise HTTPException(status_code=404, detail=f"Doc page not found: {slug}")
     return HTMLResponse(html)

@@ -32,6 +32,24 @@ from transformers.cache_utils import DynamicCache
 logger = logging.getLogger(__name__)
 
 
+class InvalidSamplingProbabilitiesError(RuntimeError):
+    """Raised before multinomial sampling when probabilities are unsafe."""
+
+
+def _validate_sampling_probs(
+    probs: torch.Tensor,
+    *,
+    context: str,
+) -> None:
+    """Fail before torch.multinomial can trigger a CUDA device-side assert."""
+    invalid = (~torch.isfinite(probs)).any() | (probs < 0).any()
+    if invalid.item():
+        raise InvalidSamplingProbabilitiesError(
+            f"{context}: invalid probabilities before multinomial "
+            f"(shape={tuple(probs.shape)}, dtype={probs.dtype}, device={probs.device})"
+        )
+
+
 # text
 @dataclass
 class GenerateChunkOutput:
@@ -250,6 +268,7 @@ class ChunkPrefillChunkGenerate:
 
                 # sampling
                 probs = F.softmax(logits, dim=-1)
+                _validate_sampling_probs(probs, context="ChunkPrefillChunkGenerate.generate.sample")
                 next_token = torch.multinomial(probs, num_samples=1)
             else:
                 next_token = torch.argmax(logits, dim=-1, keepdim=True)
@@ -803,6 +822,7 @@ class TTSStreamingGenerator:
 
             # sample next token (only use first codebook, same as generate)
             scores = F.softmax(logits, dim=-1)
+            _validate_sampling_probs(scores, context="AudioTokenGenerator.streaming_generate.sample")
             idx_next = torch.multinomial(scores, num_samples=1)  # [(B*num_vq), 1]
             next_id = idx_next.view(-1, self.num_vq)[:, 0:1]  # only take first codebook → [B, 1]
             del scores
@@ -2126,6 +2146,7 @@ class StreamDecoder:
                 sampled_token = torch.argmax(logits[0]).item()
             else:
                 original_probs = F.softmax(logits[0], dim=-1)
+                _validate_sampling_probs(original_probs, context="StreamDecoder.decode.initial_chunk_eos_sample")
                 sampled_token = torch.multinomial(original_probs, num_samples=1).item()
 
             # if sampled chunk_eos, return directly
@@ -2188,6 +2209,7 @@ class StreamDecoder:
             logits = logits / temperature
             logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
             probs = F.softmax(logits, dim=-1)
+            _validate_sampling_probs(probs, context="StreamDecoder.decode.post_filter_sample")
             next_token_id = torch.multinomial(probs, num_samples=1).squeeze(1)
         else:
             raise ValueError(f"Unsupported decode mode: {mode}")

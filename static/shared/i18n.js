@@ -39,8 +39,6 @@ const zh = {
   hfModel: 'HF 模型',
   techReport: '技术报告',
   comniApp: 'Comni 应用',
-  audioCasebook: '音频案例',
-  omniCasebook: '全双工案例',
 
   // header / status
   connecting: '连接中…',
@@ -242,8 +240,6 @@ const en = {
   hfModel: 'HF Model',
   techReport: 'Paper',
   comniApp: 'Comni App',
-  audioCasebook: 'Audio Casebook',
-  omniCasebook: 'Omni Casebook',
 
   // header / status
   connecting: 'Connecting…',

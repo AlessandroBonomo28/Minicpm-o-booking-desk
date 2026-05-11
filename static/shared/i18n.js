@@ -38,7 +38,7 @@ const zh = {
   apiDocs: 'API 文档',
   hfModel: 'HF 模型',
   techReport: '技术报告',
-  comniApp: 'Comni 应用',
+  comniApp: 'llama.cpp 桌面端',
 
   // header / status
   connecting: '连接中…',
@@ -239,7 +239,7 @@ const en = {
   apiDocs: 'API Docs',
   hfModel: 'HF Model',
   techReport: 'Paper',
-  comniApp: 'Comni App',
+  comniApp: 'llama.cpp Desktop',
 
   // header / status
   connecting: 'Connecting…',

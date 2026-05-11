@@ -1,6 +1,6 @@
 # MiniCPM-o 4.5 PyTorch Simple Demo System
 
-[中文简介](README_zh.md) | [Documentation](https://minicpmo45.modelbest.cn/docs/en/)
+[中文简介](README_zh.md) | [Documentation](https://minicpmo45.modelbest.cn/docs/en/) | [Realtime API Docs](https://minicpmo45.modelbest.cn/docs/en/realtime-api/overview/)
 
 [Ready-to-use Demo Website](https://minicpmo45.modelbest.cn/) | [Discord](https://discord.gg/UTbTeCQe) | [Feishu Group](https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=228m5ca0-dfa1-464c-9406-b8b2f86d76ea)
 
@@ -394,7 +394,7 @@ minicpmo45_service/
 | Omnimodal Full-Duplex | https://localhost:8006/omni |
 | Audio Full-Duplex | https://localhost:8006/audio_duplex |
 | Dashboard | https://localhost:8006/admin |
-| API Docs | https://localhost:8006/docs |
+| Docs / Realtime API Docs | https://localhost:8006/docs |
 
 <br/>
 <br/>

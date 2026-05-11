@@ -1,6 +1,6 @@
 # MiniCPM-o 4.5 PyTorch 简易演示系统
 
-[English Documentation](README.md) | [详细文档](https://minicpmo45.modelbest.cn/docs/zh/)
+[English Documentation](README.md) | [详细文档](https://minicpmo45.modelbest.cn/docs/zh/) | [Realtime API 文档](https://minicpmo45.modelbest.cn/docs/zh/realtime-api/overview/)
 
 [可直接使用的在线演示系统](https://minicpmo45.modelbest.cn/) | [Discord](https://discord.gg/UTbTeCQe) | [飞书群](https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=228m5ca0-dfa1-464c-9406-b8b2f86d76ea)
 
@@ -397,7 +397,7 @@ minicpmo45_service/
 | 全模态全双工 | https://localhost:8006/omni |
 | 语音全双工 | https://localhost:8006/audio_duplex |
 | 仪表盘 | https://localhost:8006/admin |
-| API 文档 | https://localhost:8006/docs |
+| 文档 / Realtime API 文档 | https://localhost:8006/docs |
 
 <br/>
 <br/>

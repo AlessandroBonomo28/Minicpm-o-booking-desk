@@ -5,7 +5,7 @@ description: "Minimal Python clients for testing MiniCPM-o Realtime audio and vi
 
 This page shows minimal Python clients for calling the MiniCPM-o Realtime API
 without a browser. The examples live in the repository under
-`examples/realtime/`.
+[`examples/realtime/`](https://github.com/OpenBMB/MiniCPM-o-Demo/tree/main/examples/realtime).
 
 ## Install
 

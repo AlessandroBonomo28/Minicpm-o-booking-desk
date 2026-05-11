@@ -2,6 +2,12 @@
 
 Minimal command-line examples for the MiniCPM-o Realtime API.
 
+Repository path:
+
+```text
+https://github.com/OpenBMB/MiniCPM-o-Demo/tree/main/examples/realtime
+```
+
 ## Install
 
 ```bash

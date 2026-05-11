@@ -1,11 +1,9 @@
 ---
-title: "MiniCPM-o 4.5 文档"
-description: "MiniCPM-o 4.5 PyTorch Simple Demo 项目文档"
+title: "概览"
+description: "MiniCPM-o 4.5 文档入口"
 ---
 
-MiniCPM-o 4.5 PyTorch 简易演示系统是由模型训练团队官方提供的推理与演示系统，使用 PyTorch + CUDA 推理后端，以透明、简洁的方式全面展示 MiniCPM-o 4.5 的音视频全模态全双工能力。
-
-系统支持四种交互模式（Turn-based Chat、Half-Duplex、Omnimodal Full-Duplex、Audio Full-Duplex），共享同一模型实例，毫秒级热切换。
+系统支持三种主要交互模式（Turn-based Chat、Omnimodal Full-Duplex、Audio Full-Duplex），共享同一模型实例，毫秒级热切换。
 
 ## 快速开始
 

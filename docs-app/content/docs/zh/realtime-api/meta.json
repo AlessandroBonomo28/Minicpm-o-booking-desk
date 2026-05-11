@@ -5,7 +5,6 @@
     "overview",
     "video",
     "audio",
-    "examples",
-    "[JSON Schema](/realtime-protocol-schema.json)"
+    "examples"
   ]
 }

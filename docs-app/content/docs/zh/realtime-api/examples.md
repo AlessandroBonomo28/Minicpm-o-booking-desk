@@ -4,7 +4,9 @@ description: "用于测试 MiniCPM-o Realtime 音频和视频 API 的最小 Pyth
 ---
 
 本页提供不依赖浏览器的最小 Python 客户端，用于调用 MiniCPM-o Realtime
-API。示例代码位于仓库的 `examples/realtime/` 目录。
+API。示例代码位于项目仓库
+[`examples/realtime/`](https://github.com/OpenBMB/MiniCPM-o-Demo/tree/main/examples/realtime)
+目录。
 
 ## 安装依赖
 

@@ -10,7 +10,7 @@ export function baseOptions(lang: string): BaseLayoutProps {
     links: [
       { text: isZh ? '首页' : 'Home', url: isZh ? '/zh' : '/en' },
       { text: isZh ? '切换 English' : 'Switch 中文', url: isZh ? '/en' : '/zh' },
-      { text: isZh ? 'Demo 首页' : 'Demo Home', url: '/' },
+      { text: isZh ? '项目首页' : 'Project Home', url: '/' },
       { text: 'GitHub', url: 'https://github.com/OpenBMB/MiniCPM-o-Demo', external: true },
     ],
   };

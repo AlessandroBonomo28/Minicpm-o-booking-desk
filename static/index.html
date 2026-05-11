@@ -57,39 +57,47 @@
             color: #666;
             margin-bottom: 32px;
         }
-        .reference-section {
+        .resource-section {
             max-width: 960px;
             width: 100%;
-            margin-top: -24px;
-            margin-bottom: 40px;
-            padding-top: 28px;
-            border-top: 1px solid #e5e5e0;
+            margin-top: -4px;
         }
-        .reference-title {
-            font-size: 18px;
+        .resource-title {
+            font-size: 12px;
             font-weight: 600;
-            color: #2d2d2d;
-            margin-bottom: 14px;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            margin-bottom: 10px;
         }
-        .reference-list {
-            margin: 0;
-            padding-left: 20px;
-            color: #666;
-            font-size: 14px;
-            line-height: 1.8;
+        .resource-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
         }
-        .reference-list li {
-            margin: 4px 0;
-        }
-        .reference-list a {
-            color: #2563eb;
+        .resource-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 13px;
+            border-radius: 999px;
+            border: 1px solid #e5e5e0;
+            background: #fff;
+            color: #444;
+            font-size: 13px;
             font-weight: 500;
+            line-height: 1;
             text-decoration: none;
-            border-bottom: 1px solid rgba(37, 99, 235, 0.28);
+            transition: border-color .15s, box-shadow .15s, color .15s, transform .15s;
         }
-        .reference-list a:hover {
-            color: #1d4ed8;
-            border-bottom-color: rgba(29, 78, 216, 0.6);
+        .resource-btn:hover {
+            border-color: #c7c7bf;
+            color: #111;
+            box-shadow: 0 2px 10px rgba(0,0,0,.045);
+            transform: translateY(-1px);
+        }
+        .resource-btn .platform-icon {
+            font-size: 15px;
         }
 
         .mode-cards {
@@ -306,6 +314,39 @@
 
         <div class="mode-cards" id="mode-cards"></div>
 
+        <section class="resource-section" aria-labelledby="resource-heading">
+            <div class="resource-title" id="resource-heading">Resources</div>
+            <div class="resource-buttons">
+                <a class="resource-btn" href="https://github.com/OpenBMB/MiniCPM-o" target="_blank" rel="noopener">
+                    <span class="platform-icon" aria-hidden="true">📦</span><span id="resource-model">Model Repo</span>
+                </a>
+                <a class="resource-btn" href="https://github.com/OpenBMB/MiniCPM-o-Demo" target="_blank" rel="noopener">
+                    <span class="platform-icon" aria-hidden="true">💻</span><span id="resource-demo">Demo Repo</span>
+                </a>
+                <a class="resource-btn" href="/docs/">
+                    <span class="platform-icon" aria-hidden="true">📘</span><span id="resource-docs">Docs</span>
+                </a>
+                <a class="resource-btn" href="/docs/zh/realtime-api/overview/">
+                    <span class="platform-icon" aria-hidden="true">⚡</span><span id="resource-api">API Docs</span>
+                </a>
+                <a class="resource-btn" href="https://huggingface.co/openbmb/MiniCPM-o-4_5" target="_blank" rel="noopener">
+                    <span class="platform-icon" aria-hidden="true">🤗</span><span id="resource-model-hf">HF Model</span>
+                </a>
+                <a class="resource-btn" href="https://huggingface.co/papers/2604.27393" target="_blank" rel="noopener">
+                    <span class="platform-icon" aria-hidden="true">📄</span><span id="resource-paper">Paper</span>
+                </a>
+                <a class="resource-btn" href="https://github.com/tc-mb/llama.cpp-omni/releases/" target="_blank" rel="noopener">
+                    <span class="platform-icon" aria-hidden="true">🖥️</span><span id="resource-comni">Comni App</span>
+                </a>
+                <a class="resource-btn" href="https://openbmb.github.io/minicpm-o-4_5/" target="_blank" rel="noopener">
+                    <span class="platform-icon" aria-hidden="true">🎧</span><span id="resource-audio-casebook">Audio Casebook</span>
+                </a>
+                <a class="resource-btn" href="https://openbmb.github.io/minicpm-o-4_5-omni/" target="_blank" rel="noopener">
+                    <span class="platform-icon" aria-hidden="true">🎥</span><span id="resource-omni-casebook">Omni Casebook</span>
+                </a>
+            </div>
+        </section>
+
         <div class="recent-section" id="recent-section" style="display:none;">
             <div class="recent-header">
                 <span class="recent-title" id="recent-title">Recent Sessions (Only visible to you)</span>
@@ -404,23 +445,6 @@
             </div>
         </section>
 
-        <section class="reference-section" aria-labelledby="reference-heading">
-            <h2 class="reference-title" id="reference-heading">References</h2>
-            <ul class="reference-list">
-                <li>
-                    <a href="https://github.com/OpenBMB/MiniCPM-o" target="_blank" rel="noopener">MiniCPM-o model repository</a>
-                    - official MiniCPM-o 4.5 model code and usage examples for vision, speech, and full-duplex multimodal live streaming.
-                </li>
-                <li>
-                    <a href="https://github.com/OpenBMB/MiniCPM-o-Demo" target="_blank" rel="noopener">MiniCPM-o-Demo web demo repository</a>
-                    - official PyTorch + CUDA web demo for deploying and trying the MiniCPM-o 4.5 interaction modes.
-                </li>
-                <li>
-                    <a href="https://huggingface.co/papers/2604.27393" target="_blank" rel="noopener">MiniCPM-o 4.5 technical report</a>
-                    - paper describing the real-time full-duplex omni-modal interaction framework and model architecture.
-                </li>
-            </ul>
-        </section>
     </main>
 
     <script src="/static/shared/i18n.js"></script>
@@ -444,6 +468,16 @@
     document.getElementById('home-title').textContent = t.chooseMode;
     document.getElementById('recent-title').textContent = t.recentSessions;
     document.getElementById('recent-clear-btn').textContent = t.clearRecent;
+    document.getElementById('resource-heading').textContent = t.resources;
+    document.getElementById('resource-model').textContent = t.modelRepo;
+    document.getElementById('resource-demo').textContent = t.demoRepo;
+    document.getElementById('resource-docs').textContent = t.docs;
+    document.getElementById('resource-api').textContent = t.apiDocs;
+    document.getElementById('resource-model-hf').textContent = t.hfModel;
+    document.getElementById('resource-paper').textContent = t.techReport;
+    document.getElementById('resource-comni').textContent = t.comniApp;
+    document.getElementById('resource-audio-casebook').textContent = t.audioCasebook;
+    document.getElementById('resource-omni-casebook').textContent = t.omniCasebook;
 
     // Language toggle in header (FAQ-style)
     const _hlEl = document.getElementById('headerLang');

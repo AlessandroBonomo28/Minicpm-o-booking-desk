@@ -31,6 +31,16 @@ const zh = {
   turnbasedDesc: '多轮对话：文本和音频输入，流式输出。适合问答、编辑和多轮任务。',
   omniDesc: '全双工实时：摄像头 + 麦克风或本地视频/音频文件；实时对话。',
   audioDuplexDesc: '纯语音全双工：麦克风或本地音频文件，低延迟语音对话。',
+  resources: '资源链接',
+  modelRepo: '模型仓库',
+  demoRepo: 'Demo 仓库',
+  docs: '文档',
+  apiDocs: 'API 文档',
+  hfModel: 'HF 模型',
+  techReport: '技术报告',
+  comniApp: 'Comni 应用',
+  audioCasebook: '音频案例',
+  omniCasebook: '全双工案例',
 
   // header / status
   connecting: '连接中…',
@@ -224,6 +234,16 @@ const en = {
   turnbasedDesc: 'Multi-turn chat: text and audio input with streaming output. For Q&A, editing, and multi-turn tasks.',
   omniDesc: 'Full-duplex real-time: camera + mic or local video/audio file; speak and see with live replies.',
   audioDuplexDesc: 'Voice-only full-duplex: live mic or local audio file, low-latency voice conversation.',
+  resources: 'Resources',
+  modelRepo: 'Model Repo',
+  demoRepo: 'Demo Repo',
+  docs: 'Docs',
+  apiDocs: 'API Docs',
+  hfModel: 'HF Model',
+  techReport: 'Paper',
+  comniApp: 'Comni App',
+  audioCasebook: 'Audio Casebook',
+  omniCasebook: 'Omni Casebook',
 
   // header / status
   connecting: 'Connecting…',

@@ -1,0 +1,9 @@
+{
+  "title": "旧版 API 参考",
+  "pages": [
+    "chat",
+    "half-duplex",
+    "duplex",
+    "index"
+  ]
+}

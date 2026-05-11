@@ -1448,172 +1448,59 @@ async def realtime_page():
 
 # ============ Docs Hosting ============
 
-_DOCS_DIR = os.path.join(os.path.dirname(__file__), "docs")
-_DOCS_HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="{html_lang}">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title}</title>
-<style>
-:root {{ --bg: #0d1117; --fg: #e6edf3; --muted: #7d8590; --border: #30363d;
-         --link: #58a6ff; --code-bg: #161b22; --table-alt: #161b22;
-         --accent: #1f6feb; }}
-* {{ margin: 0; padding: 0; box-sizing: border-box; }}
-body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-        background: var(--bg); color: var(--fg); line-height: 1.6;
-        display: flex; min-height: 100vh; }}
-nav {{ width: 240px; min-width: 200px; padding: 24px 16px; border-right: 1px solid var(--border);
-       position: sticky; top: 0; height: 100vh; overflow-y: auto; background: var(--bg); }}
-nav .logo {{ font-size: 14px; font-weight: 700; color: var(--fg); margin-bottom: 20px;
-             padding-bottom: 12px; border-bottom: 1px solid var(--border); }}
-nav a {{ display: block; padding: 6px 10px; margin: 2px 0; border-radius: 6px;
-         text-decoration: none; color: var(--muted); font-size: 13px; transition: all .15s; }}
-nav a:hover {{ color: var(--fg); background: rgba(255,255,255,.05); }}
-nav a.active {{ color: var(--link); background: rgba(56,139,253,.1); font-weight: 600; }}
-.lang-switch {{ display: flex; gap: 6px; margin: -8px 0 16px; padding-bottom: 14px;
-                border-bottom: 1px solid var(--border); }}
-.lang-switch a {{ display: inline-block; margin: 0; padding: 4px 8px; font-size: 12px; }}
-.lang-switch a.lang-active {{ color: var(--fg); background: rgba(255,255,255,.08); font-weight: 600; }}
-main {{ flex: 1; max-width: 900px; padding: 32px 48px 64px; }}
-article h1 {{ font-size: 28px; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 20px; }}
-article h2 {{ font-size: 20px; margin-top: 32px; margin-bottom: 12px; padding-bottom: 6px;
-              border-bottom: 1px solid var(--border); }}
-article h3 {{ font-size: 16px; margin-top: 24px; margin-bottom: 8px; }}
-article h4 {{ font-size: 14px; margin-top: 20px; margin-bottom: 6px; color: var(--muted); }}
-article p {{ margin-bottom: 12px; }}
-article a {{ color: var(--link); text-decoration: none; }}
-article a:hover {{ text-decoration: underline; }}
-article ul, article ol {{ padding-left: 24px; margin-bottom: 12px; }}
-article li {{ margin-bottom: 4px; }}
-article code {{ font-family: "SF Mono","Fira Code",Consolas,monospace; font-size: 85%;
-                background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }}
-article pre {{ background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
-               padding: 14px 18px; overflow-x: auto; margin-bottom: 16px; line-height: 1.45; }}
-article pre code {{ background: none; padding: 0; font-size: 13px; }}
-article table {{ width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 14px; }}
-article th {{ text-align: left; padding: 8px 12px; border: 1px solid var(--border);
-              background: var(--code-bg); font-weight: 600; }}
-article td {{ padding: 8px 12px; border: 1px solid var(--border); }}
-article tr:nth-child(even) {{ background: var(--table-alt); }}
-article blockquote {{ border-left: 3px solid var(--accent); padding: 8px 16px; margin: 12px 0;
-                      color: var(--muted); background: rgba(56,139,253,.05); border-radius: 0 6px 6px 0; }}
-article hr {{ border: none; border-top: 1px solid var(--border); margin: 24px 0; }}
-.codehilite {{ background: var(--code-bg); border-radius: 8px; }}
-@media (max-width: 768px) {{
-    body {{ flex-direction: column; }}
-    nav {{ width: 100%; height: auto; position: static; border-right: none;
-           border-bottom: 1px solid var(--border); display: flex; gap: 4px;
-           flex-wrap: wrap; padding: 12px; }}
-    nav .logo {{ display: none; }}
-    main {{ padding: 20px 16px; }}
-}}
-</style>
-</head>
-<body>
-<nav>
-  <div class="logo">MiniCPM-o Docs</div>
-  <div class="lang-switch">{lang_switch}</div>
-  {nav_links}
-</nav>
-<main><article>
-{content}
-</article></main>
-</body>
-</html>"""
-
-_DOCS_PAGES = [
-    ("overview", "realtime-protocol-overview.md", "en/realtime-protocol-overview.md", "概览", "Overview"),
-    ("video", "video-duplex-protocol.md", "en/video-duplex-protocol.md", "视频双工", "Video Duplex"),
-    ("audio", "audio-duplex-protocol.md", "en/audio-duplex-protocol.md", "音频双工", "Audio Duplex"),
-]
+docs_static_dir = os.path.join(static_dir, "docs")
 
 
-def _render_doc(slug: str, lang: str = "zh") -> str:
-    import markdown
-
-    page = next((p for p in _DOCS_PAGES if p[0] == slug), None)
-    if page is None:
-        return None
-
-    is_en = lang == "en"
-    md_path = os.path.join(_DOCS_DIR, page[2] if is_en else page[1])
-    if not os.path.exists(md_path):
-        return None
-
-    with open(md_path, "r", encoding="utf-8") as f:
-        md_text = f.read()
-
-    doc_prefix = "/docs/en" if is_en else "/docs"
-    for s, zh_fname, en_fname, _, _ in _DOCS_PAGES:
-        md_text = md_text.replace(f"]({zh_fname})", f"]({doc_prefix}/{s})")
-        md_text = md_text.replace(f"]({en_fname})", f"]({doc_prefix}/{s})")
-    md_text = md_text.replace("](realtime-protocol-schema.json)", "](/docs/realtime-protocol-schema.json)")
-
-    html_content = markdown.markdown(
-        md_text,
-        extensions=["tables", "fenced_code", "codehilite", "toc"],
-        extension_configs={"codehilite": {"css_class": "codehilite", "guess_lang": False}},
-    )
-
-    title = page[4] if is_en else page[3]
-    nav_links = "\n  ".join(
-        f'<a href="{doc_prefix}/{s}" class="{"active" if s == slug else ""}">'
-        f'{en_title if is_en else zh_title}</a>'
-        for s, _, _, zh_title, en_title in _DOCS_PAGES
-    )
-    lang_switch = (
-        f'<a href="/docs/{slug}" class="{"lang-active" if not is_en else ""}">中文</a>'
-        f'<a href="/docs/en/{slug}" class="{"lang-active" if is_en else ""}">English</a>'
-    )
-
-    return _DOCS_HTML_TEMPLATE.format(
-        html_lang="en" if is_en else "zh-CN",
-        title=f"{title} — MiniCPM-o Docs",
-        lang_switch=lang_switch,
-        nav_links=nav_links,
-        content=html_content,
-    )
-
-
-@app.get("/docs", response_class=HTMLResponse)
+@app.api_route("/docs", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def docs_index():
-    """Redirect /docs to /docs/overview"""
-    return RedirectResponse(url="/docs/overview", status_code=302)
+    """Docs entry: Fumadocs static site."""
+    return RedirectResponse(url="/docs/zh/", status_code=302)
 
 
-@app.get("/docs/en", response_class=HTMLResponse)
+@app.api_route("/docs/overview", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_legacy_overview():
+    """Compatibility redirect for the previous runtime docs route."""
+    return RedirectResponse(url="/docs/zh/realtime-api/overview/", status_code=302)
+
+
+@app.api_route("/docs/video", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_legacy_video():
+    """Compatibility redirect for the previous runtime docs route."""
+    return RedirectResponse(url="/docs/zh/realtime-api/video/", status_code=302)
+
+
+@app.api_route("/docs/audio", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_legacy_audio():
+    """Compatibility redirect for the previous runtime docs route."""
+    return RedirectResponse(url="/docs/zh/realtime-api/audio/", status_code=302)
+
+
+@app.api_route("/docs/en", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def docs_en_index():
-    """Redirect /docs/en to /docs/en/overview"""
-    return RedirectResponse(url="/docs/en/overview", status_code=302)
+    """English docs entry."""
+    return RedirectResponse(url="/docs/en/", status_code=302)
 
 
-@app.get("/docs/en/{slug}")
-async def docs_en_page(slug: str):
-    """Render an English Markdown doc as a styled HTML page, or serve raw files"""
-    if slug.endswith(".json"):
-        file_path = os.path.join(_DOCS_DIR, slug)
-        if os.path.exists(file_path):
-            return FileResponse(file_path, media_type="application/json")
-        raise HTTPException(status_code=404, detail=f"File not found: {slug}")
-    html = _render_doc(slug, lang="en")
-    if html is None:
-        raise HTTPException(status_code=404, detail=f"Doc page not found: en/{slug}")
-    return HTMLResponse(html)
+@app.api_route("/docs/en/overview", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_en_legacy_overview():
+    """Compatibility redirect for the previous English runtime docs route."""
+    return RedirectResponse(url="/docs/en/realtime-api/overview/", status_code=302)
 
 
-@app.get("/docs/{slug}")
-async def docs_page(slug: str):
-    """Render a Markdown doc as a styled HTML page, or serve raw files"""
-    if slug.endswith(".json"):
-        file_path = os.path.join(_DOCS_DIR, slug)
-        if os.path.exists(file_path):
-            return FileResponse(file_path, media_type="application/json")
-        raise HTTPException(status_code=404, detail=f"File not found: {slug}")
-    html = _render_doc(slug, lang="zh")
-    if html is None:
-        raise HTTPException(status_code=404, detail=f"Doc page not found: {slug}")
-    return HTMLResponse(html)
+@app.api_route("/docs/en/video", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_en_legacy_video():
+    """Compatibility redirect for the previous English runtime docs route."""
+    return RedirectResponse(url="/docs/en/realtime-api/video/", status_code=302)
+
+
+@app.api_route("/docs/en/audio", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_en_legacy_audio():
+    """Compatibility redirect for the previous English runtime docs route."""
+    return RedirectResponse(url="/docs/en/realtime-api/audio/", status_code=302)
+
+
+if os.path.exists(docs_static_dir):
+    app.mount("/docs", StaticFiles(directory=docs_static_dir, html=True), name="docs")
 
 
 # ============ Realtime API (OpenAI Realtime Protocol) ============

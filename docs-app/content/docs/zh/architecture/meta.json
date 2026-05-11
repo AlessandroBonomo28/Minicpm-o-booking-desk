@@ -1,0 +1,10 @@
+{
+  "title": "系统架构",
+  "pages": [
+    "index",
+    "chat",
+    "half-duplex",
+    "duplex",
+    "internals"
+  ]
+}

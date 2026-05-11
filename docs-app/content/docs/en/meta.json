@@ -1,0 +1,15 @@
+{
+  "title": "MiniCPM-o Docs",
+  "pages": [
+    "index",
+    "---Realtime API---",
+    "realtime-api",
+    "---Project Docs---",
+    "model",
+    "compile",
+    "deployment",
+    "architecture",
+    "frontend",
+    "api"
+  ]
+}

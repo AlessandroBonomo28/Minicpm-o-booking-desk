@@ -27,7 +27,10 @@ resources/
 *.swo
 playbook/
 
-public/
+/public/
+docs-app/.next/
+docs-app/.source/
+docs-app/out/
 torch_compile_cache/
 AutoAWQ/
 dev_tools/

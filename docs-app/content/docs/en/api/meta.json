@@ -1,0 +1,9 @@
+{
+  "title": "Legacy API Reference",
+  "pages": [
+    "chat",
+    "half-duplex",
+    "duplex",
+    "index"
+  ]
+}

@@ -9,7 +9,10 @@
   },
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "docs:install": "cd docs-app && bun install",
+    "docs:dev": "cd docs-app && bun run dev",
+    "docs:build": "cd docs-app && bun run build"
   },
   "keywords": [],
   "author": "",

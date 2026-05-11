@@ -200,14 +200,9 @@ modelscope download --model OpenBMB/MiniCPM-o-4_5 --local_dir /path/to/your/Mini
 Modify `"gateway_port": 8006` to change the deployment port. The default is 8006.
 
 
-**4. Build Frontend Assets and Start the Service**
+**4. Build the Mobile Frontend and Start the Service**
 
-`start_all.sh` automatically rebuilds the mobile app and documentation before starting workers and the gateway:
-
-- `frontend/mobile` → `static/mobile/`
-- `docs-app` → `static/docs/`
-
-This keeps `/mobile` and `/docs` in sync with the latest source.
+`start_all.sh` automatically rebuilds `frontend/mobile` and publishes it to `static/mobile/` before starting workers and the gateway. This keeps the `/mobile` entry in sync with the latest React/Vite code.
 
 If this is your first time building the mobile frontend, install its npm dependencies once:
 
@@ -217,21 +212,13 @@ bun install
 cd ../..
 ```
 
-If this is your first time building the documentation site, install its bun dependencies once:
-
-```bash
-cd docs-app
-bun install
-cd ../..
-```
-
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 bash start_all.sh
 ```
 
-For manual deployment, always run `cd frontend/mobile && bun run build:static` and `cd docs-app && bun run build` before starting the gateway. Only set `SKIP_MOBILE_BUILD=1` or `SKIP_DOCS_BUILD=1` for backend-only debugging.
+For manual deployment, always run `cd frontend/mobile && bun run build:static` before starting the gateway. Only set `SKIP_MOBILE_BUILD=1` for backend-only debugging.
 
-After the service starts, visit https://localhost:8006. The documentation is available at `/docs/`. The self-signed certificate will trigger a browser warning — click "Advanced" → "Proceed" to continue.
+After the service starts, visit https://localhost:8006. The self-signed certificate will trigger a browser warning — click "Advanced" → "Proceed" to continue.
 
 **5. torch.compile Acceleration**
 

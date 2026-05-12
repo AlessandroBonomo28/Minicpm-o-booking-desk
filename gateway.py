@@ -1499,8 +1499,7 @@ async def docs_en_legacy_audio():
     return RedirectResponse(url="/docs/en/realtime-api/audio/", status_code=302)
 
 
-if os.path.exists(docs_static_dir):
-    app.mount("/docs", StaticFiles(directory=docs_static_dir, html=True), name="docs")
+app.mount("/docs", StaticFiles(directory=docs_static_dir, html=True, check_dir=False), name="docs")
 
 
 # ============ Realtime API (OpenAI Realtime Protocol) ============

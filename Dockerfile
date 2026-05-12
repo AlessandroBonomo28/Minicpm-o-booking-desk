@@ -22,6 +22,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
+# ============ Frontend/docs build toolchain ============
+
+ENV BUN_INSTALL=/root/.bun
+ENV PATH="${BUN_INSTALL}/bin:${PATH}"
+
+RUN curl -fsSL https://bun.sh/install | bash
+
 # ============ PyTorch (CUDA 12.8) ============
 
 RUN pip install --no-cache-dir \
@@ -39,6 +46,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 RUN chmod +x docker-entrypoint.sh
+
+# Build static frontend/docs assets into static/.
+RUN if [ -f frontend/mobile/package.json ]; then \
+        cd frontend/mobile && bun install --frozen-lockfile && bun run build:static; \
+    fi && \
+    if [ -f docs-app/package.json ]; then \
+        cd docs-app && bun install --frozen-lockfile && bun run build; \
+    fi
 
 # Ensure config.json exists (user should mount their own)
 RUN if [ ! -f config.json ]; then cp config.example.json config.json; fi

@@ -1,6 +1,6 @@
 # MiniCPM-o 4.5 PyTorch 简易演示系统
 
-[English Documentation](README.md) | [详细文档](https://openbmb.github.io/MiniCPM-o-Demo/site/zh/index.html)
+[English Documentation](README.md) | [详细文档](https://minicpmo45.modelbest.cn/docs/zh/) | [Realtime API 文档](https://minicpmo45.modelbest.cn/docs/zh/realtime-api/overview/)
 
 [可直接使用的在线演示系统](https://minicpmo45.modelbest.cn/) | [Discord](https://discord.gg/UTbTeCQe) | [飞书群](https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=228m5ca0-dfa1-464c-9406-b8b2f86d76ea)
 
@@ -207,11 +207,11 @@ modelscope download --model OpenBMB/MiniCPM-o-4_5 --local_dir /path/to/your/Mini
 
 `start_all.sh` 会在启动 Worker 和 Gateway 前，自动重新构建 `frontend/mobile`，并发布到 `static/mobile/`。这样 `/mobile` 入口会始终使用最新的 React/Vite 代码。
 
-第一次构建移动端前端时，需要先安装一次 npm 依赖：
+第一次构建移动端前端时，需要先安装一次 bun 依赖：
 
 ```bash
 cd frontend/mobile
-npm install
+bun install
 cd ../..
 ```
 
@@ -219,7 +219,7 @@ cd ../..
 CUDA_VISIBLE_DEVICES=0,1,2,3 bash start_all.sh
 ```
 
-如果手动部署，一定要先执行 `cd frontend/mobile && npm run build:static`，再启动 gateway。只有在纯后端调试时才建议设置 `SKIP_MOBILE_BUILD=1` 跳过移动端构建。
+如果手动部署，一定要先执行 `cd frontend/mobile && bun run build:static`，再启动 gateway。只有在纯后端调试时才建议设置 `SKIP_MOBILE_BUILD=1` 跳过移动端构建。
 
 服务启动后访问 https://localhost:8006 即可。自签名证书会触发浏览器警告，点"高级"→"继续访问"。
 
@@ -397,7 +397,7 @@ minicpmo45_service/
 | 全模态全双工 | https://localhost:8006/omni |
 | 语音全双工 | https://localhost:8006/audio_duplex |
 | 仪表盘 | https://localhost:8006/admin |
-| API 文档 | https://localhost:8006/docs |
+| 文档 / Realtime API 文档 | https://localhost:8006/docs |
 
 <br/>
 <br/>

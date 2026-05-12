@@ -1,0 +1,10 @@
+{
+  "title": "Frontend",
+  "pages": [
+    "index",
+    "pages",
+    "audio",
+    "duplex-session",
+    "components"
+  ]
+}

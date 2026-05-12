@@ -1,0 +1,10 @@
+{
+  "title": "Architecture",
+  "pages": [
+    "index",
+    "chat",
+    "half-duplex",
+    "duplex",
+    "internals"
+  ]
+}

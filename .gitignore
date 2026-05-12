@@ -13,6 +13,10 @@ build/
 # Node
 node_modules/
 static/mobile/
+docs-app/.next/
+docs-app/.source/
+docs-app/out/
+static/docs/
 
 # 本地配置与运行时（用户从 config.example.json 复制）
 config.json
@@ -48,6 +52,7 @@ torch_compile_cache/
 AutoAWQ/
 
 dev_tools/
+.wrangler/
 
 benchmark.json
 .run-logs/

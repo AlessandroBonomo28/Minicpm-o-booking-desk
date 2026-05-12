@@ -1,6 +1,6 @@
 # MiniCPM-o 4.5 PyTorch Simple Demo System
 
-[中文简介](README_zh.md) | [Detailed Documentation](https://openbmb.github.io/MiniCPM-o-Demo/site/en/index.html)
+[中文简介](README_zh.md) | [Documentation](https://minicpmo45.modelbest.cn/docs/en/) | [Realtime API Docs](https://minicpmo45.modelbest.cn/docs/en/realtime-api/overview/)
 
 [Ready-to-use Demo Website](https://minicpmo45.modelbest.cn/) | [Discord](https://discord.gg/UTbTeCQe) | [Feishu Group](https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=228m5ca0-dfa1-464c-9406-b8b2f86d76ea)
 
@@ -208,7 +208,7 @@ If this is your first time building the mobile frontend, install its npm depende
 
 ```bash
 cd frontend/mobile
-npm install
+bun install
 cd ../..
 ```
 
@@ -216,7 +216,7 @@ cd ../..
 CUDA_VISIBLE_DEVICES=0,1,2,3 bash start_all.sh
 ```
 
-For manual deployment, always run `cd frontend/mobile && npm run build:static` before starting the gateway. Only set `SKIP_MOBILE_BUILD=1` for backend-only debugging.
+For manual deployment, always run `cd frontend/mobile && bun run build:static` before starting the gateway. Only set `SKIP_MOBILE_BUILD=1` for backend-only debugging.
 
 After the service starts, visit https://localhost:8006. The self-signed certificate will trigger a browser warning — click "Advanced" → "Proceed" to continue.
 
@@ -394,7 +394,7 @@ minicpmo45_service/
 | Omnimodal Full-Duplex | https://localhost:8006/omni |
 | Audio Full-Duplex | https://localhost:8006/audio_duplex |
 | Dashboard | https://localhost:8006/admin |
-| API Docs | https://localhost:8006/docs |
+| Docs / Realtime API Docs | https://localhost:8006/docs |
 
 <br/>
 <br/>

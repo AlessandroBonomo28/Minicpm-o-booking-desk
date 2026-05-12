@@ -157,6 +157,8 @@ app = FastAPI(
     description="MiniCPMO45 多模态推理网关",
     version="1.0.0-alpha.2",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
 )
 
 
@@ -1112,6 +1114,40 @@ async def list_cache():
 _BASE_DIR = os.path.dirname(__file__)
 
 
+def _list_active_sessions_payload() -> Dict[str, Any]:
+    """Gateway 当前占用 Worker 的会话列表（Admin / 测试共用）。"""
+    if worker_pool is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    sessions: List[Dict[str, Any]] = []
+    for w in worker_pool.workers.values():
+        if not w.current_session_id:
+            continue
+        last_active = w.last_heartbeat or w.task_started_at or datetime.now()
+        sessions.append(
+            {
+                "session_id": w.current_session_id,
+                "worker_id": w.worker_id,
+                "messages_hash": w.cached_hash or "",
+                "last_active": last_active.isoformat()
+                if hasattr(last_active, "isoformat")
+                else str(last_active),
+            }
+        )
+    return {"total": len(sessions), "sessions": sessions}
+
+
+@app.get("/sessions")
+async def list_active_sessions():
+    """列出活跃会话（与 admin.html `GET /sessions` 一致）。"""
+    return _list_active_sessions_payload()
+
+
+@app.get("/api/sessions")
+async def list_active_sessions_api():
+    """同 list_active_sessions，REST 风格路径便于与 `/api/sessions/{id}` 并列。"""
+    return _list_active_sessions_payload()
+
+
 def _session_dir(session_id: str) -> str:
     """获取 session 目录的绝对路径（含路径安全校验）"""
     safe_id = _sanitize_session_id(session_id)
@@ -1221,8 +1257,7 @@ async def upload_session_recording(session_id: str, file: UploadFile = File(...)
     存储为 data/sessions/{session_id}/frontend_replay.{ext}
     """
     sdir = _session_dir(session_id)
-    if not os.path.isdir(sdir):
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    os.makedirs(sdir, exist_ok=True)
 
     content_type = (file.content_type or "").split(";")[0].strip()
     if content_type not in _ALLOWED_UPLOAD_TYPES:
@@ -1255,8 +1290,7 @@ _COMMENT_MAX_CHARS = 2000
 async def save_session_comment(session_id: str, payload: Dict[str, Any] = Body(...)):
     """保存用户对该 session 的评语，写入 data/sessions/{session_id}/comment.txt"""
     sdir = _session_dir(session_id)
-    if not os.path.isdir(sdir):
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    os.makedirs(sdir, exist_ok=True)
 
     raw = payload.get("comment")
     if raw is None:
@@ -1401,6 +1435,313 @@ async def audio_duplex():
     if os.path.exists(page_path):
         return FileResponse(page_path)
     return HTMLResponse("<h1>Audio Duplex</h1><p>Page not found</p>")
+
+
+@app.get("/realtime", response_class=HTMLResponse)
+async def realtime_page():
+    """Realtime API Demo 页面（OpenAI Realtime Protocol 风格双工）"""
+    page_path = os.path.join(static_dir, "realtime", "realtime.html")
+    if os.path.exists(page_path):
+        return FileResponse(page_path)
+    return HTMLResponse("<h1>Realtime API</h1><p>Page not found</p>")
+
+
+# ============ Docs Hosting ============
+
+docs_static_dir = os.path.join(static_dir, "docs")
+
+
+@app.api_route("/docs", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_index():
+    """Docs entry: Fumadocs static site."""
+    return RedirectResponse(url="/docs/zh/", status_code=302)
+
+
+@app.api_route("/docs/overview", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_legacy_overview():
+    """Compatibility redirect for the previous runtime docs route."""
+    return RedirectResponse(url="/docs/zh/realtime-api/overview/", status_code=302)
+
+
+@app.api_route("/docs/video", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_legacy_video():
+    """Compatibility redirect for the previous runtime docs route."""
+    return RedirectResponse(url="/docs/zh/realtime-api/video/", status_code=302)
+
+
+@app.api_route("/docs/audio", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_legacy_audio():
+    """Compatibility redirect for the previous runtime docs route."""
+    return RedirectResponse(url="/docs/zh/realtime-api/audio/", status_code=302)
+
+
+@app.api_route("/docs/en", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_en_index():
+    """English docs entry."""
+    return RedirectResponse(url="/docs/en/", status_code=302)
+
+
+@app.api_route("/docs/en/overview", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_en_legacy_overview():
+    """Compatibility redirect for the previous English runtime docs route."""
+    return RedirectResponse(url="/docs/en/realtime-api/overview/", status_code=302)
+
+
+@app.api_route("/docs/en/video", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_en_legacy_video():
+    """Compatibility redirect for the previous English runtime docs route."""
+    return RedirectResponse(url="/docs/en/realtime-api/video/", status_code=302)
+
+
+@app.api_route("/docs/en/audio", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def docs_en_legacy_audio():
+    """Compatibility redirect for the previous English runtime docs route."""
+    return RedirectResponse(url="/docs/en/realtime-api/audio/", status_code=302)
+
+
+app.mount("/docs", StaticFiles(directory=docs_static_dir, html=True, check_dir=False), name="docs")
+
+
+# ============ Realtime API (OpenAI Realtime Protocol) ============
+
+@app.websocket("/v1/realtime")
+async def realtime_ws(ws: WebSocket):
+    """OpenAI Realtime-style WebSocket 代理
+
+    Protocol translation gateway:
+      Client speaks OpenAI Realtime events → translates to old protocol → Worker
+      Worker speaks old protocol → translates to OpenAI events → Client
+
+    Uses the same FIFO queue + Worker allocation as /ws/duplex.
+    """
+    session_id = f"rt_{int(datetime.now().timestamp()*1000)}"
+    mode = ws.query_params.get("mode", "video")
+    max_duration_s = 300 if mode == "video" else 600
+
+    if worker_pool is None:
+        await ws.close(code=1013, reason="Service not ready")
+        return
+
+    session_id = _sanitize_session_id(session_id)
+    await ws.accept()
+
+    try:
+        duplex_type = "omni_duplex" if mode == "video" else "audio_duplex"
+        ticket, future = worker_pool.enqueue(duplex_type, session_id=session_id)
+    except WorkerPool.QueueFullError:
+        await ws.send_json({
+            "type": "error",
+            "error": {"code": "queue_full", "message": "Queue full", "type": "server_error"},
+        })
+        await ws.close(code=1013, reason="Queue full")
+        return
+
+    worker: Optional[WorkerConnection] = None
+    if future.done():
+        worker = future.result()
+    else:
+        try:
+            await ws.send_json({
+                "type": "session.queued",
+                "position": ticket.position,
+                "estimated_wait_s": ticket.estimated_wait_s,
+                "ticket_id": ticket.ticket_id,
+                "queue_length": worker_pool.queue_length,
+            })
+            while not future.done():
+                try:
+                    worker = await asyncio.wait_for(asyncio.shield(future), timeout=3.0)
+                    break
+                except asyncio.TimeoutError:
+                    updated = worker_pool.get_ticket(ticket.ticket_id)
+                    if updated:
+                        await ws.send_json({
+                            "type": "session.queue_update",
+                            "position": updated.position,
+                            "estimated_wait_s": updated.estimated_wait_s,
+                            "queue_length": worker_pool.queue_length,
+                        })
+                except asyncio.CancelledError:
+                    worker_pool.cancel(ticket.ticket_id)
+                    return
+        except (WebSocketDisconnect, Exception) as e:
+            logger.info(f"Realtime WS disconnected during queue: session={session_id}, cancelling ({e})")
+            worker_pool.cancel(ticket.ticket_id)
+            return
+        if worker is None and future.done():
+            worker = future.result()
+
+    if worker is None:
+        await ws.send_json({
+            "type": "error",
+            "error": {"code": "worker_busy", "message": "No worker available", "type": "server_error"},
+        })
+        await ws.close(code=1013, reason="No worker available")
+        return
+
+    await ws.send_json({"type": "session.queue_done"})
+    logger.info(f"Realtime WS connected: session={session_id} → {worker.worker_id}")
+
+    worker.mark_busy(GatewayWorkerStatus.DUPLEX_ACTIVE, duplex_type, session_id=session_id)
+    task_start = datetime.now()
+    session_closed = asyncio.Event()
+
+    worker_ws = None
+
+    try:
+        import websockets
+        ws_url = f"ws://{worker.host}:{worker.port}/ws/duplex?session_id={session_id}"
+
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                worker_ws = await websockets.connect(ws_url, open_timeout=5)
+                break
+            except Exception as conn_err:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Realtime WS connect to {worker.worker_id} failed (attempt {attempt + 1}): {conn_err}")
+                    await asyncio.sleep(1.0)
+                else:
+                    raise
+
+        async def session_timeout_watchdog():
+            """Total session duration watchdog."""
+            await asyncio.sleep(max_duration_s)
+            if session_closed.is_set():
+                return
+            logger.info(f"Realtime session timeout ({max_duration_s}s): session={session_id}")
+            try:
+                await ws.send_json({"type": "session.closed", "reason": "timeout"})
+            except Exception:
+                pass
+            session_closed.set()
+
+        async def client_to_worker():
+            """Client (OpenAI Realtime) → Worker (old protocol): translate on the fly"""
+            try:
+                async for raw in ws.iter_text():
+                    msg = json.loads(raw)
+                    msg_type = msg.get("type", "")
+
+                    if msg_type == "session.update":
+                        session_cfg = msg.get("session", {})
+                        worker_msg = {
+                            "type": "prepare",
+                            "system_prompt": session_cfg.get("instructions", "You are a helpful assistant."),
+                            "deferred_finalize": True,
+                            "max_slice_nums": session_cfg.get("max_slice_nums", 1),
+                        }
+                        if session_cfg.get("ref_audio"):
+                            worker_msg["ref_audio_base64"] = session_cfg["ref_audio"]
+                        if session_cfg.get("tts_ref_audio"):
+                            worker_msg["tts_ref_audio_base64"] = session_cfg["tts_ref_audio"]
+                        if session_cfg.get("voice_config"):
+                            worker_msg["config"] = session_cfg["voice_config"]
+                        await worker_ws.send(json.dumps(worker_msg))
+
+                    elif msg_type == "input_audio_buffer.append":
+                        worker_msg = {
+                            "type": "audio_chunk",
+                            "audio_base64": msg.get("audio", ""),
+                        }
+                        if msg.get("force_listen"):
+                            worker_msg["force_listen"] = True
+                        if msg.get("video_frames"):
+                            worker_msg["frame_base64_list"] = msg["video_frames"]
+                        if msg.get("max_slice_nums"):
+                            worker_msg["max_slice_nums"] = msg["max_slice_nums"]
+                        await worker_ws.send(json.dumps(worker_msg))
+
+                    elif msg_type == "session.close":
+                        await worker_ws.send(json.dumps({"type": "stop"}))
+
+            except WebSocketDisconnect:
+                pass
+
+        async def worker_to_client():
+            """Worker (old protocol) → Client (OpenAI Realtime): translate on the fly"""
+            try:
+                async for raw in worker_ws:
+                    msg = json.loads(raw)
+                    msg_type = msg.get("type", "")
+
+                    if msg_type == "prepared":
+                        await ws.send_json({
+                            "type": "session.created",
+                            "session_id": session_id,
+                            "prompt_length": msg.get("prompt_length", 0),
+                        })
+
+                    elif msg_type == "result":
+                        kv_len = msg.get("kv_cache_length", 0)
+                        if msg.get("is_listen"):
+                            await ws.send_json({
+                                "type": "response.listen",
+                                "kv_cache_length": kv_len,
+                            })
+                        else:
+                            await ws.send_json({
+                                "type": "response.output_audio.delta",
+                                "text": msg.get("text", ""),
+                                "audio": msg.get("audio_data"),
+                                "end_of_turn": msg.get("end_of_turn", False),
+                                "kv_cache_length": kv_len,
+                            })
+                        if kv_len >= 8192 and not session_closed.is_set():
+                            logger.info(f"Realtime context full (kv={kv_len}): session={session_id}")
+                            await ws.send_json({"type": "session.closed", "reason": "context_full"})
+                            session_closed.set()
+                    elif msg_type == "stopped":
+                        await ws.send_json({"type": "session.closed", "reason": "stopped"})
+
+                    elif msg_type == "timeout":
+                        await ws.send_json({"type": "session.closed", "reason": "timeout"})
+
+                    elif msg_type == "error":
+                        await ws.send_json({
+                            "type": "error",
+                            "error": {
+                                "code": "inference_failed",
+                                "message": msg.get("error", "Unknown error"),
+                                "type": "server_error",
+                            },
+                        })
+
+                    else:
+                        await ws.send_text(raw)
+
+            except Exception:
+                pass
+
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(client_to_worker()),
+                asyncio.create_task(worker_to_client()),
+                asyncio.create_task(session_timeout_watchdog()),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+
+    except Exception as e:
+        logger.error(f"Realtime WS error: {e}", exc_info=True)
+    finally:
+        if worker_ws:
+            try:
+                await worker_ws.close()
+            except Exception:
+                pass
+
+        if worker:
+            duration = (datetime.now() - task_start).total_seconds() if task_start else 0
+            worker_pool.release_worker(
+                worker,
+                request_type=duplex_type,
+                duration_s=duration,
+            )
+            logger.info(f"Realtime WS ended: session={session_id}, Worker released ({duration:.1f}s)")
 
 
 @app.get("/mobile-omni", include_in_schema=False)

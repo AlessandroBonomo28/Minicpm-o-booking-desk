@@ -16,6 +16,10 @@ httpx>=0.28.0
 websockets>=16.0
 python-multipart
 
+# Docs rendering
+markdown>=3.6
+Pygments>=2.18.0
+
 # Data / Schema
 pydantic>=2.11.0
 numpy>=2.2.0

@@ -1175,7 +1175,7 @@ function initInputEnhancements() {
 function _createAttachFileInput(getEditor) {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'audio/*,video/*';
+    input.accept = 'image/*,audio/*,video/*';
     input.multiple = true;
     input.style.display = 'none';
     document.body.appendChild(input);
@@ -1189,7 +1189,8 @@ function _createAttachFileInput(getEditor) {
 
 function _addFileToEditor(editor, file) {
     if (file.type.startsWith('image/')) {
-        return; // image upload disabled
+        const objectUrl = URL.createObjectURL(file);
+        editor.addItem({ type: 'image', file, name: file.name || 'image', objectUrl, data: null });
     } else if (file.type.startsWith('audio/')) {
         const objectUrl = URL.createObjectURL(file);
         const audio = new Audio(objectUrl);

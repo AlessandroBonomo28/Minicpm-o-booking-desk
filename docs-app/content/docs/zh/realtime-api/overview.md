@@ -38,8 +38,8 @@ wss://host/v1/realtime?mode={video|audio}
 
 ## 协议文档
 
-- [视频双工协议](/docs/zh/realtime-api/video/) — 含视频帧的全双工对话
-- [音频双工协议](/docs/zh/realtime-api/audio/) — 纯音频的全双工对话
+- [视频双工协议](/zh/realtime-api/video/) — 含视频帧的全双工对话
+- [音频双工协议](/zh/realtime-api/audio/) — 纯音频的全双工对话
 - [JSON Schema](/docs/realtime-protocol-schema.json) — 机器可读的消息格式定义
 
 ## 示例代码

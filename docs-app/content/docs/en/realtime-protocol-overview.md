@@ -38,8 +38,8 @@ The mode cannot be changed during a session.
 
 ## Protocol Documents
 
-- [Video Full-Duplex Protocol](/docs/en/video-duplex-protocol/) — full-duplex conversation with video frames.
-- [Audio Full-Duplex Protocol](/docs/en/audio-duplex-protocol/) — audio-only full-duplex conversation.
+- [Video Full-Duplex Protocol](/en/video-duplex-protocol/) — full-duplex conversation with video frames.
+- [Audio Full-Duplex Protocol](/en/audio-duplex-protocol/) — audio-only full-duplex conversation.
 - [JSON Schema](realtime-protocol-schema.json) — machine-readable message schema.
 
 ## Example Code

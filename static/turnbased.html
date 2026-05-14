@@ -1103,11 +1103,11 @@ function init() {
     // 创建 Compose Editor（初始视图 + 对话视图）— compose 模式融入外层容器
     state.composeEditorInit = new UserContentEditor(
         document.getElementById('composeEditorInit'),
-        { placeholder: (window.I18n?.t?.typeOrRecord || 'Type or press Space to record...'), onSubmit: () => sendFirstMessage(), compose: true, showImageBtn: false }
+        { placeholder: (window.I18n?.t?.typeOrRecord || 'Type or press Space to record...'), onSubmit: () => sendFirstMessage(), compose: true, showImageBtn: true }
     );
     state.composeEditorChat = new UserContentEditor(
         document.getElementById('composeEditorChat'),
-        { placeholder: (window.I18n?.t?.typeOrRecord || 'Type or press Space to record...'), onSubmit: () => sendMessage(), compose: true, showImageBtn: false }
+        { placeholder: (window.I18n?.t?.typeOrRecord || 'Type or press Space to record...'), onSubmit: () => sendMessage(), compose: true, showImageBtn: true }
     );
 
     // 默认让 chat compose editor 成为 Space 键目标

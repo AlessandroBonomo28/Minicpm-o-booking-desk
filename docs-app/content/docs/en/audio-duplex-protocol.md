@@ -3,7 +3,7 @@ title: "MiniCPM-o Audio Full-Duplex API Protocol"
 ---
 
 > This document defines the WebSocket protocol for **Audio Full-Duplex** mode.
-> For video mode, see [video-duplex-protocol.md](video-duplex-protocol.md).
+> For video mode, see [video-duplex-protocol.md](/docs/en/video-duplex-protocol/).
 
 ---
 

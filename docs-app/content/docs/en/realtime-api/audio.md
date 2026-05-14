@@ -4,7 +4,7 @@ description: "Realtime audio-only full-duplex API protocol"
 ---
 
 > This document defines the WebSocket protocol for **Audio Full-Duplex** mode.
-> For video mode, see [video-duplex-protocol.md](video.md).
+> For video mode, see [video-duplex-protocol.md](/docs/en/realtime-api/video/).
 
 ---
 

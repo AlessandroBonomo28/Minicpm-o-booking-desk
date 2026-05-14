@@ -7,7 +7,7 @@ The system supports three main interaction modes (Turn-based Chat, Omnimodal Ful
 
 ## Quick Start
 
-- [Architecture](architecture/index.md) — System architecture, mode topology, and request flow
-- [Model](model.md) — Multimodal model internals and data flow
+- [Architecture](/docs/en/architecture/) — System architecture, mode topology, and request flow
+- [Model](/docs/en/model/) — Multimodal model internals and data flow
 - [API Reference](https://minicpmo45.modelbest.cn/docs/overview) — Interface definitions and usage
-- [Deployment](deployment.md) — Requirements, configuration, and deployment steps
+- [Deployment](/docs/en/deployment/) — Requirements, configuration, and deployment steps

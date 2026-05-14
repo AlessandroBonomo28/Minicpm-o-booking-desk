@@ -25,7 +25,8 @@ export class DuplexSession {
             outputSampleRate: config.outputSampleRate || 24000,
             getWsUrl: config.getWsUrl || ((sessionId) => {
                 const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-                return `${proto}://${location.host}/ws/duplex/${sessionId}`;
+                const url = `${proto}://${location.host}/ws/duplex/${sessionId}`;
+                return window.ClientIdentity ? window.ClientIdentity.appendToUrl(url) : url;
             }),
         };
 

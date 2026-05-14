@@ -55,7 +55,8 @@ function createSession() {
         getStopOnSlidingWindow: () => false,
         getWsUrl: () => {
             const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-            return `${proto}://${location.host}/v1/realtime`;
+            const url = `${proto}://${location.host}/v1/realtime`;
+            return window.ClientIdentity ? window.ClientIdentity.appendToUrl(url) : url;
         },
     });
 

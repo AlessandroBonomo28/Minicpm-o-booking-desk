@@ -1063,6 +1063,7 @@
 <script src="/static/shared/preset-selector.js"></script>
 <script src="/static/system-content-editor.js"></script>
 <script src="/static/user-content-editor.js"></script>
+<script src="/static/shared/client-identity.js"></script>
 <script>
 // ============ 状态 ============
 // 默认 system content list（模型最佳实践：text + ref_audio + text）
@@ -2502,7 +2503,8 @@ async function sendChatMessage(maxTokens) {
         const { body, enableTts } = _buildChatWSBody(maxTokens, false);
 
         const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-        const ws = new WebSocket(`${wsProto}://${window.location.host}/ws/chat`);
+        const chatWsUrl = `${wsProto}://${window.location.host}/ws/chat`;
+        const ws = new WebSocket(window.ClientIdentity ? window.ClientIdentity.appendToUrl(chatWsUrl) : chatWsUrl);
 
         ws.onopen = () => ws.send(JSON.stringify(body));
 
@@ -3090,7 +3092,8 @@ async function sendStreamingMessage(maxTokens) {
 
     try {
         const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-        const ws = new WebSocket(`${wsProto}://${window.location.host}/ws/chat`);
+        const chatWsUrl = `${wsProto}://${window.location.host}/ws/chat`;
+        const ws = new WebSocket(window.ClientIdentity ? window.ClientIdentity.appendToUrl(chatWsUrl) : chatWsUrl);
 
         ws.onopen = () => ws.send(JSON.stringify(body));
 

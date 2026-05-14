@@ -833,6 +833,8 @@ async def chat_ws(ws: WebSocket):
                         "streaming": streaming,
                         "ref_audio": _chat_ws_cfg.ref_audio_path,
                     },
+                    client_info=_ws_client_info(ws),
+                    source_info=_ws_source_info(ws, "demo_turnbased", "chat"),
                     data_dir=_chat_ws_cfg.data_dir,
                 )
 
@@ -1074,6 +1076,28 @@ def _sanitize_session_id(session_id: str) -> str:
     return session_id
 
 
+def _ws_client_info(ws: WebSocket) -> Dict[str, Any]:
+    """Best-effort client/page identity captured from gateway-forwarded query params."""
+    return {
+        "client_id": ws.query_params.get("client_id"),
+        "page_session_id": ws.query_params.get("page_session_id"),
+        "ip": ws.query_params.get("client_ip"),
+        "user_agent": ws.query_params.get("user_agent"),
+        "origin": ws.query_params.get("origin"),
+    }
+
+
+def _ws_source_info(ws: WebSocket, default_channel: str, default_mode: Optional[str] = None) -> Dict[str, Any]:
+    return {
+        "channel": ws.query_params.get("source_channel") or default_channel,
+        "mode": ws.query_params.get("source_mode") or default_mode,
+        "gateway_session_id": ws.query_params.get("gateway_session_id") or ws.query_params.get("session_id"),
+        "path": ws.query_params.get("source_path"),
+        "page_route": ws.query_params.get("page_route"),
+        "client_surface": ws.query_params.get("client_surface"),
+    }
+
+
 _half_duplex_stop_events: Dict[str, threading.Event] = {}
 
 _half_duplex_ref_audio_cache: Dict[str, np.ndarray] = {}
@@ -1235,6 +1259,8 @@ async def half_duplex_ws(ws: WebSocket):
                             "tts_enabled": generate_audio,
                             "timeout_s": timeout_s,
                         },
+                        client_info=_ws_client_info(ws),
+                        source_info=_ws_source_info(ws, "demo_half_duplex", "audio"),
                         data_dir=hdx_cfg.data_dir,
                     )
 
@@ -1560,6 +1586,12 @@ async def duplex_ws(ws: WebSocket):
                             app_type=duplex_type,
                             worker_id=worker.gpu_id,
                             config_snapshot=config_snap,
+                            client_info=_ws_client_info(ws),
+                            source_info=_ws_source_info(
+                                ws,
+                                "demo_omni" if duplex_type == "omni_duplex" else "demo_audio_duplex",
+                                "video" if duplex_type == "omni_duplex" else "audio",
+                            ),
                             data_dir=cfg.data_dir,
                         )
                     session_start_perf = time.perf_counter()

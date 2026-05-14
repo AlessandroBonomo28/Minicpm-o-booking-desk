@@ -23,6 +23,7 @@ import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from contextlib import asynccontextmanager
+from urllib.parse import urlencode
 
 import zipfile
 from io import BytesIO
@@ -72,6 +73,48 @@ def _sanitize_session_id(session_id: str) -> str:
         safe = re.sub(r'[^a-zA-Z0-9_\-]', '_', session_id)
         return safe
     return session_id
+
+
+def _client_ip_from_ws(ws: WebSocket) -> Optional[str]:
+    xff = ws.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return ws.headers.get("x-real-ip") or (ws.client.host if ws.client else None)
+
+
+def _worker_identity_query(
+    ws: WebSocket,
+    *,
+    session_id: str,
+    source_channel: str,
+    source_mode: Optional[str] = None,
+) -> str:
+    """Build query params passed to worker so recordings can be linked to clients/pages."""
+    client_id = (
+        ws.query_params.get("client_id")
+        or ws.headers.get("x-client-id")
+        or ws.cookies.get("client_id")
+    )
+    page_session_id = (
+        ws.query_params.get("page_session_id")
+        or ws.headers.get("x-page-session-id")
+        or ws.cookies.get("page_session_id")
+    )
+    params = {
+        "session_id": session_id,
+        "gateway_session_id": session_id,
+        "client_id": client_id,
+        "page_session_id": page_session_id,
+        "client_ip": _client_ip_from_ws(ws),
+        "user_agent": ws.headers.get("user-agent"),
+        "origin": ws.headers.get("origin"),
+        "source_channel": source_channel,
+        "source_mode": source_mode,
+        "source_path": ws.url.path,
+        "page_route": ws.query_params.get("page_route"),
+        "client_surface": ws.query_params.get("client_surface"),
+    }
+    return urlencode({k: v for k, v in params.items() if v})
 
 
 # ============ 全局变量 ============
@@ -385,7 +428,13 @@ async def chat_ws_proxy(ws: WebSocket):
 
         # 连接 Worker WebSocket
         import websockets
-        ws_url = f"ws://{assigned_worker.host}:{assigned_worker.port}/ws/chat"
+        identity_qs = _worker_identity_query(
+            ws,
+            session_id=f"chatgw_{int(datetime.now().timestamp()*1000)}",
+            source_channel="demo_turnbased",
+            source_mode="chat",
+        )
+        ws_url = f"ws://{assigned_worker.host}:{assigned_worker.port}/ws/chat?{identity_qs}"
         # max_size on the client side caps how large an *incoming* frame can
         # be from the worker; chat chunks are small but we bump it for
         # symmetry with the gateway uvicorn config.
@@ -502,7 +551,13 @@ async def half_duplex_ws(ws: WebSocket, session_id: str):
 
     try:
         import websockets
-        ws_url = f"ws://{worker.host}:{worker.port}/ws/half_duplex?session_id={session_id}"
+        identity_qs = _worker_identity_query(
+            ws,
+            session_id=session_id,
+            source_channel="demo_half_duplex",
+            source_mode="audio",
+        )
+        ws_url = f"ws://{worker.host}:{worker.port}/ws/half_duplex?{identity_qs}"
 
         max_retries = 5
         for attempt in range(max_retries):
@@ -665,7 +720,13 @@ async def duplex_ws(ws: WebSocket, session_id: str):
 
     try:
         import websockets
-        ws_url = f"ws://{worker.host}:{worker.port}/ws/duplex?session_id={session_id}"
+        identity_qs = _worker_identity_query(
+            ws,
+            session_id=session_id,
+            source_channel="demo_omni" if duplex_type == "omni_duplex" else "demo_audio_duplex",
+            source_mode="video" if duplex_type == "omni_duplex" else "audio",
+        )
+        ws_url = f"ws://{worker.host}:{worker.port}/ws/duplex?{identity_qs}"
 
         # Worker 可能在清理上一个 Duplex session（GPU 显存释放等），
         # 短暂重试确保 Worker 准备就绪
@@ -1590,7 +1651,13 @@ async def realtime_ws(ws: WebSocket):
 
     try:
         import websockets
-        ws_url = f"ws://{worker.host}:{worker.port}/ws/duplex?session_id={session_id}"
+        identity_qs = _worker_identity_query(
+            ws,
+            session_id=session_id,
+            source_channel="realtime_api",
+            source_mode=mode,
+        )
+        ws_url = f"ws://{worker.host}:{worker.port}/ws/duplex?{identity_qs}"
 
         max_retries = 5
         for attempt in range(max_retries):
@@ -1670,6 +1737,7 @@ async def realtime_ws(ws: WebSocket):
                             "type": "session.created",
                             "session_id": session_id,
                             "prompt_length": msg.get("prompt_length", 0),
+                            **({"recording_session_id": msg.get("recording_session_id")} if msg.get("recording_session_id") else {}),
                         })
 
                     elif msg_type == "result":

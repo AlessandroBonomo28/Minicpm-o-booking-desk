@@ -158,6 +158,8 @@ class SessionRecorder:
         app_type: str,
         worker_id: int,
         config_snapshot: Dict[str, Any],
+        client_info: Optional[Dict[str, Any]] = None,
+        source_info: Optional[Dict[str, Any]] = None,
         data_dir: str = "data",
     ) -> None:
         """
@@ -166,12 +168,16 @@ class SessionRecorder:
             app_type: 应用类型 (chat / streaming / audio_duplex / omni_duplex)
             worker_id: 处理该 session 的 Worker GPU ID
             config_snapshot: 模型配置快照 (system_prompt, ref_audio, length_penalty, ...)
+            client_info: 客户端观测信息 (client_id, page_session_id, ip, user_agent, ...)
+            source_info: 来源信息 (channel, mode, gateway_session_id, ...)
             data_dir: 数据根目录（相对于 minicpmo45_service/）
         """
         self.session_id = session_id
         self.app_type = app_type
         self.worker_id = worker_id
         self.config_snapshot = config_snapshot
+        self.client_info = client_info or {}
+        self.source_info = source_info or {}
 
         base = os.path.join(os.path.dirname(__file__), data_dir, "sessions", session_id)
         self.session_dir = base
@@ -191,6 +197,8 @@ class SessionRecorder:
             "duration_s": None,
             "worker_id": worker_id,
             "title": f"对话 {self._start_ts.strftime('%m-%d %H:%M')}",
+            "client": self.client_info,
+            "source": self.source_info,
             "config": config_snapshot,
         }
         _write_json(os.path.join(base, "meta.json"), meta)

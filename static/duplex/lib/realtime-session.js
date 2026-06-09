@@ -19,7 +19,8 @@ export class RealtimeSession {
             outputSampleRate: config.outputSampleRate || 24000,
             getWsUrl: config.getWsUrl || (() => {
                 const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-                return `${proto}://${location.host}/v1/realtime`;
+                const url = `${proto}://${location.host}/v1/realtime`;
+                return window.ClientIdentity ? window.ClientIdentity.appendToUrl(url) : url;
             }),
         };
 
@@ -29,6 +30,7 @@ export class RealtimeSession {
             getPlaybackDelayMs: this.config.getPlaybackDelayMs,
         });
         this.sessionId = '';
+        this.recordingSessionId = '';
         this.chunksSent = 0;
         this.paused = false;
         this.forceListenActive = false;
@@ -102,6 +104,7 @@ export class RealtimeSession {
     async start(systemPrompt, preparePayload, startMediaFn) {
         this._reset();
         this.sessionId = '';
+        this.recordingSessionId = '';
         this.onMetrics({ type: 'state', sessionState: 'Connecting...' });
 
         const wsUrl = this.config.getWsUrl();
@@ -188,6 +191,7 @@ export class RealtimeSession {
                     } else if (msg.type === 'session.created') {
                         this._queueReject = null;
                         this.sessionId = msg.session_id || '';
+                        this.recordingSessionId = msg.recording_session_id || this.sessionId;
                         this._logProtoEvent('server', 'session.created',
                             `session_id=${this.sessionId}`, msg);
                         this.onQueueUpdate(null);

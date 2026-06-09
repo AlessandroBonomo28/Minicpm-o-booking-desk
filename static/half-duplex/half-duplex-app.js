@@ -433,7 +433,8 @@ function generateSessionId() {
 async function startSession() {
     const sessionId = generateSessionId();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws/half_duplex/${sessionId}`;
+    const baseUrl = `${proto}://${location.host}/ws/half_duplex/${sessionId}`;
+    const url = window.ClientIdentity ? window.ClientIdentity.appendToUrl(baseUrl) : baseUrl;
 
     turnIndex = 0;
     turnValue.textContent = '0';

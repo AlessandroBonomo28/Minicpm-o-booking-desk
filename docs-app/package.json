@@ -9,6 +9,7 @@
     "clean": "rm -rf .next out ../static/docs"
   },
   "dependencies": {
+    "@orama/tokenizers": "^3.1.18",
     "@types/mdx": "latest",
     "fumadocs-core": "latest",
     "fumadocs-mdx": "latest",

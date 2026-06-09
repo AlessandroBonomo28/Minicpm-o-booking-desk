@@ -1063,6 +1063,7 @@
 <script src="/static/shared/preset-selector.js"></script>
 <script src="/static/system-content-editor.js"></script>
 <script src="/static/user-content-editor.js"></script>
+<script src="/static/shared/client-identity.js"></script>
 <script>
 // ============ 状态 ============
 // 默认 system content list（模型最佳实践：text + ref_audio + text）
@@ -1103,11 +1104,11 @@ function init() {
     // 创建 Compose Editor（初始视图 + 对话视图）— compose 模式融入外层容器
     state.composeEditorInit = new UserContentEditor(
         document.getElementById('composeEditorInit'),
-        { placeholder: (window.I18n?.t?.typeOrRecord || 'Type or press Space to record...'), onSubmit: () => sendFirstMessage(), compose: true, showImageBtn: false }
+        { placeholder: (window.I18n?.t?.typeOrRecord || 'Type or press Space to record...'), onSubmit: () => sendFirstMessage(), compose: true, showImageBtn: true }
     );
     state.composeEditorChat = new UserContentEditor(
         document.getElementById('composeEditorChat'),
-        { placeholder: (window.I18n?.t?.typeOrRecord || 'Type or press Space to record...'), onSubmit: () => sendMessage(), compose: true, showImageBtn: false }
+        { placeholder: (window.I18n?.t?.typeOrRecord || 'Type or press Space to record...'), onSubmit: () => sendMessage(), compose: true, showImageBtn: true }
     );
 
     // 默认让 chat compose editor 成为 Space 键目标
@@ -1175,7 +1176,7 @@ function initInputEnhancements() {
 function _createAttachFileInput(getEditor) {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'audio/*,video/*';
+    input.accept = 'image/*,audio/*,video/*';
     input.multiple = true;
     input.style.display = 'none';
     document.body.appendChild(input);
@@ -1189,7 +1190,8 @@ function _createAttachFileInput(getEditor) {
 
 function _addFileToEditor(editor, file) {
     if (file.type.startsWith('image/')) {
-        return; // image upload disabled
+        const objectUrl = URL.createObjectURL(file);
+        editor.addItem({ type: 'image', file, name: file.name || 'image', objectUrl, data: null });
     } else if (file.type.startsWith('audio/')) {
         const objectUrl = URL.createObjectURL(file);
         const audio = new Audio(objectUrl);
@@ -2501,7 +2503,8 @@ async function sendChatMessage(maxTokens) {
         const { body, enableTts } = _buildChatWSBody(maxTokens, false);
 
         const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-        const ws = new WebSocket(`${wsProto}://${window.location.host}/ws/chat`);
+        const chatWsUrl = `${wsProto}://${window.location.host}/ws/chat`;
+        const ws = new WebSocket(window.ClientIdentity ? window.ClientIdentity.appendToUrl(chatWsUrl) : chatWsUrl);
 
         ws.onopen = () => ws.send(JSON.stringify(body));
 
@@ -3089,7 +3092,8 @@ async function sendStreamingMessage(maxTokens) {
 
     try {
         const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-        const ws = new WebSocket(`${wsProto}://${window.location.host}/ws/chat`);
+        const chatWsUrl = `${wsProto}://${window.location.host}/ws/chat`;
+        const ws = new WebSocket(window.ClientIdentity ? window.ClientIdentity.appendToUrl(chatWsUrl) : chatWsUrl);
 
         ws.onopen = () => ws.send(JSON.stringify(body));
 

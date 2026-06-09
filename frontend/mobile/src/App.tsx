@@ -35,6 +35,7 @@ import {
   copyToClipboard,
   saveSessionComment,
 } from './shared/share-helpers'
+import { appendClientIdentity } from './shared/client-identity'
 import { I18nContext, useI18n, detectLang, persistLang, t as getT } from './i18n'
 import type { Lang, Translations } from './i18n'
 import './App.css'
@@ -4996,7 +4997,7 @@ function App() {
 
     const wsProto =
       window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${wsProto}//${window.location.host}/ws/chat`
+    const wsUrl = appendClientIdentity(`${wsProto}//${window.location.host}/ws/chat`)
 
     // Auto-retry semantics: while no streaming data has been received yet,
     // a connection-level error / unexpected close is treated as a transient

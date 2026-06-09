@@ -4,7 +4,7 @@ description: "带视频帧的实时全双工 API 协议"
 ---
 
 > 本文档定义**视频双工**（Video Full-Duplex）模式的 WebSocket 协议。
-> 音频双工模式见 [audio-duplex-protocol.md](audio.md)。
+> 音频双工模式见 [audio-duplex-protocol.md](/zh/realtime-api/audio/)。
 
 ---
 

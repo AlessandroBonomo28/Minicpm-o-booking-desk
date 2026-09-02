@@ -1258,17 +1258,6 @@ if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
-@app.middleware("http")
-async def _static_no_cache(request, call_next):
-    # no-cache = il browser rivalida sempre (ETag/304, costo minimo): senza, un
-    # JS vecchio in cache sopravvive agli aggiornamenti e "spegne" funzionalita'
-    # nuove in modo invisibile (successo il 02/09 con use_xtts)
-    response = await call_next(request)
-    if request.url.path.startswith("/static"):
-        response.headers["Cache-Control"] = "no-cache"
-    return response
-
-
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """首页：模式选择（Turn-based / Omni Duplex / Audio Duplex）"""

@@ -255,12 +255,6 @@ class BackendProtocolSession:
         if config:
             await asyncio.to_thread(self.backend.set_duplex_config, config)
 
-        # Onora la spunta TTS del frontend: il payload manda use_tts da sempre, ma
-        # nessuno lo leggeva (la spunta non disattivava nulla — segnalato 01/09).
-        # A False i delta audio non vengono inviati: testo-solo, utile per test/debug.
-        self._use_tts = bool(params.get("use_tts", True))
-        logger.info("duplex init: use_tts=%s", self._use_tts)
-
         voice = _first_dict(params.get("voice"), params.get("defaults"))
         refs = resolve_duplex_voice_refs(
             ref_audio_path=_coalesce(params.get("ref_audio_path"), voice.get("ref_audio_path")),
@@ -500,7 +494,7 @@ class BackendProtocolSession:
                     metrics=metrics,
                     **take_usage_fields(),
                 )
-            if result.audio_data and getattr(self, "_use_tts", True):
+            if result.audio_data:
                 await self.send_output_delta(
                     "audio",
                     session_id=self.session_id,

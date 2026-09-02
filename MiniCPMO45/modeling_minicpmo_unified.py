@@ -348,10 +348,7 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
         # Load extra .pt weights to override base model (if provided)
         if pt_path is not None:
             logger.info(f"Loading extra weights: {pt_path}")
-            # mmap: i pesi restano su disco e vengono paginati al bisogno; senza,
-            # un pt da 17GB materializzato in RAM sopra al modello sfora il tetto
-            # della VM WSL (31GB) e Windows la butta giu' a meta' caricamento
-            state_dict = torch.load(pt_path, map_location="cpu", mmap=True)
+            state_dict = torch.load(pt_path, map_location="cpu")
             info = self.load_state_dict(state_dict, strict=False)
             logger.info(f"Weights loaded — missing: {len(info.missing_keys)}, unexpected: {len(info.unexpected_keys)}")
             if info.unexpected_keys:

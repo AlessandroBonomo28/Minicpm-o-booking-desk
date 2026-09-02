@@ -239,9 +239,11 @@ class DuplexConfig(BaseModel):
         description="Top-P 采样"
     )
     text_repetition_penalty: float = Field(
-        1.05, 
+        1.15,
         ge=1.0,
-        description="文本重复惩罚"
+        description="文本重复惩罚 -- alzato da 1.05: misurato che 1.15 azzera i loop di "
+                    "ripetizione sul checkpoint LoRA italiano senza toccare i pesi "
+                    "(vedi plan/recap20agosto.md)"
     )
     text_repetition_window_size: int = Field(
         512,

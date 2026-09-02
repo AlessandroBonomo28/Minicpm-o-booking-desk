@@ -1360,10 +1360,17 @@ class UnifiedProcessor(BaseProcessor):
             logger.info("Quantized model detected")
 
         # Load base model
+        load_kwargs = {}
+        if not is_quantized:
+            # bf16 diretto e caricamento a flusso: senza, il modello viene prima
+            # materializzato per intero in RAM CPU (picco misurato ~30GB, OOM su
+            # VM WSL da 31GB) e solo dopo castato e spostato su GPU
+            load_kwargs.update(torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
         self.model = MiniCPMO.from_pretrained(
             self.model_path,
             trust_remote_code=True,
             _attn_implementation=resolved_attn,
+            **load_kwargs,
         )
 
         if is_quantized:

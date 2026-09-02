@@ -11,10 +11,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import io
 import json
 import logging
+import os
+import re
 import time
+import urllib.request
 import uuid
+import wave
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
@@ -210,6 +215,9 @@ class BackendProtocolSession:
         if self.closed:
             return
         self.closed = True
+        with suppress(Exception):
+            if getattr(self, "_xtts_worker_task", None):
+                self._xtts_worker_task.cancel()
         await self._drain_finalize()
 
         if self.mode == "full_duplex":
@@ -244,16 +252,108 @@ class BackendProtocolSession:
         with suppress(Exception):
             await self.ws.close(code=1011, reason=reason)
         with suppress(Exception):
+            if getattr(self, "_xtts_worker_task", None):
+                self._xtts_worker_task.cancel()
+        with suppress(Exception):
             if self.mode == "full_duplex":
                 await asyncio.to_thread(self.backend.duplex_stop)
                 await self._drain_finalize()
                 await asyncio.to_thread(self.backend.duplex_cleanup)
         await self.state.forget(self.session_id)
 
+    _SENT_END = re.compile(r"([.!?…]+[\s\"»']*)")
+
+    def _xtts_push(self, text: str, response_id, input_id) -> None:
+        """Accumula il testo del turno; le frasi complete vanno in coda di sintesi."""
+        self._xtts_buf += text
+        while True:
+            m = self._SENT_END.search(self._xtts_buf)
+            if not m:
+                return
+            sent = self._xtts_buf[:m.end()].strip()
+            self._xtts_buf = self._xtts_buf[m.end():]
+            if len(sent) >= 2 and self._xtts_queue is not None:
+                self._xtts_queue.put_nowait((sent, response_id, input_id))
+                self._xtts_inflight += 1
+
+    def _xtts_flush(self, response_id, input_id) -> None:
+        rest = self._xtts_buf.strip()
+        self._xtts_buf = ""
+        if rest and len(rest) >= 2 and self._xtts_queue is not None:
+            self._xtts_queue.put_nowait((rest, response_id, input_id))
+            self._xtts_inflight += 1
+
+    def _xtts_synth_blocking(self, text: str) -> Optional[bytes]:
+        req = urllib.request.Request(
+            self._cascade_url.rstrip("/") + "/synth",
+            data=json.dumps({"text": text, "lang": "it"}).encode(),
+            headers={"content-type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=60) as r:
+            if r.status != 200:
+                return None
+            return r.read()
+
+    async def _xtts_worker(self) -> None:
+        """Consumatore FIFO: garantisce l'ORDINE delle frasi anche se la sintesi
+        e' asincrona rispetto al ciclo duplex (che non va mai bloccato)."""
+        while True:
+            sent, response_id, input_id = await self._xtts_queue.get()
+            try:
+                wav_bytes = await asyncio.to_thread(self._xtts_synth_blocking, sent)
+                if wav_bytes:
+                    with wave.open(io.BytesIO(wav_bytes)) as wf:
+                        sr = wf.getframerate()
+                        pcm = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+                    x = pcm.astype(np.float32) / 32768.0
+                    if sr != 24000:  # il frontend riproduce float32 @24kHz
+                        idx = np.linspace(0, len(x) - 1, int(len(x) * 24000 / sr))
+                        x = np.interp(idx, np.arange(len(x)), x).astype(np.float32)
+                    await self.send_output_delta(
+                        "audio", session_id=self.session_id, response_id=response_id,
+                        input_id=input_id,
+                        audio=base64.b64encode(x.tobytes()).decode("utf-8"),
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("cascata XTTS: frase saltata (%s: %s)", type(e).__name__, e)
+            self._xtts_inflight = max(0, self._xtts_inflight - 1)
+            # coda svuotata: ora (e solo ora) parte il "listen" rimandato, cosi'
+            # il client chiude il turno DOPO l'ultima frase, come col TTS interno
+            if self._xtts_inflight == 0 and self._xtts_pending_listen:
+                pend, self._xtts_pending_listen = self._xtts_pending_listen, None
+                with suppress(Exception):
+                    await self.send_output_delta("listen", **pend)
+
     async def _init_duplex(self, params: Dict[str, Any]) -> None:
         config = _first_dict(params.get("config"), params.get("duplex"))
         if config:
             await asyncio.to_thread(self.backend.set_duplex_config, config)
+
+        # Onora la spunta TTS del frontend: il payload manda use_tts da sempre, ma
+        # nessuno lo leggeva (la spunta non disattivava nulla — segnalato 01/09).
+        # A False i delta audio non vengono inviati: testo-solo, utile per test/debug.
+        self._use_tts = bool(params.get("use_tts", True))
+
+        # CASCATA XTTS (02/09): con use_xtts=True la voce viene dal doppiatore esterno
+        # (tools/cascade_tts_server.py, URL in env CASCADE_TTS_URL): il testo del turno
+        # si accumula per FRASI; ogni frase completa viene sintetizzata in ordine (coda
+        # FIFO per sessione) e spedita come delta audio; l'audio del TTS interno viene
+        # soppresso. Ingresso/decisione duplex: intoccati.
+        self._use_xtts = bool(params.get("use_xtts", False))
+        self._cascade_url = os.environ.get("CASCADE_TTS_URL", "http://127.0.0.1:22600")
+        self._xtts_buf = ""
+        self._xtts_queue: asyncio.Queue | None = None
+        self._xtts_worker_task = None
+        self._xtts_inflight = 0          # frasi accodate/in sintesi non ancora spedite
+        self._xtts_pending_listen = None  # delta "listen" rimandato a coda svuotata
+        if self._use_xtts:
+            self._xtts_queue = asyncio.Queue()
+            self._xtts_worker_task = asyncio.create_task(self._xtts_worker())
+        # traccia nel log cosa ha chiesto DAVVERO il client (un JS vecchio in cache
+        # del browser non manda use_xtts: qui si vede subito)
+        logger.info("duplex init: use_tts=%s use_xtts=%s cascade=%s",
+                    self._use_tts, self._use_xtts, self._cascade_url)
 
         voice = _first_dict(params.get("voice"), params.get("defaults"))
         refs = resolve_duplex_voice_refs(
@@ -469,6 +569,31 @@ class BackendProtocolSession:
                 return usage_fields
 
             if result.is_listen:
+                if getattr(self, "_use_xtts", False):
+                    if self._active_response_id is not None:
+                        # barge-in: listen con risposta ancora aperta = turno di
+                        # parola tagliato; le frasi in coda appartengono al
+                        # discorso interrotto e si scartano
+                        self._xtts_buf = ""
+                        if self._xtts_queue is not None:
+                            while not self._xtts_queue.empty():
+                                try:
+                                    self._xtts_queue.get_nowait()
+                                except asyncio.QueueEmpty:
+                                    break
+                                self._xtts_inflight = max(0, self._xtts_inflight - 1)
+                    if self._xtts_inflight > 0:
+                        # la voce in cascata sta ancora uscendo: il "listen" parte
+                        # a coda svuotata (dal worker), altrimenti il client apre
+                        # un nuovo turno a ogni frase e tronca la precedente
+                        self._xtts_pending_listen = dict(
+                            session_id=self.session_id,
+                            response_id=self._active_response_id,
+                            input_id=input_id,
+                        )
+                        self._active_response_id = None
+                        self._schedule_finalize()
+                        return
                 await self.send_output_delta(
                     "listen",
                     session_id=self.session_id,
@@ -494,7 +619,10 @@ class BackendProtocolSession:
                     metrics=metrics,
                     **take_usage_fields(),
                 )
-            if result.audio_data:
+                if getattr(self, "_use_xtts", False):
+                    self._xtts_push(result.text, self._active_response_id, input_id)
+            if result.audio_data and getattr(self, "_use_tts", True) \
+                    and not getattr(self, "_use_xtts", False):
                 await self.send_output_delta(
                     "audio",
                     session_id=self.session_id,
@@ -505,6 +633,19 @@ class BackendProtocolSession:
                     **take_usage_fields(),
                 )
             if result.end_of_turn:
+                if getattr(self, "_use_xtts", False):
+                    self._xtts_flush(self._active_response_id, input_id)
+                    if self._xtts_inflight > 0:
+                        # come sopra: il "listen" di fine turno esce dopo
+                        # l'ultima frase sintetizzata, mai prima
+                        self._xtts_pending_listen = dict(
+                            session_id=self.session_id,
+                            response_id=self._active_response_id,
+                            input_id=input_id,
+                        )
+                        self._active_response_id = None
+                        self._schedule_finalize()
+                        return
                 await self.send_output_delta(
                     "listen",
                     session_id=self.session_id,

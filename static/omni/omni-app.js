@@ -225,6 +225,10 @@ const _omniPreset = new PresetSelector({
             document.getElementById('systemPrompt').value = preset.system_prompt;
             settingsPersistence.save();
         }
+        if (preset && preset.length_penalty && document.getElementById('omniLengthPenalty')) {
+            // il preset definisce il punto operativo: vince sulla localStorage
+            document.getElementById('omniLengthPenalty').value = preset.length_penalty;
+        }
         if (audioLoaded && preset && preset.ref_audio && preset.ref_audio.data) {
             refAudio.setAudio(preset.ref_audio.data, preset.ref_audio.name, preset.ref_audio.duration);
         }

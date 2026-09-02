@@ -262,3 +262,21 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   d'uso diventa Omni, il contratto di distribuzione cambia (token video in ogni unita')
   e v1.3 va ri-gateata in quel contesto. Aggiunto preset italiano per Omni (4e0cd1b) e
   applicazione del length_penalty da preset nella pagina Omni.
+- 02/09 (sera) — **Prompt nativo vince, misurato dal vivo**: pagina Audio + "Streaming Omni
+  Conversation." → turni max 9-14 s, ascolto dominante (L 70-77 vs S 25-40), cedimenti
+  33-60% con latenza 0.7-1.4 s; con il prompt lungo turni 17-23 s; Omni+nativo monologhi
+  26-42 s. Il replay a 3 bracci (interruzioni asincrone) non lo vedeva: dal vivo il timing
+  adattivo di Alessandro conta. Lezione strutturale: il prompt di deploy deve stare vicino
+  al contesto di training del base (3 parole). Aggiunto preset "Italiano (prompt nativo)"
+  in audio_duplex e omni, entrambi gli alberi. Da valutare: ri-addestrare v1.x con
+  contesto nativo+riga lingua invece del paragrafo di istruzioni.
+- 02/09 (sera) — **Perché Omni "risponde mentre parla" e Audio no** (paper §4.3 + FAQ
+  upstream): i dati full-duplex di training contengono SEMPRE il video (segmenti a bassa
+  rilevanza audio-visiva scartati) → le unità solo-audio sono fuori distribuzione per il
+  riflesso "rispondi a domande nuove mentre parli"; la FAQ lo ammette ("may not
+  immediately respond… while speaking", solo per Audio; e "LP 1.3 → interruption
+  difficult"). Le mie metriche misuravano il CEDERE il turno (nessuna pagina forte),
+  non il virare sul contenuto. PROSSIMO ESPERIMENTO (variabile singola): fotogramma
+  COSTANTE in ogni unità dalla pagina Audio (nello screenshot Omni la webcam era
+  coperta e andava comunque meglio) → se basta la presenza dei token video, si porta
+  nel training set (unità italiane + frame fisso).

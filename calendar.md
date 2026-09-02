@@ -194,6 +194,21 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
       (l'install CosyVoice2 e' difettoso; XTTS ha cache locale e fu giudicato
       accettabile all'ascolto) — scelta d'architettura da fare INSIEME, non pezza.
 
+- [ ] **5. Omni italiano — training con blocco visivo (via appuntata il 02/09, NON lanciata
+      per scelta di Alessandro)**. Causa misurata: v1.3 in Omni degenera (loop 0.61,
+      22/24 parole incollate) perche' ogni unita' Omni contiene `<image>`+64 embedding
+      visivi+`</image>` prima dell'audio, sequenza mai vista dalla LoRA (solo-audio).
+      Piano quando si decidera' di farlo:
+      1. trainer: inserire il blocco visivo nell'unita' (dopo `<unit>`, prima dei 10
+         embedding audio), token visivi NON supervisionati (~20 righe);
+      2. fotogrammi: mix uniformi (nero/grigio: il caso che rompe) + costanti realistici +
+         qualche frame vario;
+      3. corsa: stadio-ruolo dall'adapter it11, ~300 passi (<1 h);
+      4. gate: quelli audio invariati + gate in contesto Omni col replay a frame
+         (`tools/replay/replay_omni_frames.py`, bracci reale/nero/solo-audio);
+      5. predizione: frame nero da loop 0.61 → ~0, incollate 22/24 → ~0, audio puro invariato.
+      Nel frattempo Omni+v1.3 si usa con camera scoperta e scena reale (braccio A: regge).
+
 ---
 
 ## Incertezze dichiarate (per leggere i ritardi, se arrivano)

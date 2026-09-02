@@ -280,3 +280,13 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   COSTANTE in ogni unità dalla pagina Audio (nello screenshot Omni la webcam era
   coperta e andava comunque meglio) → se basta la presenza dei token video, si porta
   nel training set (unità italiane + frame fisso).
+- 02/09 (sera, 17:45) — **Omni + v1.3 va in loop: causa isolata con replay a 3 bracci**
+  (stessa sessione italiana di Alessandro rimandata al backend v1.3): solo-audio →
+  sano (loop 0.00, giunzioni incollate 0/7); fotogrammi reali (camera scura) → sano
+  (0.00, 1/20); **fotogramma NERO uniforme → degenera** (loop 0.61, 22/24 parole
+  incollate, 25 speak/3 listen) = la firma vista dal vivo. La LoRA non ha mai visto
+  `<unit><image>V64</image>audio`: con un'immagine uniforme l'embedding visivo spinge
+  l'LLM adattato in un attrattore ripetitivo e rompe la convenzione degli spazi.
+  Cura strutturale: addestrare le unità italiane CON il blocco visivo (frame costanti +
+  uniformi + qualche frame vario), stadio-ruolo da it11 (~300 passi), gate anche in
+  contesto Omni (replay con frame). Strumenti di replay salvati in tools/replay/.

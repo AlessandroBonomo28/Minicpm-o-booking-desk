@@ -36,7 +36,7 @@ distribuzione — e il LoRA si lega a quell'angolo.
 | 8 | canale/formato audio | 16 kHz mono lato utente | 16 kHz mono microfono | ✅ allineati (fix mixdown, 20/08) |
 | 9 | silenzio post-turno | dati identità: coda di silenzio + gap | l'utente tace quando vuole | ✅ coperto dal mix identità+conversazione continua |
 | 10 | concatenazione del testo tra chunk | unità codificate da sole (primo token SENZA spazio) | frontend concatena VERBATIM (`+=`) → parole incollate "chetu" | ❌ **ELIMINATA (22/08 sera)**: unità di continuazione codificate con spazio iniziale (it_09); e l'harness ora concatena verbatim come la demo (il vecchio `" ".join` mascherava il difetto) |
-| 11 | modalità della pagina demo | unità solo-audio (`/audio_duplex`, mode=audio): nessun token video | Audio Duplex = allineato; **Omni** (`/omni`, mode=video) aggiunge un fotogramma webcam (token V) in OGNI unità, length_penalty default 1.0, preset nativo en/zh | ⚠️ **APERTA (02/09)**: se l'uso diventa Omni, v1.3 va ri-gateata in quel contesto (training senza token V); preset italiano per Omni aggiunto, taratura 1.05 applicata dal preset |
+| 11 | modalità della pagina demo | unità solo-audio (`/audio_duplex`): nessun token video | **Omni** (`/omni`) inserisce in OGNI unità `<image>`+64 embedding visivi+`</image>` prima dell'audio | ❌ **CONFERMATA CAUSA DI LOOP (02/09, replay 3 bracci)**: frame nero uniforme → loop 0.61 e 22/24 parole incollate; solo-audio → sano. Da eliminare addestrando le unità con il blocco visivo (frame costanti/uniformi/vari) e gateando in contesto Omni |
 
 ## Regole operative
 

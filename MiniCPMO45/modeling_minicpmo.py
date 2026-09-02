@@ -2366,7 +2366,7 @@ class MiniCPMODuplex:
 
         if pt_path is not None:
             logger.info(f"Loading checkpoint from {pt_path}")
-            state_dict = torch.load(pt_path, map_location="cpu")
+            state_dict = torch.load(pt_path, map_location="cpu", mmap=True)
             info = self.model.load_state_dict(state_dict, strict=False)
             logger.warning(info)
             del state_dict

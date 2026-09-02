@@ -18,6 +18,7 @@ import json
 import logging
 import math
 import os
+import re
 import tempfile
 import threading
 import time
@@ -4332,8 +4333,23 @@ class DuplexCapability:
         self.forbidden_token_ids = [self.tts_pad_id] + list(bad_token_ids)
         # self.forbidden_token_ids = [] + list(bad_token_ids)
         
+        # Control tokens must be declared as special, otherwise they land in
+        # decoder.generated_tokens and the text repetition penalty ends up penalizing
+        # <|listen|>/<|speak|> at every decision point, i.e. skewing turn-taking.
+        self.control_token_ids = [
+            self.listen_token_id,
+            self.speak_token_id,
+            self.tts_bos_token_id,
+            self.chunk_eos_token_id,
+            self.chunk_tts_eos_token_id,
+            self.turn_eos_token_id,
+        ]
+
         self.decoder = StreamDecoder(
-            llm=self.model.llm, tokenizer=self.tokenizer, forbidden_token_ids=self.forbidden_token_ids
+            llm=self.model.llm,
+            tokenizer=self.tokenizer,
+            special_token_ids=self.control_token_ids,
+            forbidden_token_ids=self.forbidden_token_ids,
         )
         
         # 滑窗模式: "off" / "basic" / "context"
@@ -5072,14 +5088,32 @@ class DuplexCapability:
         _pending_terminator_id = None  # 延迟 feed 的终止符，和 </unit> 合并
         _chunk_has_tts_pad = False
 
-        for j in range(max_new_speak_tokens_per_chunk):
-            if j == max_new_speak_tokens_per_chunk - 1:
+        # Taglio allineato ai confini di parola: quando il budget (token o caratteri) si
+        # esaurisce a meta' parola, si continua per una grazia limitata finche' il token
+        # campionato inizia una parola NUOVA (spazio/punteggiatura in testa) e si taglia
+        # li'. Un chunk_eos iniettato a meta' parola e' fuori distribuzione rispetto al
+        # training (i target iniziano sempre a confine di parola) e produce la
+        # frammentazione "fac co": il chunk successivo riparte come parola nuova.
+        WORD_ALIGN_GRACE_TOKENS = 4
+        WORD_ALIGN_GRACE_CHARS = 6
+        CHUNK_CHAR_LIMIT = 28
+        _hard_token_cap = max_new_speak_tokens_per_chunk + WORD_ALIGN_GRACE_TOKENS
+
+        def _starts_new_word(piece: str) -> bool:
+            if not piece:
+                return False
+            c = piece[0]
+            # l'apostrofo NON e' un confine: "dell" + "'altro" e' la stessa parola
+            return c.isspace() or c in ".,;:!?…)»\"”"
+
+        for j in range(_hard_token_cap):
+            if j == _hard_token_cap - 1:
                 if self.ls_mode == "explicit":
                     # 不立即 feed，记录下来和 </unit> 合并
                     _pending_terminator_id = self.chunk_eos_token_id
                     self.total_ids.append(self.chunk_eos_token_id)
                     _tok_str = self.tokenizer.decode([self.chunk_eos_token_id])
-                    _token_trace.append(f"  j={j} CHUNK_EOS id={self.chunk_eos_token_id} '{_tok_str}' (deferred)")
+                    _token_trace.append(f"  j={j} CHUNK_EOS id={self.chunk_eos_token_id} '{_tok_str}' (deferred, hard cap)")
                     break
 
             t_step = time.time()
@@ -5125,18 +5159,31 @@ class DuplexCapability:
                 # normal speak
                 self.current_turn_ended = False
 
-                # 在 feed 之前检查字符长度，超限则不 feed、不记录，直接终止
+                # 在 feed 之前检查预算（字符 e token）。Il taglio avviene:
+                #  - a un confine di parola appena il budget "morbido" e' superato, oppure
+                #  - incondizionatamente all'hard cap (budget + grazia), anche a meta' parola.
                 if j != 0:
                     _test_ids = total_ids_in_unit + [last_id.item()]
                     _chunk_text = self.tokenizer.decode(_test_ids, skip_special_tokens=True)
-                    if len(_chunk_text) >= 28:
+                    _over_soft = (len(_chunk_text) >= CHUNK_CHAR_LIMIT
+                                  or j >= max_new_speak_tokens_per_chunk - 1)
+                    _over_hard = len(_chunk_text) >= CHUNK_CHAR_LIMIT + WORD_ALIGN_GRACE_CHARS
+                    if _over_soft and (_starts_new_word(_tok_str) or _over_hard):
                         self.total_ids.pop()
+                        # The token is rejected and never fed to the KV cache, so it must not
+                        # stay in the repetition-penalty history either: otherwise the exact
+                        # continuation of the truncated word is penalized in the next chunk,
+                        # and a space-prefixed variant wins ("fac" + " co").
+                        if self.decoder.generated_tokens and \
+                                self.decoder.generated_tokens[-1] == last_id.item():
+                            self.decoder.generated_tokens.pop()
                         if self.ls_mode == "explicit":
                             _pending_terminator_id = self.chunk_eos_token_id
                             self.total_ids.append(self.chunk_eos_token_id)
                         _kept_text = self.tokenizer.decode(total_ids_in_unit, skip_special_tokens=True) if total_ids_in_unit else ""
+                        _cut_kind = "boundary" if _starts_new_word(_tok_str) else "HARD"
                         _token_trace.append(
-                            f"  j={j} CHAR_LIMIT len={len(_chunk_text)}>=20, rejected token id={last_id.item()} '{_tok_str}', "
+                            f"  j={j} BUDGET_CUT[{_cut_kind}] len={len(_chunk_text)}, rejected token id={last_id.item()} '{_tok_str}', "
                             f"kept len={len(_kept_text)} text='{_kept_text}' (forced chunk_eos, not fed to KV)"
                         )
                         break

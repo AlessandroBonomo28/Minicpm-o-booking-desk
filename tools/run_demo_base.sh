@@ -21,9 +21,10 @@ echo "=== backend BASE, codice upstream puro (carica ~4 min) — $(date '+%H:%M'
 setsid "$PY" -m py_backend.server --host 0.0.0.0 --port 22500 --gpu-id 0 \
     --model-path "$MAIN/modelli/MiniCPM-o-4_5" \
     > "$LOGS/backend.log" 2>&1 < /dev/null &
+BACKPID=$!
 for i in $(seq 1 90); do
   curl -sf http://127.0.0.1:22500/health >/dev/null 2>&1 && break
-  pgrep -f "py_backend.server" >/dev/null || { echo "BACKEND MORTO"; tail -15 "$LOGS/backend.log"; exit 1; }
+  kill -0 "$BACKPID" 2>/dev/null || { echo "BACKEND MORTO"; tail -15 "$LOGS/backend.log"; exit 1; }
   sleep 5
 done
 curl -sf http://127.0.0.1:22500/health >/dev/null || { echo "BACKEND NON RISPONDE"; exit 1; }

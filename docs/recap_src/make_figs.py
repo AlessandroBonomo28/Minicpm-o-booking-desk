@@ -101,3 +101,27 @@ ax.text(0, 30.8, "30 GB -> crash", ha="center", fontsize=9); ax.text(1, 4.7, "3.
 ax.set_title("Caricamento pesi: da 4 minuti e crash a 30 secondi", fontsize=11)
 ax.spines[["top", "right"]].set_visible(False); plt.tight_layout(); plt.savefig(f"{S}/fig_ram.png", dpi=170); plt.close()
 print("figure OK")
+
+# --- Fig F: MiniCPM-o 2.6 vs 4.5 ---
+rows26 = [("Occhio", "SigLIP-400M", "SigLIP 418M + resampler\n(LLaVA-UHD, 16x compressione)", False),
+          ("Orecchio", "Whisper-medium 300M", "Whisper Medium 307M + projector\n(streaming a chunk, 10 token/s)", False),
+          ("Cervello", "Qwen2.5-7B", "Qwen3-8B (solo testo, 3-4 token/s)", True),
+          ("Laringe", "ChatTTS-200M", "Speech token decoder 0.3B (S3, 25/s)\n+ vocoder flow-matching", True),
+          ("Tempo", "TDM: fette di percezione,\nrisposta A TURNI (VAD)", "Omni-Flow: fette da 1 s, token\nlisten/speak PRIMA del contenuto:\nFULL-DUPLEX e proattivo", True),
+          ("Allineamento\ntesto-voce", "-", "TAIL (isocronia)", True),
+          ("Training", "SFT", "SFT + RL (GRPO, RLAIF-V)", True)]
+fig, ax = plt.subplots(figsize=(11, 6.4)); ax.axis("off"); ax.set_xlim(0, 10); ax.set_ylim(-0.4, len(rows26) + 0.9)
+ax.text(0.9, len(rows26) + 0.45, "MiniCPM-o 2.6 (gen 2025, ~8B)", fontsize=12, fontweight="bold", ha="left")
+ax.text(5.2, len(rows26) + 0.45, "MiniCPM-o 4.5 (2026, 9.34B)", fontsize=12, fontweight="bold", ha="left")
+for i, (mod, a, b, new) in enumerate(reversed(rows26)):
+    y = i
+    ax.text(0.05, y + 0.4, mod, fontsize=9.5, fontweight="bold", va="center")
+    ax.add_patch(FancyBboxPatch((0.9, y + 0.05), 4.0, 0.75, boxstyle="round,pad=0.03", fc="#eceff1", ec="#37474f", lw=1))
+    ax.text(2.9, y + 0.425, a, fontsize=8.6, ha="center", va="center")
+    ax.add_patch(FancyBboxPatch((5.2, y + 0.05), 4.7, 0.75, boxstyle="round,pad=0.03",
+                                fc=("#c8e6c9" if new else "#eceff1"), ec="#37474f", lw=1))
+    ax.text(7.55, y + 0.425, b, fontsize=8.6, ha="center", va="center")
+    ax.annotate("", xy=(5.15, y + 0.425), xytext=(4.95, y + 0.425), arrowprops=dict(arrowstyle="->", lw=1, color="#37474f"))
+ax.text(5, -0.3, "verde = cambiato in modo sostanziale tra 2.6 e 4.5", fontsize=8.5, ha="center", style="italic", color="#2e7d32")
+plt.tight_layout(); plt.savefig(f"{S}/fig_26vs45.png", dpi=170); plt.close()
+print("fig 2.6 OK")

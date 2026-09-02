@@ -79,6 +79,25 @@ E += [img(f"{S}/paper_fig4.png", 16.5),
       Paragraph("<b>Cosa non c'era nel modello originale</b>: nessuna lingua oltre cinese e inglese per la voce (il paper stesso ammette instabilità e mescolanze zh/en), nessuna valutazione dell'interruzione (la parola «barge-in» non compare), e nessuna ricetta ufficiale per riaddestrare la modalità omni/duplex (l'issue #1071 upstream lo conferma: il fine-tuning ufficiale è solo «vision»). Tutto il training che segue lo abbiamo costruito noi dal paper.", P),
       PageBreak()]
 
+
+# ---------- 2b. 2.6 vs 4.5 ----------
+E += [Paragraph("2b. In cosa è diverso da MiniCPM-o 2.6", H1),
+      Paragraph("MiniCPM-o 2.6 (gennaio 2025) è il predecessore diretto: stessa famiglia, stessa idea «omni», ma una generazione indietro su tre punti che per noi contano molto.", P),
+      img(f"{S}/fig_26vs45.png", 16.8),
+      Paragraph("Modulo per modulo: 2.6 a sinistra, 4.5 a destra. In verde ciò che è cambiato in modo sostanziale.", CAP),
+      tbl([["Aspetto", "MiniCPM-o 2.6", "MiniCPM-o 4.5", "Perché conta per il nostro lavoro"],
+           ["Conversazione", "<b>A turni</b>: percepisce in streaming (TDM), ma risponde quando hai finito di parlare (VAD).", "<b>Full-duplex</b>: ogni secondo decide se parlare, anche mentre sta parlando; può intervenire da solo.", "Tutta la nostra pipeline dati è nel formato «unità da 1 s + token listen/speak»: esiste solo in 4.5. Su 2.6 non si trasferirebbe."],
+           ["Cervello", "Qwen2.5-7B", "Qwen3-8B, che genera solo testo", "Il cervello solo-testo rende efficace la LoRA sull'LLM senza toccare la voce."],
+           ["Laringe", "ChatTTS-200M", "Decoder vocale 0.3B (token S3 a 25/s) + vocoder flow-matching, guidato dagli stati nascosti", "È il pezzo nuovo che decide la pronuncia; sa solo zh/en in entrambe le generazioni."],
+           ["Allineamento testo-voce", "assente", "TAIL: il testo di ogni secondo dura un secondo di voce", "Il vincolo di isocronia ha guidato la nostra densità testo/unità (v1.3)."],
+           ["Training", "SFT", "SFT + RL (GRPO, RLAIF-V)", "Il 4.5 arriva già più «disciplinato» sul formato; noi partiamo da lì."],
+           ["Lingue voce", "cinese, inglese", "cinese, inglese", "L'italiano manca in entrambi: il nostro lavoro è necessario in ogni caso."],
+           ["Deploy", "int4 ~7 GB, iPad, llama.cpp", "int4 &lt;12 GB, RTF 0.21 su RTX 4090", "Entrambi girano in locale; 4.5 costa un po' di più ma resta consumer."]],
+          [2.6, 4.2, 4.6, 5.8]),
+      Spacer(1, 6),
+      Paragraph("<b>In una frase</b>: 2.6 era un modello che <i>ascolta mentre guarda</i> ma parla a turni; 4.5 è il primo della famiglia che <i>parla mentre ascolta</i>. Per questo abbiamo scelto 4.5: il full-duplex nativo è proprio la capacità che volevamo in italiano, e la sua struttura (cervello solo-testo + laringe separata) è quella che rende il training mirato possibile su una GPU sola.", P),
+      PageBreak()]
+
 # ---------- 3. cosa abbiamo cambiato ----------
 E += [Paragraph("3. Cosa abbiamo cambiato, modulo per modulo", H1),
       img(f"{S}/fig_parametri.png", 15),
@@ -160,6 +179,7 @@ E += [Paragraph(x, PS) for x in [
     "Storia tecnica del progetto: calendar.md, plan/audit-20agosto-fable.md, plan/contratto-distribuzione.md, plan/modus-operandi.md; releases in training/releases/ (LEGGIMI.md).",
     "FLEXI (arXiv 2509.22243), Full-Duplex-Bench v1.5 (arXiv 2507.23159), FD-Bench (arXiv 2507.19040): benchmark 2025-26 sul barge-in.",
     "Moshi (arXiv 2410.00037), J-Moshi (arXiv 2506.02979), Human-1 (arXiv 2604.23295), Raon-Speech (arXiv 2605.23912): ricette e scala dati per lingue nuove.",
+    "MiniCPM-o 2.6: model card openbmb/MiniCPM-o-2_6 (Hugging Face, gennaio 2025): SigLip-400M, Whisper-medium-300M, ChatTTS-200M, Qwen2.5-7B, TDM omni streaming, conversazione a turni.",
     "Qwen3-Omni (arXiv 2509.17765) e Qwen3.5-Omni (arXiv 2604.15804): confronto architetturale (Thinker-Talker, a turni, solo API per 3.5)."]]
 
 def footer(canvas, doc):

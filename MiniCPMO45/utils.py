@@ -1189,9 +1189,7 @@ class StreamDecoder:
     def __init__(self, llm, tokenizer, special_token_ids=None, forbidden_token_ids=None):
         self.m = llm
         self.tokenizer = tokenizer
-        # NOTE: this used to be eos_token_id (151645, <|im_end|>), which made
-        # listen_prob_scale / listen_top_k act on the wrong token.
-        self.listen_id = self.tokenizer.convert_tokens_to_ids("<|listen|>")
+        self.listen_id = self.tokenizer.eos_token_id
 
         self.chunk_eos_id = self.tokenizer.convert_tokens_to_ids("<|chunk_eos|>")
         self.chunk_tts_eos_id = self.tokenizer.convert_tokens_to_ids("<|chunk_tts_eos|>")
@@ -2147,10 +2145,7 @@ class StreamDecoder:
             if mode == "greedy":
                 sampled_token = torch.argmax(logits[0]).item()
             else:
-                # NOTE: the docstring says "apply temperature" — the code sampled at T=1.0,
-                # so with temperature<1 configured, chunk_eos fired more often than the
-                # sampling strategy intended (premature chunk closures, mid-word cuts).
-                original_probs = F.softmax(logits[0] / temperature, dim=-1)
+                original_probs = F.softmax(logits[0], dim=-1)
                 _validate_sampling_probs(original_probs, context="StreamDecoder.decode.initial_chunk_eos_sample")
                 sampled_token = torch.multinomial(original_probs, num_samples=1).item()
 
@@ -2174,15 +2169,14 @@ class StreamDecoder:
             recent_tokens = list(set(recent_tokens))
 
             # apply penalty to repeated tokens
-            # NOTE: the sign matters. Dividing a NEGATIVE logit by penalty>1 moves it toward
-            # zero, i.e. makes the repeated token MORE likely — the opposite of the intent.
-            # Same convention as the length_penalty block below (and as CTRL/HF).
             for token_id in recent_tokens:
                 if token_id < logits.size(-1):  # ensure token_id is in vocabulary range
-                    if logits[0, token_id] > 0:
+                    if text_repetition_penalty > 1.0:
+                        # penalize repetition: decrease logits
                         logits[0, token_id] /= text_repetition_penalty
                     else:
-                        logits[0, token_id] *= text_repetition_penalty
+                        # encourage repetition: increase logits
+                        logits[0, token_id] *= 1.0 / text_repetition_penalty
 
         # 2. apply length penalty to turn_eos token
         # higher length_penalty → suppress turn_eos → model 更不容易结束当前 turn，倾向更长输出

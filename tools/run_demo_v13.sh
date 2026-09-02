@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 # Demo DEFAULT (02/09): backend v1.3 it11_b12_merged.pt (validato dal vivo, TTS
-# interno) + server XTTS opzionale avviato DOPO il backend (mai in concorrenza:
-# il picco RAM del boot va rispettato). A spunta "XTTS (ita)" spenta (default)
-# la sessione e' identica alla v1.3 di sempre; accesa, la voce esce da XTTS.
+# interno). L'opzione XTTS e' stata SCARTATA da Alessandro il 02/09.
 # Uso: bash tools/run_demo_v13.sh
 set -uo pipefail
 PY=/home/alex/miniconda3/envs/minicpm/bin/python
-PYX=/home/alex/miniconda3/envs/xtts/bin/python
 ROOT=/home/alex/progetti/MiniCPM-o-Demo
 LOGS=$ROOT/logs_demo
 PT=$ROOT/training/releases/v1_3_voce_intera/it11_b12_merged.pt
@@ -43,15 +40,7 @@ curl -s -X PUT -H "content-type: application/json" \
     --data '{"endpoint":"127.0.0.1:22400","gpu_group":"gpu-0"}' \
     http://127.0.0.1:8007/internal/workers/worker-0 >/dev/null
 
-echo "=== XTTS server (dopo il backend, per il picco RAM) — $(date '+%H:%M')"
-setsid "$PYX" tools/cascade_tts_server.py --port 22600 --engine xtts \
-    > "$LOGS/xtts_server.log" 2>&1 < /dev/null &
-for i in $(seq 1 40); do
-  curl -sf http://127.0.0.1:22600/health >/dev/null 2>&1 && break; sleep 5
-done
-
 echo "--- verifiche — $(date '+%H:%M')"
-curl -sf http://127.0.0.1:22600/health >/dev/null && echo "xtts: OK" || { echo "xtts: KO"; tail -5 "$LOGS/xtts_server.log"; }
 curl -sf http://127.0.0.1:22400/health >/dev/null && echo "worker: OK" || echo "worker: KO"
 curl -skf https://127.0.0.1:8006/ >/dev/null && echo "gateway: OK" || echo "gateway: KO"
 grep -iE "weights loaded|missing|unexpected" "$LOGS/backend.log" | tail -3

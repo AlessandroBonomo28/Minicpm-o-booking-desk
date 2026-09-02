@@ -111,7 +111,7 @@
             <div class="cg-body">
                 <div class="cg-row inline" data-tip="Buffer before playback starts, higher = more stable but more latency">
                     <span class="cg-label" style="flex:none;">Delay</span>
-                    <input type="number" class="cg-input-sm" id="playbackDelay" value="200" min="0" max="2000" step="50">
+                    <input type="number" class="cg-input-sm" id="playbackDelay" value="600" min="0" max="2000" step="50">
                     <span style="font-size:10px;color:#888;">ms</span>
                 </div>
                 <div class="cg-row inline" data-tip="Max KV cache size, limits conversation context length">
@@ -127,10 +127,6 @@
                 <div class="cg-row inline" data-tip="Enable text-to-speech audio response for the session">
                     <span class="cg-label" style="flex:none;">TTS Response</span>
                     <input type="checkbox" id="ttsEnabled" checked>
-                </div>
-                <div class="cg-row inline" data-tip="Voce dal doppiatore esterno XTTS (italiano vero, per frase) invece del TTS interno pron_04">
-                    <span class="cg-label" style="flex:none;">XTTS (ita)</span>
-                    <input type="checkbox" id="xttsEnabled">
                 </div>
             </div>
         </details>

@@ -741,6 +741,19 @@ async def get_presets():
     return _presets_cache
 
 
+@app.post("/api/tool_agent/decide")
+async def tool_agent_decide(request: Request):
+    """Ramo HUD: inoltra al modello SEPARATO di tool calling (tools/tool_agent_server.py, :22700)."""
+    import httpx
+    body = await request.body()
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post("http://127.0.0.1:22700/decide", content=body, headers={"content-type": "application/json"})
+        return JSONResponse(status_code=r.status_code, content=r.json())
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"error": f"tool agent non raggiungibile: {type(e).__name__}: {e}"})
+
+
 @app.get("/api/presets/{mode}/{preset_id}/audio")
 async def get_preset_audio(mode: str, preset_id: str):
     """按需加载单个 preset 的音频数据"""

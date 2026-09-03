@@ -134,6 +134,7 @@ async function startSession() {
     setHud('IDLE', '', '');
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
+    transcript.length = 0; lastDecidedText = '';
 
     session = new RealtimeSession('hud', {
         getMaxKvTokens: () => 8192,
@@ -202,12 +203,60 @@ function onModelText(text) {
         awaitingReaction = false;
         hudLog('hud', `REAZIONE +${(now() - hud.lastFrameAt).toFixed(1)}s dopo il frame (stato ${hud.state}): "${text.slice(0, 60)}"`);
     }
-    if ($('autoTrig').checked && hud.state === 'IDLE' && text !== lastSeenText) {
+    const mode = $('trigMode').value;
+    if (mode === 'regex' && hud.state === 'IDLE' && text !== lastSeenText) {
         let re = null;
         try { re = new RegExp($('autoRegex').value, 'i'); } catch (_) {}
-        if (re && re.test(text)) startQuery('auto: il modello ha detto "' + (text.match(re) || [''])[0] + '"');
+        if (re && re.test(text)) startQuery('regex: il modello ha detto "' + (text.match(re) || [''])[0] + '"');
     }
+    if (mode === 'tool' && hud.state === 'IDLE') scheduleToolDecision(text);
     lastSeenText = text;
+}
+
+// ---- modello SEPARATO di tool calling: legge la trascrizione e decide la chiamata
+const transcript = [];          // [{role:'assistant'|'user', text}]
+let toolTimer = null, toolBusy = false, lastDecidedText = '';
+function noteAssistantText(text) {
+    if (!text) return;
+    if (transcript.length && transcript[transcript.length - 1].role === 'assistant') transcript[transcript.length - 1].text = text;
+    else transcript.push({ role: 'assistant', text });
+    if (transcript.length > 8) transcript.shift();
+}
+function scheduleToolDecision(text) {
+    noteAssistantText(text);
+    clearTimeout(toolTimer);
+    // aspetta che il testo del turno si assesti (~1.2 s senza nuovi delta), poi chiede al modello separato
+    toolTimer = setTimeout(() => askToolAgent(text), 1200);
+}
+async function askToolAgent(text) {
+    if (toolBusy || hud.state !== 'IDLE' || text === lastDecidedText || (text || '').length < 8) return;
+    toolBusy = true; lastDecidedText = text;
+    try {
+        const t0 = performance.now();
+        const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ transcript }) });
+        const d = await r.json();
+        const dt = ((performance.now() - t0) / 1000).toFixed(1);
+        if (!r.ok) { hudLog('warn', `tool agent: ${d.error || r.status}`); return; }
+        const calls = d.tool_calls || [];
+        if (!calls.length) { hudLog('sys', `tool agent (${dt}s): nessuna azione — "${(d.raw || '').slice(0, 60)}"`); return; }
+        for (const c of calls) {
+            hudLog('hud', `TOOL AGENT (${dt}s): ${c.name}(${JSON.stringify(c.arguments)})`);
+            if (c.name === 'check_availability' && hud.state === 'IDLE') {
+                const a = c.arguments || {};
+                if (a.date) $('qDate').value = String(a.date);
+                if (a.time) $('qTime').value = String(a.time);
+                startQuery('modello separato');
+            }
+        }
+    } catch (e) { hudLog('warn', 'tool agent errore: ' + e.message); }
+    finally { toolBusy = false; }
+}
+async function checkToolAgent() {
+    try {
+        const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transcript: [] }) });
+        $('toolAgentState').textContent = r.ok ? 'tool agent: pronto' : 'tool agent: non raggiungibile';
+    } catch (_) { $('toolAgentState').textContent = 'tool agent: non raggiungibile'; }
 }
 
 // ------------------------------------------------------------------ UI
@@ -218,3 +267,4 @@ $('btnQuery').onclick = () => startQuery('manuale');
 $('btnReset').onclick = () => { clearTimeout(queryTimer); setHud('IDLE', '', ''); };
 $('btnFrame').onclick = () => hudSync(true);
 drawHud();
+checkToolAgent();

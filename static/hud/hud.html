@@ -59,9 +59,17 @@
         <button class="primary" id="btnQuery" disabled>Avvia verifica → HUD "IN CORSO", poi esito</button>
         <button id="btnReset" disabled>Reset HUD (IDLE)</button>
       </div>
-      <div class="row"><label>Auto-trigger</label>
-        <input type="checkbox" id="autoTrig" checked> <span class="small">avvia la verifica quando il modello dice:</span>
-        <input type="text" id="autoRegex" value="controll|verific|un attimo|un momento|guardo" style="width:230px"></div>
+      <div class="row"><label>Trigger</label>
+        <select id="trigMode">
+          <option value="tool" selected>modello separato di tool calling (Qwen3-1.7B)</option>
+          <option value="regex">regex sul testo dell'omni</option>
+          <option value="off">solo manuale</option>
+        </select>
+        <span class="small" id="toolAgentState">tool agent: ?</span></div>
+      <div class="row"><label>Regex (se scelta)</label>
+        <input type="text" id="autoRegex" value="controll|verific|un attimo|un momento|guardo" style="width:260px"></div>
+      <div class="row"><label>Modello separato</label>
+        <span class="small">legge la trascrizione (operatore = testo dell'omni; utente = ciò che l'omni ripete) e chiama <code>check_availability(date,time)</code>; data/ora estratte finiscono sull'HUD (eco della richiesta).</span></div>
       <div class="row"><label>Frame iniziale</label>
         <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
       <div class="row"><label>Frame manuale</label><button id="btnFrame" disabled>Invia il frame corrente ora</button></div>

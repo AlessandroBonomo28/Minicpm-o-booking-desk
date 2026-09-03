@@ -28,6 +28,8 @@ for i in $(seq 1 90); do
 done
 curl -sf http://127.0.0.1:22500/health >/dev/null || { echo "BACKEND NON RISPONDE"; exit 1; }
 
+echo "=== tool agent (Qwen3-1.7B, modello separato per il tool calling) — $(date '+%H:%M')"
+setsid "$PY" tools/tool_agent_server.py --port 22700 > "$LOGS/tool_agent.log" 2>&1 < /dev/null &
 echo "=== worker + gateway — $(date '+%H:%M')"
 setsid "$PY" worker.py --host 0.0.0.0 --port 22400 --gpu-id 0 \
     --backend-server-url http://127.0.0.1:22500 \
@@ -41,7 +43,9 @@ curl -s -X PUT -H "content-type: application/json" \
     --data '{"endpoint":"127.0.0.1:22400","gpu_group":"gpu-0"}' \
     http://127.0.0.1:8007/internal/workers/worker-0 >/dev/null
 
+for i in $(seq 1 40); do curl -sf http://127.0.0.1:22700/health >/dev/null 2>&1 && break; sleep 3; done
 echo "--- verifiche — $(date '+%H:%M')"
+curl -sf http://127.0.0.1:22700/health >/dev/null && echo "tool agent: OK" || { echo "tool agent: KO"; tail -3 "$LOGS/tool_agent.log"; }
 curl -sf http://127.0.0.1:22400/health >/dev/null && echo "worker: OK" || echo "worker: KO"
 curl -skf https://127.0.0.1:8006/ >/dev/null && echo "gateway: OK" || echo "gateway: KO"
 grep -iE "weights loaded|missing|unexpected" "$LOGS/backend.log" | tail -3

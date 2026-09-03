@@ -84,7 +84,6 @@ function startQuery(reason) {
     const outcome = $('qOutcome').value;
     hud.detail = '';
     hudLog('sys', `verifica avviata (${reason}): ${date} ${time || 'ALL DAY'}, esito tra ${delay}s`);
-    micRing.length = 0;
     setHud('CHECKING', date, time);
     clearTimeout(queryTimer);
     // la verifica passa dal "gestionale" del server (prenotazioni inserite in /static/hud/db.html)
@@ -101,9 +100,41 @@ function startQuery(reason) {
     }, Math.max(0, delay * 1000 - (performance.now() - t0q)));
 }
 
-// ------------------------------------------------------------------ microfono
+// ------------------------------------------------------------------ microfono + VAD
+/** VAD a energia, risoluzione 100 ms: parli -> accumula; taci per `silenceMs` -> fine turno (callback con l'audio della battuta). */
+class TurnDetector {
+    constructor(onTurnEnd) {
+        this.onTurnEnd = onTurnEnd; this.speaking = false; this.speechMs = 0; this.silenceMs = 0; this.frames = []; this.preroll = [];
+    }
+    params() {
+        return { thr: parseFloat($('vadThr').value) || 0.02, silence: parseInt($('vadSilence').value, 10) || 600, minSpeech: parseInt($('vadMin').value, 10) || 300 };
+    }
+    feed(frame) {   // frame = Float32Array da 100 ms
+        const { thr, silence, minSpeech } = this.params();
+        let e = 0; for (let i = 0; i < frame.length; i++) e += frame[i] * frame[i]; const rms = Math.sqrt(e / frame.length);
+        $('vadMeter').textContent = rms.toFixed(3); $('vadState').textContent = this.speaking ? 'PARLI' : 'silenzio';
+        if (!this.speaking) {
+            this.preroll.push(frame); if (this.preroll.length > 3) this.preroll.shift();   // 300 ms prima dell'attacco
+            if (rms > thr) { this.speaking = true; this.speechMs = 100; this.silenceMs = 0; this.frames = this.preroll.slice(); this.frames.push(frame); }
+            return;
+        }
+        this.frames.push(frame);
+        if (rms > thr) { this.speechMs += 100; this.silenceMs = 0; }
+        else { this.silenceMs += 100; }
+        if (this.silenceMs >= silence) {
+            const spoke = this.speechMs >= minSpeech; const frames = this.frames;
+            this.speaking = false; this.frames = []; this.preroll = []; this.speechMs = 0; this.silenceMs = 0;
+            if (spoke) {
+                const n = frames.reduce((a, f) => a + f.length, 0); const out = new Float32Array(n); let o = 0;
+                for (const f of frames) { out.set(f, o); o += f.length; }
+                this.onTurnEnd(out);
+            }
+        }
+    }
+}
+
 class MicCapture {
-    constructor(onChunk) { this.onChunk = onChunk; this.ctx = null; this.stream = null; this.node = null; }
+    constructor(onChunk, onFrame100) { this.onChunk = onChunk; this.onFrame100 = onFrame100; this.ctx = null; this.stream = null; this.node = null; this.vadNode = null; }
     async start() {
         this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 }, video: false });
         this.ctx = new AudioContext({ sampleRate: SR_IN });
@@ -113,6 +144,10 @@ class MicCapture {
         this.node = new AudioWorkletNode(this.ctx, 'capture-processor', { processorOptions: { chunkSize: SR_IN } });
         this.node.port.onmessage = (e) => { if (e.data.type === 'chunk' && !e.data.final) this.onChunk(e.data.audio); };
         src.connect(this.node);
+        // secondo nodo: fettine da 100 ms per il VAD (stesso worklet, chunk piu' corto)
+        this.vadNode = new AudioWorkletNode(this.ctx, 'capture-processor', { processorOptions: { chunkSize: SR_IN / 10 } });
+        this.vadNode.port.onmessage = (e) => { if (e.data.type === 'chunk' && !e.data.final) this.onFrame100(e.data.audio); };
+        src.connect(this.vadNode); this.vadNode.port.postMessage({ command: 'start' });
         // tiene vivo il grafo audio (il worklet gira solo se collegato a un'uscita); guadagno 0 = niente eco
         this.sink = this.ctx.createGain(); this.sink.gain.value = 0;
         this.node.connect(this.sink); this.sink.connect(this.ctx.destination);
@@ -121,6 +156,7 @@ class MicCapture {
     }
     stop() {
         try { this.node && this.node.port.postMessage({ command: 'stop' }); } catch (_) {}
+        try { this.vadNode && this.vadNode.port.postMessage({ command: 'stop' }); this.vadNode && this.vadNode.disconnect(); } catch (_) {}
         try { this.node && this.node.disconnect(); } catch (_) {}
         try { this.stream && this.stream.getTracks().forEach(t => t.stop()); } catch (_) {}
         try { this.ctx && this.ctx.close(); } catch (_) {}
@@ -156,7 +192,7 @@ async function startSession() {
     setHud('IDLE', '', '');
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
-    transcript.length = 0; lastDecidedText = ''; micRing.length = 0;
+    transcript.length = 0; lastDecidedText = '';
 
     session = new RealtimeSession('hud', {
         getMaxKvTokens: () => 8192,
@@ -188,8 +224,8 @@ async function startSession() {
     try {
         await session.start($('systemPrompt').value, preparePayload, async () => {
             if ($('sendInitial').checked) hudSync(true);
+            const turns = new TurnDetector((utterance) => onUserTurnEnd(utterance));
             mic = new MicCapture((audioF32) => {
-                micRing.push(new Float32Array(audioF32)); if (micRing.length > MIC_RING_SEC) micRing.shift();
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
                 if (hud.pendingFrame) {
                     msg.frame_base64_list = [hud.pendingFrame];
@@ -200,9 +236,9 @@ async function startSession() {
                 }
                 session.sendChunk(msg);
                 $('chunks').textContent = session.chunksSent;
-            });
+            }, (frame100) => turns.feed(frame100));
             await mic.start();
-            conv('sys', 'microfono attivo — parla con lo sportello');
+            conv('sys', 'microfono attivo — parla con lo sportello (VAD attivo: la decisione parte quando finisci di parlare)');
         });
         setRunning(true);
     } catch (e) {
@@ -232,8 +268,40 @@ function onModelText(text) {
         try { re = new RegExp($('autoRegex').value, 'i'); } catch (_) {}
         if (re && re.test(text)) startQuery('regex: il modello ha detto "' + (text.match(re) || [''])[0] + '"');
     }
-    if (mode === 'tool' && hud.state !== 'CHECKING') scheduleToolDecision(text);
+    if (mode === 'tool') noteAssistantText(text);   // solo contesto: il trigger e' il turno dell'utente
     lastSeenText = text;
+}
+
+/** Fine del tuo turno: ASR della sola battuta (GPU) + decisione del modello separato. */
+async function onUserTurnEnd(utterance) {
+    const secs = (utterance.length / SR_IN).toFixed(1);
+    hudLog('sys', `TURNO UTENTE finito (${secs} s di voce)`);
+    if ($('trigMode').value !== 'tool') return;
+    if (toolBusy) { hudLog('warn', 'tool agent occupato: battuta saltata'); return; }
+    if (hud.state === 'CHECKING') { hudLog('sys', 'verifica in corso: battuta usata solo come contesto'); return; }
+    toolBusy = true;
+    try {
+        const t0 = performance.now();
+        const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ transcript, user_audio_b64: arrayBufferToBase64(utterance.buffer), language: 'en' }) });
+        const d = await r.json();
+        const dt = ((performance.now() - t0) / 1000).toFixed(2);
+        if (!r.ok) { hudLog('warn', `tool agent: ${d.error || r.status}`); return; }
+        if (d.user_text) { conv('sys', 'TU (ASR): ' + d.user_text); transcript.push({ role: 'user', text: d.user_text }); if (transcript.length > 8) transcript.shift(); }
+        const calls = d.tool_calls || [];
+        const tim = `ASR ${d.asr_s ?? '?'} s + LLM ${d.llm_s ?? '?'} s = ${dt} s`;
+        if (!calls.length) { hudLog('sys', `tool agent (${tim}): nessuna azione — "${(d.raw || '').slice(0, 50)}"`); return; }
+        for (const c of calls) {
+            hudLog('hud', `TOOL AGENT (${tim}): ${c.name}(${JSON.stringify(c.arguments)})`);
+            if (c.name === 'check_availability' && hud.state !== 'CHECKING') {
+                const a = c.arguments || {};
+                if (a.date) $('qDate').value = String(a.date);
+                $('qTime').value = a.time ? String(a.time) : '';
+                startQuery('modello separato (turno utente)');
+            }
+        }
+    } catch (e) { hudLog('warn', 'tool agent errore: ' + e.message); }
+    finally { toolBusy = false; }
 }
 
 // ---- modello SEPARATO di tool calling: legge la trascrizione e decide la chiamata

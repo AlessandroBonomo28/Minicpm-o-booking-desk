@@ -66,10 +66,15 @@
           <option value="off">solo manuale</option>
         </select>
         <span class="small" id="toolAgentState">tool agent: ?</span></div>
+      <div class="row"><label>VAD (browser)</label>
+        <span class="small">soglia</span><input type="number" id="vadThr" value="0.02" step="0.005" min="0.005" style="width:70px">
+        <span class="small">silenzio di fine turno</span><input type="number" id="vadSilence" value="600" step="100" min="200" style="width:70px"> ms
+        <span class="small">voce minima</span><input type="number" id="vadMin" value="300" step="100" style="width:70px"> ms
+        <span class="small">livello <b id="vadMeter">0.000</b> · <b id="vadState">silenzio</b></span></div>
       <div class="row"><label>Regex (se scelta)</label>
         <input type="text" id="autoRegex" value="check|let me see|one moment|hold on|looking" style="width:260px"></div>
       <div class="row"><label>Modello separato</label>
-        <span class="small">legge la trascrizione (operatore = testo dell'omni; utente = ciò che l'omni ripete) e chiama <code>check_availability(date,time)</code>; data/ora estratte finiscono sull'HUD (eco della richiesta).</span></div>
+        <span class="small">parte alla FINE DEL TUO TURNO (VAD): trascrive solo la tua battuta (GPU), legge il testo dell'omni come contesto e chiama <code>check_availability(date,time)</code>; data/ora estratte finiscono sull'HUD (eco della richiesta).</span></div>
       <div class="row"><label>Frame iniziale</label>
         <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
       <div class="row"><label>Frame manuale</label><button id="btnFrame" disabled>Invia il frame corrente ora</button></div>

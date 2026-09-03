@@ -9,7 +9,7 @@ dell'utente, cosi' il modello separato di tool calling legge ANCHE le parole del
 Avvio (env cosyvoice2, che ha openai-whisper):
   /home/alex/miniconda3/envs/cosyvoice2/bin/python tools/asr_server.py --port 22710 --model small
 """
-import argparse, base64, json, sys, threading
+import argparse, base64, json, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 
@@ -33,9 +33,10 @@ class H(BaseHTTPRequestHandler):
             req = json.loads(self.rfile.read(n) or b"{}")
             x = np.frombuffer(base64.b64decode(req.get("audio_b64") or ""), dtype=np.float32)
             if len(x) < 1600: self._send(200, b'{"text": ""}'); return
+            t0 = time.time()
             with lock:
                 r = model.transcribe(x, language=req.get("language") or None, fp16=(DEV == "cuda"), condition_on_previous_text=False)
-            self._send(200, json.dumps({"text": (r.get("text") or "").strip(), "language": r.get("language")}).encode())
+            self._send(200, json.dumps({"text": (r.get("text") or "").strip(), "language": r.get("language"), "asr_s": round(time.time() - t0, 2), "audio_s": round(len(x) / 16000, 1)}).encode())
         except Exception as e:
             self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}).encode())
 

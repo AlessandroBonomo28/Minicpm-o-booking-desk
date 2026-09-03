@@ -315,3 +315,6 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   `<tool_call>`/`<tool_response>` (eredità Qwen3-8B) ma con il blocco `<tools>` esatto il base
   inventa la risposta invece di chiamare la funzione (3 sonde). Via percorribile: frase-segnale
   nello stream di testo ("controllo un attimo" → il backend agisce) + ritorno via HUD (ramo HUD).
+- 04/09 — **Ramo HUD, laterale veloce**: VAD nel browser + trigger sul turno utente + ASR GPU
+  (decisione di Alessandro; il resto in `ideescartate.md`). NPU Intel AI Boost verificata: c'è,
+  ma invisibile da WSL → piano B via servizio Windows/OpenVINO se la VRAM stringe.

@@ -130,3 +130,13 @@ giorno). Sul server: normalizzazione solo per far combaciare la verifica (orario
 **BOOKED ALL DAY / BOOKED 3 PM / BOOKED 3-17**. Verifica senza ora = giornata: AVAILABLE (nessuna
 prenotazione) / PARTLY BOOKED con l'elenco / BOOKED ALL DAY. Il tool agent non inventa più l'ora: `time`
 facoltativo nello schema (domanda senza ora → verifica della giornata).
+
+## 04/09 — laterale veloce: VAD nel browser + trigger sul turno dell'utente + ASR su GPU
+- **VAD nel browser** (energia, fettine da 100 ms tramite un secondo nodo del capture-worklet): soglia,
+  silenzio di fine turno (600 ms) e voce minima (300 ms) regolabili in pagina; 300 ms di pre-roll.
+- **Trigger = fine del TUO turno**: la battuta appena finita (solo quella) va al tool agent; il testo dell'omni
+  è solo contesto (mai trigger) → i falsi positivi da domande/annunci dell'operatore spariscono per costruzione.
+- **ASR su GPU** (whisper small, fp16): trascrive solo la battuta (3-5 s). Tempi riportati nel registro:
+  `ASR x s + LLM y s = z s`.
+- Scartati (vedi `ideescartate.md`): prefiltro, due passi, cache vLLM, iniezione lato server. Piano B se la
+  VRAM stringe: ASR sulla NPU Intel AI Boost (Core Ultra 9 285K) da un servizio Windows con OpenVINO.

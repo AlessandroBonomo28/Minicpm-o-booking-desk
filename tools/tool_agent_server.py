@@ -19,6 +19,7 @@ import json
 import re
 import sys
 import threading
+import time
 import urllib.request
 ASR_URL = "http://127.0.0.1:22710/transcribe"
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -100,13 +101,13 @@ class H(BaseHTTPRequestHandler):
         try:
             req = json.loads(self.rfile.read(n) or b"{}")
             transcript = list(req.get("transcript") or [])
-            user_text = ""
+            user_text = ""; asr_s = None; t_all = time.time()
             if req.get("user_audio_b64"):
                 # ASR degli ultimi secondi del microfono (servizio separato, env cosyvoice2)
                 try:
                     body = json.dumps({"audio_b64": req["user_audio_b64"], "language": req.get("language") or "en"}).encode()
                     r = urllib.request.urlopen(urllib.request.Request(ASR_URL, data=body, headers={"content-type": "application/json"}), timeout=20)
-                    user_text = (json.loads(r.read()).get("text") or "").strip()
+                    rj = json.loads(r.read()); user_text = (rj.get("text") or "").strip(); asr_s = rj.get("asr_s")
                 except Exception as e:
                     user_text = ""; sys.stderr.write(f"[tool-agent] ASR non disponibile: {e}\n")
                 if user_text:
@@ -115,8 +116,9 @@ class H(BaseHTTPRequestHandler):
                         transcript.insert(len(transcript) - 1, {"role": "user", "text": user_text})
                     else:
                         transcript.append({"role": "user", "text": user_text})
+            t_llm = time.time()
             res = decide(transcript, req.get("tools") or DEFAULT_TOOLS)
-            res["user_text"] = user_text
+            res["user_text"] = user_text; res["asr_s"] = asr_s; res["llm_s"] = round(time.time() - t_llm, 2); res["total_s"] = round(time.time() - t_all, 2)
             self._send(200, json.dumps(res, ensure_ascii=False).encode())
         except Exception as e:
             self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}).encode())

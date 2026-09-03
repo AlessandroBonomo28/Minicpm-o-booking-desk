@@ -35,9 +35,9 @@ DEFAULT_TOOLS = [{
             "type": "object",
             "properties": {
                 "date": {"type": "string", "description": "the requested date as spoken, e.g. 'March 31'"},
-                "time": {"type": "string", "description": "the requested time in 24h HH:MM, e.g. '15:00'"},
+                "time": {"type": "string", "description": "the requested time in 24h HH:MM, e.g. '15:00'. OMIT it when the user asks about a whole day or gives no time."},
             },
-            "required": ["date", "time"],
+            "required": ["date"],
         },
     },
 }]
@@ -50,7 +50,7 @@ SYSTEM = ("You are the action extractor for a booking desk. Read the transcript 
           "- '3 pm' / 'three in the afternoon' -> 15:00; '8 in the evening' -> 20:00; 'noon' -> 12:00; '9 am' -> 09:00\n"
           "- 'at 15' / 'fifteen hundred' -> 15:00; '5:20 pm' -> 17:20\n"
           "DATE RULES: copy the date as spoken ('March 31', 'April 2nd', 'tomorrow', 'next Monday').\n"
-          "Never invent a time that was not said.")
+          "If the user asks about a whole day or gives no time, call check_availability with the date ONLY (no time field). Never invent a time that was not said.")
 
 tok = None
 model = None

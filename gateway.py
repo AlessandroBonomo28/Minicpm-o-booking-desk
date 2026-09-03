@@ -769,6 +769,19 @@ def _hud_db_save():
 _hud_db_load()
 
 
+def _hud_db_migrate():
+    slots = _HUD_DB.get("slots") or {}
+    fixed = {}
+    for k, v in slots.items():
+        d = _hud_norm_date(v.get("date")); t = _hud_norm_time(v.get("time"))
+        v = {**v, "date": d, "time": t}
+        fixed[f"{d} {t}"] = v
+    _HUD_DB["slots"] = fixed
+    _hud_db_save()
+
+
+
+
 _MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
 
 
@@ -782,20 +795,65 @@ def _hud_norm_date(d: str) -> str:
     return t
 
 
-def _hud_norm_time(x: str) -> str:
-    """'3 pm' / '15' / '3:00 pm' / '10:30' -> 'HH:MM'."""
-    t = str(x or "").strip().lower().replace(".", ":")
-    m = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$", t)
+_ALL_DAY = {"", "all day", "allday", "all-day", "whole day", "tutto il giorno", "giornata", "day"}
+
+
+def _hud_parse_clock(t: str):
+    """'3 pm' / '15' / '3:00' / '10.30' -> minuti dalla mezzanotte (None se non e' un orario).
+    Sportello: un'ora 1-7 senza am/pm si intende pomeridiana (3 -> 15:00)."""
+    t = t.strip().lower().replace(".", ":")
+    m = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm|h)?$", t)
     if not m:
-        return t
+        return None
     h = int(m.group(1)); mi = int(m.group(2) or 0); ap = m.group(3)
+    if h > 24 or mi > 59:
+        return None
     if ap == "pm" and h < 12: h += 12
-    if ap == "am" and h == 12: h = 0
-    return f"{h:02d}:{mi:02d}"
+    elif ap == "am" and h == 12: h = 0
+    elif ap is None and 1 <= h <= 7: h += 12
+    return (h % 24) * 60 + mi
+
+
+def _hud_norm_time(x: str) -> str:
+    """Normalizza il campo ora (libero): '' / 'all day' -> 'all-day'; '3 pm' -> '15:00';
+    '3-17' / '15:00-17:00' / '3 pm - 5 pm' -> '15:00-17:00'. Altro testo: com'e', minuscolo."""
+    t = str(x or "").strip().lower()
+    if t in _ALL_DAY:
+        return "all-day"
+    parts = re.split(r"\s*(?:-|–|to|a|alle)\s*", t)
+    if len(parts) == 2:
+        a, b = _hud_parse_clock(parts[0]), _hud_parse_clock(parts[1])
+        if a is not None and b is not None:
+            if b <= a: b += 12 * 60   # '3-5' -> 15:00-17:00
+            return f"{a // 60:02d}:{a % 60:02d}-{(b // 60) % 24:02d}:{b % 60:02d}"
+    a = _hud_parse_clock(t)
+    return f"{a // 60:02d}:{a % 60:02d}" if a is not None else t
+
+
+def _hud_time_span(tm: str):
+    """'15:00' -> (900, 900); '15:00-17:00' -> (900, 1020); 'all-day' -> (0, 1440); altro -> None."""
+    if tm == "all-day":
+        return (0, 24 * 60)
+    m = re.match(r"^(\d{2}):(\d{2})(?:-(\d{2}):(\d{2}))?$", tm or "")
+    if not m:
+        return None
+    a = int(m.group(1)) * 60 + int(m.group(2))
+    b = int(m.group(3)) * 60 + int(m.group(4)) if m.group(3) else a
+    return (a, b)
+
+
+def _hud_time_label(v) -> str:
+    """Etichetta da mostrare: la stringa scritta nel form (time_raw), altrimenti l'orario normalizzato."""
+    if isinstance(v, dict):
+        return v.get("time_raw") or ("all day" if v.get("time") == "all-day" else (v.get("time") or ""))
+    return "all day" if v == "all-day" else (v or "")
 
 
 def _hud_key(date: str, tm: str) -> str:
     return f"{_hud_norm_date(date)} {_hud_norm_time(tm)}".strip()
+
+
+_hud_db_migrate()
 
 
 @app.get("/api/hud_db")
@@ -808,10 +866,11 @@ async def hud_db_book(request: Request):
     """Form prenotazioni: inserisce (o aggiorna) una prenotazione -> slot OCCUPATO."""
     body = await request.json()
     date = _hud_norm_date(body.get("date")); tm = _hud_norm_time(body.get("time"))
-    if not date or not tm:
-        return JSONResponse(status_code=400, content={"error": "data e ora obbligatorie"})
+    if not date:
+        return JSONResponse(status_code=400, content={"error": "la data e' obbligatoria (l'ora vuota = tutto il giorno)"})
     key = f"{date} {tm}"
-    _HUD_DB["slots"][key] = {"date": date, "time": tm, "status": "booked", "name": str(body.get("name") or "").strip(),
+    _HUD_DB["slots"][key] = {"date": date, "time": tm, "time_raw": str(body.get("time") or "").strip() or "all day",
+                             "status": "booked", "name": str(body.get("name") or "").strip(),
                              "created": datetime.now().isoformat(timespec="seconds"), "last_check": _HUD_DB["slots"].get(key, {}).get("last_check")}
     _hud_db_save()
     return JSONResponse(content=_HUD_DB["slots"][key])
@@ -827,31 +886,58 @@ async def hud_db_unbook(request: Request):
     return JSONResponse(content={"ok": True, "key": key})
 
 
+def _hud_lookup(date: str, tm: str):
+    """Stato di uno slot o di una giornata. Ritorna (status, detail): detail e' l'orario della
+    prenotazione trovata ('ALL DAY', '15:00', '15:00-17:00') o l'elenco per la giornata."""
+    slots = _HUD_DB["slots"]
+    day = [v for v in slots.values() if v.get("date") == date and v.get("status") == "booked"]
+    all_day = next((v for v in day if v.get("time") == "all-day"), None)
+    if all_day:
+        return "booked", _hud_time_label(all_day)
+    if tm == "all-day":
+        times = sorted(_hud_time_label(v) for v in day)
+        if times:
+            return "partial", "booked " + ", ".join(times)
+        return "available", "no bookings that day"
+    want = _hud_time_span(tm)
+    for v in day:
+        span = _hud_time_span(v.get("time"))
+        if span is None:
+            continue
+        if want is None:
+            continue
+        # sovrapposizione: un orario puntuale dentro un intervallo, o intervalli che si toccano
+        if (want[0] <= span[1] and span[0] <= want[1]) and not (want[0] == want[1] and want[0] == span[1] and span[0] != span[1]):
+            return "booked", _hud_time_label(v)
+    return "available", ""
+
+
 @app.post("/api/hud_db/check")
 async def hud_db_check(request: Request):
-    """La verifica dell'HUD. outcome: 'auto' (default) = legge il gestionale (prenotato -> booked, altrimenti
-    available); 'ok'/'no' = forzatura manuale per gli esperimenti; 'err' = simula errore/timeout."""
+    """La verifica dell'HUD. outcome: 'auto' (default) = legge il gestionale; 'ok'/'no' = forzatura manuale;
+    'err' = simula errore/timeout. L'ora puo' mancare (= giornata intera)."""
     body = await request.json()
     date = _hud_norm_date(body.get("date")); tm = _hud_norm_time(body.get("time"))
     outcome = body.get("outcome") or "auto"
-    key = f"{date} {tm}".strip()
-    slot = _HUD_DB["slots"].get(key)
+    key = f"{date} {tm}"
+    detail = ""
     if outcome == "err":
         status = "error"
     elif outcome in ("ok", "no"):
         status = "available" if outcome == "ok" else "booked"
-        _HUD_DB["slots"][key] = {**(slot or {"date": date, "time": tm, "name": ""}), "status": status}
+        _HUD_DB["slots"][key] = {**(_HUD_DB["slots"].get(key) or {"date": date, "time": tm, "name": ""}), "status": status}
     else:
-        status = (slot or {}).get("status") or "available"
-        if slot is None:
+        status, detail = _hud_lookup(date, tm)
+        if status == "available" and tm != "all-day" and key not in _HUD_DB["slots"]:
             _HUD_DB["slots"][key] = {"date": date, "time": tm, "status": "available", "name": ""}
-    if status != "error":
+    if key in _HUD_DB["slots"] and status != "error":
         _HUD_DB["slots"][key]["last_check"] = datetime.now().isoformat(timespec="seconds")
     _HUD_DB["log"].append({"ts": datetime.now().isoformat(timespec="seconds"), "date": date, "time": tm, "result": status,
-                           "source": body.get("source") or "?", "delay_s": body.get("delay_s"), "mode": outcome})
+                           "detail": detail, "source": body.get("source") or "?", "delay_s": body.get("delay_s"), "mode": outcome})
     _HUD_DB["log"] = _HUD_DB["log"][-200:]
     _hud_db_save()
-    return JSONResponse(content={"date": date, "time": tm, "status": status, "name": (_HUD_DB["slots"].get(key) or {}).get("name", "")})
+    return JSONResponse(content={"date": date, "time": tm, "status": status, "detail": detail,
+                                 "name": (_HUD_DB["slots"].get(key) or {}).get("name", "")})
 
 
 @app.post("/api/hud_db/hud_state")

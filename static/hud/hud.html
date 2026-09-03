@@ -51,7 +51,7 @@
     <div class="card" style="margin-top:14px">
       <h2>Simulatore del backend (la "query sul DB")</h2>
       <div class="row"><label>Data / ora</label>
-        <input type="text" id="qDate" value="MARCH 31" style="width:110px"> <input type="text" id="qTime" value="15:00" style="width:70px"></div>
+        <input type="text" id="qDate" value="MARCH 31" style="width:110px"> <input type="text" id="qTime" value="15:00" placeholder="vuoto = tutto il giorno" style="width:150px"></div>
       <div class="row"><label>Esito</label>
         <select id="qOutcome"><option value="auto" selected>dal gestionale (prenotazioni inserite in db.html)</option><option value="ok">forza AVAILABLE</option><option value="no">forza BOOKED</option><option value="err">simula ERROR / TIMEOUT</option></select>
         <label style="min-width:auto">ritardo</label><input type="number" id="qDelay" value="4" min="0" max="60" style="width:60px"> s</div>

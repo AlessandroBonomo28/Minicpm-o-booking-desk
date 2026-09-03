@@ -29,12 +29,12 @@ const hudLog = (cls, t) => logTo($('hudLog'), cls, t);
 // ------------------------------------------------------------------ HUD (schermo)
 const hud = {
     state: 'IDLE',          // IDLE | CHECKING | OK | NO | ERR
-    date: '', time: '',
+    date: '', time: '', detail: '',
     lastHash: null,
     pendingFrame: null,     // base64 JPEG da allegare al prossimo chunk
     framesSent: 0,
     lastFrameAt: null,      // per misurare la reazione
-    fingerprint() { return `${this.state}|${this.date}|${this.time}`; },
+    fingerprint() { return `${this.state}|${this.date}|${this.time}|${this.detail}`; },
 };
 const canvas = $('hud'), ctx = canvas.getContext('2d');
 
@@ -42,16 +42,18 @@ function drawHud() {
     const W = canvas.width, H = canvas.height;
     const theme = {
         IDLE:     { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: 'waiting for a request', line2: '' },
-        CHECKING: { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: `${hud.date} ${hud.time}`, line2: 'please wait' },
-        OK:       { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time}`, line2: 'AVAILABLE' },
-        NO:       { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time}`, line2: 'BOOKED' },
-        ERR:      { bg: '#b71c1c', fg: '#ffffff', title: 'ERROR / TIMEOUT', line1: `${hud.date} ${hud.time}`, line2: 'check failed' },
+        CHECKING: { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'please wait' },
+        OK:       { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'AVAILABLE', line3: hud.detail },
+        PARTIAL:  { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'PARTLY BOOKED', line3: hud.detail },
+        NO:       { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'BOOKED ' + (hud.detail || '').toUpperCase(), line3: '' },
+        ERR:      { bg: '#b71c1c', fg: '#ffffff', title: 'ERROR / TIMEOUT', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'check failed' },
     }[hud.state];
     ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = theme.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = 'bold 34px system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);
     ctx.font = 'bold 44px system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.50);
-    ctx.font = 'bold 56px system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.70);
+    ctx.font = (theme.line2.length > 12 ? 'bold 40px' : 'bold 56px') + ' system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.68);
+    if (theme.line3) { ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(String(theme.line3).toUpperCase().slice(0, 40), W / 2, H * 0.82); }
     ctx.font = '18px system-ui, sans-serif'; ctx.globalAlpha = 0.7; ctx.fillText('operator screen', W / 2, H * 0.92); ctx.globalAlpha = 1;
     $('hudState').textContent = hud.state;
 }
@@ -77,10 +79,11 @@ function setHud(state, date, time) {
 let queryTimer = null;
 function startQuery(reason) {
     if (hud.state === 'CHECKING') return;
-    const date = $('qDate').value.trim().toUpperCase(), time = $('qTime').value.trim();
+    const date = $('qDate').value.trim().toUpperCase(), time = $('qTime').value.trim();   // time vuoto = ALL DAY
     const delay = Math.max(0, parseFloat($('qDelay').value) || 0);
     const outcome = $('qOutcome').value;
-    hudLog('sys', `verifica avviata (${reason}): ${date} ${time}, esito tra ${delay}s`);
+    hud.detail = '';
+    hudLog('sys', `verifica avviata (${reason}): ${date} ${time || 'ALL DAY'}, esito tra ${delay}s`);
     micRing.length = 0;
     setHud('CHECKING', date, time);
     clearTimeout(queryTimer);
@@ -91,7 +94,8 @@ function startQuery(reason) {
         .then(r => r.json()).catch(e => ({ status: 'error', error: e.message }));
     queryTimer = setTimeout(async () => {
         const res = await pending;
-        const st = res.status === 'booked' ? 'NO' : res.status === 'available' ? 'OK' : 'ERR';
+        const st = res.status === 'booked' ? 'NO' : res.status === 'available' ? 'OK' : res.status === 'partial' ? 'PARTIAL' : 'ERR';
+        hud.detail = res.detail || '';
         setHud(st);
         hudLog('sys', `gestionale ha risposto: ${res.status}${res.name ? ' (' + res.name + ')' : ''} per ${res.date || date} ${res.time || time}` + (res.error ? ' — ' + res.error : ''));
     }, Math.max(0, delay * 1000 - (performance.now() - t0q)));
@@ -273,7 +277,7 @@ async function askToolAgent(text) {
             if (c.name === 'check_availability' && hud.state !== 'CHECKING') {
                 const a = c.arguments || {};
                 if (a.date) $('qDate').value = String(a.date);
-                if (a.time) $('qTime').value = String(a.time);
+                $('qTime').value = a.time ? String(a.time) : '';   // niente ora = giornata intera
                 startQuery('modello separato');
             }
         }

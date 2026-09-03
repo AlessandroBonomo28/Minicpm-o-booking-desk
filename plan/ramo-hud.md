@@ -124,3 +124,9 @@ Aggiornamento: `db.html` ha ora la **form delle prenotazioni** (data, ora, nome 
 riapre). La verifica dell'HUD di default legge il gestionale (`outcome=auto`: prenotato → BOOKED, altrimenti
 AVAILABLE); "forza AVAILABLE/BOOKED" e "simula ERROR" restano nel pannello HUD per gli esperimenti. Date e ore
 normalizzate lato server come le estrae il tool agent ("March 31st"→march 31, "3 pm"→15:00, "15"→15:00).
+Aggiornamento (03/09 sera): campo ora **libero** nel form ("3 pm", "3:00", "all day", "3-17", vuoto = tutto il
+giorno). Sul server: normalizzazione solo per far combaciare la verifica (orario singolo, intervallo, giornata;
+1-7 senza am/pm = pomeriggio); la stringa scritta resta (`time_raw`) ed è quella mostrata sull'HUD:
+**BOOKED ALL DAY / BOOKED 3 PM / BOOKED 3-17**. Verifica senza ora = giornata: AVAILABLE (nessuna
+prenotazione) / PARTLY BOOKED con l'elenco / BOOKED ALL DAY. Il tool agent non inventa più l'ora: `time`
+facoltativo nello schema (domanda senza ora → verifica della giornata).

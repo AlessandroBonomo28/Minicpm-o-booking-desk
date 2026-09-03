@@ -311,3 +311,7 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   launcher `tools/run_demo_hud.sh` (codice ramo ita + pesi BASE), doc `plan/ramo-hud.md`.
   Nessuna modifica al backend. In attesa del test interattivo di Alessandro (Test 1).
   Test 2 (iniezione di testo) NON costruito: richiede estensione del backend, dopo il verdetto.
+- 03/09 — **Tool calling nativo su MiniCPM-o 4.5: testato, NO.** Il tokenizer ha template e token
+  `<tool_call>`/`<tool_response>` (eredità Qwen3-8B) ma con il blocco `<tools>` esatto il base
+  inventa la risposta invece di chiamare la funzione (3 sonde). Via percorribile: frase-segnale
+  nello stream di testo ("controllo un attimo" → il backend agisce) + ritorno via HUD (ramo HUD).

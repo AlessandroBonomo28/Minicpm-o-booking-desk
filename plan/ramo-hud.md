@@ -42,3 +42,14 @@ iniezione di TESTO invece del frame) **non è ancora costruito**: richiede un'es
 - attribuzione della risposta in ritardo (mitigata dall'eco della richiesta nell'HUD);
 - il modello base potrebbe descrivere lo schermo invece di "usarlo" (visto nel replay: "Il video è in totale
   oscurità…") → il prompt deve dirgli cosa fare con lo schermo, non cosa c'è.
+
+## Sonda tool calling nativo (03/09, modello base, turn-based via gateway)
+
+Prompt di sistema con il blocco `<tools>` ESATTO del chat template Qwen3 (presente nel tokenizer di
+MiniCPM-o 4.5, con i token speciali `<tool_call>`/`<tool_response>`), funzione `check_availability(date,time)`.
+- "È libero il 31 marzo alle 15:00?" → **nessun `<tool_call>`**: risponde inventando ("Certamente, il 31 marzo alle 15:00 è disponibile").
+- "Buongiorno, come va?" → chiacchiera normale (corretto).
+- "Vorrei prenotare per il 2 aprile alle 10." → **nessun `<tool_call>`**: chiede conferma a parole.
+Verdetto: la grammatica dei tool esiste nel tokenizer/template (ereditata da Qwen3-8B) ma il modello omni
+NON la usa: il comportamento di chiamata è stato smussato dal training omni. Il tool calling va costruito
+fuori dal modello (estrazione dallo stream di testo / frase-segnale) — coerente con la spec §6.

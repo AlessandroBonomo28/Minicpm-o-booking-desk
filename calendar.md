@@ -305,3 +305,9 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   Cura strutturale: addestrare le unità italiane CON il blocco visivo (frame costanti +
   uniformi + qualche frame vario), stadio-ruolo da it11 (~300 passi), gate anche in
   contesto Omni (replay con frame). Strumenti di replay salvati in tools/replay/.
+- 03/09 — **Ramo HUD costruito** (spec di Alessandro: il frame come clock, non come store):
+  pagina `static/hud/hud.html` (schermo operatore a 5 stati, frame SOLO al cambio, simulatore
+  backend con esito/ritardo, auto-trigger sul testo del modello, registro "REAZIONE +x s"),
+  launcher `tools/run_demo_hud.sh` (codice ramo ita + pesi BASE), doc `plan/ramo-hud.md`.
+  Nessuna modifica al backend. In attesa del test interattivo di Alessandro (Test 1).
+  Test 2 (iniezione di testo) NON costruito: richiede estensione del backend, dopo il verdetto.

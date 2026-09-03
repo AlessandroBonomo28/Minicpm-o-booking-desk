@@ -2,6 +2,8 @@
 # Demo HUD (ramo sperimentale, 03/09): CODICE del ramo italiano (fix decodifica +
 # pagina /static/hud/hud.html) con i pesi BASE (nessun --pt-path): v1.3 con i token
 # video degenera (calendario, via 5). Uso: bash tools/run_demo_hud.sh
+set -uo pipefail
+PY=/home/alex/miniconda3/envs/minicpm/bin/python
 ROOT=/home/alex/progetti/MiniCPM-o-Demo
 LOGS=$ROOT/logs_demo
 PT=""  # HUD: pesi BASE (v1.3 con i frame degenera, vedi calendario via 5)

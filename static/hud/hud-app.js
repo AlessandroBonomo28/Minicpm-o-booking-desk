@@ -84,13 +84,17 @@ function startQuery(reason) {
     micRing.length = 0;
     setHud('CHECKING', date, time);
     clearTimeout(queryTimer);
-    // la verifica passa dal "gestionale" del server (stato visibile in /static/hud/db.html)
-    fetch('/api/hud_db/check', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ date, time, outcome, source: reason, delay_s: delay }) }).catch(() => {});
-    queryTimer = setTimeout(() => {
-        setHud(outcome === 'ok' ? 'OK' : outcome === 'no' ? 'NO' : 'ERR');
-        hudLog('sys', `backend ha risposto: ${hud.state}`);
-    }, delay * 1000);
+    // la verifica passa dal "gestionale" del server (prenotazioni inserite in /static/hud/db.html)
+    const t0q = performance.now();
+    const pending = fetch('/api/hud_db/check', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ date, time, outcome, source: reason, delay_s: delay }) })
+        .then(r => r.json()).catch(e => ({ status: 'error', error: e.message }));
+    queryTimer = setTimeout(async () => {
+        const res = await pending;
+        const st = res.status === 'booked' ? 'NO' : res.status === 'available' ? 'OK' : 'ERR';
+        setHud(st);
+        hudLog('sys', `gestionale ha risposto: ${res.status}${res.name ? ' (' + res.name + ')' : ''} per ${res.date || date} ${res.time || time}` + (res.error ? ' — ' + res.error : ''));
+    }, Math.max(0, delay * 1000 - (performance.now() - t0q)));
 }
 
 // ------------------------------------------------------------------ microfono

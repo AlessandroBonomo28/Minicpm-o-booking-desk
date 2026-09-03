@@ -120,3 +120,7 @@ schermo HUD, slot conosciuti (data, ora, LIBERO/OCCUPATO, ultima verifica), regi
 richiesta, esito, avviata da: modello separato/regex/manuale, ritardo). Sorgente: `GET /api/hud_db` (gateway del
 ramo italiano, persistito in `data/hud_db.json`); la pagina HUD scrive a ogni verifica (`/api/hud_db/check`)
 e a ogni cambio di schermo (`/api/hud_db/hud_state`). `POST /api/hud_db/reset` azzera.
+Aggiornamento: `db.html` ha ora la **form delle prenotazioni** (data, ora, nome → slot OCCUPATO; "Libera" lo
+riapre). La verifica dell'HUD di default legge il gestionale (`outcome=auto`: prenotato → BOOKED, altrimenti
+AVAILABLE); "forza AVAILABLE/BOOKED" e "simula ERROR" restano nel pannello HUD per gli esperimenti. Date e ore
+normalizzate lato server come le estrae il tool agent ("March 31st"→march 31, "3 pm"→15:00, "15"→15:00).

@@ -769,27 +769,89 @@ def _hud_db_save():
 _hud_db_load()
 
 
+_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+
+
+def _hud_norm_date(d: str) -> str:
+    """'March 31st' / '31 march' / 'march 31' -> 'march 31'; altro testo -> minuscolo."""
+    t = re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", str(d or "").strip().lower())
+    t = re.sub(r"[,.]", " ", t); t = re.sub(r"\s+", " ", t).strip()
+    m = re.search(r"\b(" + "|".join(_MONTHS) + r")\b", t); n = re.search(r"\b(\d{1,2})\b", t)
+    if m and n:
+        return f"{m.group(1)} {int(n.group(1))}"
+    return t
+
+
+def _hud_norm_time(x: str) -> str:
+    """'3 pm' / '15' / '3:00 pm' / '10:30' -> 'HH:MM'."""
+    t = str(x or "").strip().lower().replace(".", ":")
+    m = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$", t)
+    if not m:
+        return t
+    h = int(m.group(1)); mi = int(m.group(2) or 0); ap = m.group(3)
+    if ap == "pm" and h < 12: h += 12
+    if ap == "am" and h == 12: h = 0
+    return f"{h:02d}:{mi:02d}"
+
+
+def _hud_key(date: str, tm: str) -> str:
+    return f"{_hud_norm_date(date)} {_hud_norm_time(tm)}".strip()
+
+
 @app.get("/api/hud_db")
 async def hud_db_get():
     return JSONResponse(content=_HUD_DB)
 
 
+@app.post("/api/hud_db/book")
+async def hud_db_book(request: Request):
+    """Form prenotazioni: inserisce (o aggiorna) una prenotazione -> slot OCCUPATO."""
+    body = await request.json()
+    date = _hud_norm_date(body.get("date")); tm = _hud_norm_time(body.get("time"))
+    if not date or not tm:
+        return JSONResponse(status_code=400, content={"error": "data e ora obbligatorie"})
+    key = f"{date} {tm}"
+    _HUD_DB["slots"][key] = {"date": date, "time": tm, "status": "booked", "name": str(body.get("name") or "").strip(),
+                             "created": datetime.now().isoformat(timespec="seconds"), "last_check": _HUD_DB["slots"].get(key, {}).get("last_check")}
+    _hud_db_save()
+    return JSONResponse(content=_HUD_DB["slots"][key])
+
+
+@app.post("/api/hud_db/unbook")
+async def hud_db_unbook(request: Request):
+    body = await request.json()
+    key = _hud_key(body.get("date"), body.get("time"))
+    if key in _HUD_DB["slots"]:
+        _HUD_DB["slots"][key].update({"status": "available", "name": ""})
+        _hud_db_save()
+    return JSONResponse(content={"ok": True, "key": key})
+
+
 @app.post("/api/hud_db/check")
 async def hud_db_check(request: Request):
-    """La verifica dell'HUD: registra la richiesta, aggiorna/legge lo slot, ritorna l'esito.
-    outcome (ok|no|err) arriva dal pannello dell'HUD (controllo manuale dell'esperimento)."""
+    """La verifica dell'HUD. outcome: 'auto' (default) = legge il gestionale (prenotato -> booked, altrimenti
+    available); 'ok'/'no' = forzatura manuale per gli esperimenti; 'err' = simula errore/timeout."""
     body = await request.json()
-    date = str(body.get("date") or "").strip().lower(); tm = str(body.get("time") or "").strip()
-    outcome = body.get("outcome") or "ok"
+    date = _hud_norm_date(body.get("date")); tm = _hud_norm_time(body.get("time"))
+    outcome = body.get("outcome") or "auto"
     key = f"{date} {tm}".strip()
-    status = {"ok": "available", "no": "booked", "err": "error"}.get(outcome, "available")
+    slot = _HUD_DB["slots"].get(key)
+    if outcome == "err":
+        status = "error"
+    elif outcome in ("ok", "no"):
+        status = "available" if outcome == "ok" else "booked"
+        _HUD_DB["slots"][key] = {**(slot or {"date": date, "time": tm, "name": ""}), "status": status}
+    else:
+        status = (slot or {}).get("status") or "available"
+        if slot is None:
+            _HUD_DB["slots"][key] = {"date": date, "time": tm, "status": "available", "name": ""}
     if status != "error":
-        _HUD_DB["slots"][key] = {"date": date, "time": tm, "status": status, "last_check": datetime.now().isoformat(timespec="seconds")}
+        _HUD_DB["slots"][key]["last_check"] = datetime.now().isoformat(timespec="seconds")
     _HUD_DB["log"].append({"ts": datetime.now().isoformat(timespec="seconds"), "date": date, "time": tm, "result": status,
-                           "source": body.get("source") or "?", "delay_s": body.get("delay_s")})
+                           "source": body.get("source") or "?", "delay_s": body.get("delay_s"), "mode": outcome})
     _HUD_DB["log"] = _HUD_DB["log"][-200:]
     _hud_db_save()
-    return JSONResponse(content={"date": date, "time": tm, "status": status})
+    return JSONResponse(content={"date": date, "time": tm, "status": status, "name": (_HUD_DB["slots"].get(key) or {}).get("name", "")})
 
 
 @app.post("/api/hud_db/hud_state")

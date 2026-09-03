@@ -26,7 +26,7 @@
 <body>
 <header>
   <h1>Stato del gestionale (DB prenotazioni)</h1>
-  <span class="sub">sola lettura · si aggiorna da solo ogni secondo · sorgente: <code>/api/hud_db</code> (scritto dalla pagina HUD a ogni verifica)</span>
+  <span class="sub">si aggiorna da solo ogni secondo · qui inserisci le prenotazioni che l'HUD poi verifica · sorgente: <code>/api/hud_db</code> (scritto dalla pagina HUD a ogni verifica)</span>
   <span class="sub" style="margin-left:auto" id="upd">—</span>
 </header>
 <div class="wrap">
@@ -36,9 +36,20 @@
       <div class="hudbox"><span class="pill IDLE" id="hudState">IDLE</span> <span id="hudSlot"></span> <span class="small" id="hudUpd"></span></div>
     </div>
     <div class="card" style="margin-top:14px">
+      <h2>Inserisci una prenotazione</h2>
+      <form id="bookForm" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px">
+        <input type="text" id="bDate" placeholder="data, es. March 31" style="width:150px" required>
+        <input type="text" id="bTime" placeholder="ora, es. 15:00 o 3 pm" style="width:130px" required>
+        <input type="text" id="bName" placeholder="nome (facoltativo)" style="width:160px">
+        <button type="submit" style="padding:6px 12px; border-radius:6px; border:1px solid #1a237e; background:#1a237e; color:#fff; cursor:pointer">Prenota (slot OCCUPATO)</button>
+        <span class="small" id="bMsg"></span>
+      </form>
+      <div class="small" style="margin-top:6px">Date e ore vengono normalizzate come le estrae il tool agent ("March 31st" → march 31, "3 pm" → 15:00), così la verifica dell'HUD le ritrova.</div>
+    </div>
+    <div class="card" style="margin-top:14px">
       <h2>Slot conosciuti dal gestionale</h2>
-      <table><thead><tr><th>Data</th><th>Ora</th><th>Stato</th><th>Ultima verifica</th></tr></thead><tbody id="slots"><tr><td colspan="4" class="small">nessuno slot ancora</td></tr></tbody></table>
-      <div class="small" style="margin-top:6px">Uno slot entra nel gestionale la prima volta che viene verificato; lo stato è quello scelto nel pannello dell'HUD (LIBERO/OCCUPATO). Le verifiche in ERRORE non creano slot.</div>
+      <table><thead><tr><th>Data</th><th>Ora</th><th>Stato</th><th>Nome</th><th>Ultima verifica</th><th></th></tr></thead><tbody id="slots"><tr><td colspan="6" class="small">nessuno slot ancora</td></tr></tbody></table>
+      <div class="small" style="margin-top:6px">Le prenotazioni inserite qui sono OCCUPATE; gli slot verificati dall'HUD e non prenotati compaiono come LIBERI. "Libera" cancella la prenotazione.</div>
     </div>
   </div>
   <div class="card">
@@ -62,8 +73,12 @@ async function refresh() {
     $('hudSlot').textContent = (h.date || h.time) ? `${(h.date || '').toUpperCase()} ${h.time || ''}` : '';
     $('hudUpd').textContent = h.updated ? `(aggiornato ${h.updated.slice(11, 19)})` : '';
     const slots = Object.values(d.slots || {}).sort((a, b) => (b.last_check || '').localeCompare(a.last_check || ''));
-    $('slots').innerHTML = slots.length ? slots.map(s => `<tr><td>${esc(s.date).toUpperCase()}</td><td>${esc(s.time)}</td><td><span class="pill ${esc(s.status)}">${labelStatus[s.status] || esc(s.status)}</span></td><td class="small">${esc((s.last_check || '').slice(11, 19))}</td></tr>`).join('')
-      : '<tr><td colspan="4" class="small">nessuno slot ancora</td></tr>';
+    $('slots').innerHTML = slots.length ? slots.map(s => `<tr><td>${esc(s.date).toUpperCase()}</td><td>${esc(s.time)}</td><td><span class="pill ${esc(s.status)}">${labelStatus[s.status] || esc(s.status)}</span></td><td>${esc(s.name || '')}</td><td class="small">${esc((s.last_check || '').slice(11, 19))}</td><td>${s.status === 'booked' ? `<button data-d="${esc(s.date)}" data-t="${esc(s.time)}" class="unbook" style="font-size:12px">Libera</button>` : ''}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="small">nessuno slot ancora</td></tr>';
+    document.querySelectorAll('button.unbook').forEach(b => b.onclick = async () => {
+      await fetch('/api/hud_db/unbook', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ date: b.dataset.d, time: b.dataset.t }) });
+      refresh();
+    });
     const log = (d.log || []).slice().reverse();
     const fresh = lastLogLen >= 0 && log.length > lastLogLen; lastLogLen = log.length;
     $('log').innerHTML = log.length ? log.map((e, i) => `<tr class="${fresh && i === 0 ? 'fresh' : ''}"><td class="small">${esc((e.ts || '').slice(11, 19))}</td><td>${esc(e.date).toUpperCase()} ${esc(e.time)}</td><td><span class="pill ${esc(e.result)}">${labelStatus[e.result] || esc(e.result)}</span></td><td class="small">${esc(e.source)}</td><td class="small">${e.delay_s ?? ''} s</td></tr>`).join('')
@@ -72,6 +87,15 @@ async function refresh() {
   } catch (e) { $('upd').textContent = 'non raggiungibile: ' + e.message; }
 }
 refresh(); setInterval(refresh, 1000);
+$('bookForm').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const r = await fetch('/api/hud_db/book', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ date: $('bDate').value, time: $('bTime').value, name: $('bName').value }) });
+  const d = await r.json();
+  $('bMsg').textContent = r.ok ? `prenotato: ${(d.date || '').toUpperCase()} ${d.time}${d.name ? ' — ' + d.name : ''}` : ('errore: ' + (d.error || r.status));
+  if (r.ok) { $('bDate').value = ''; $('bTime').value = ''; $('bName').value = ''; }
+  refresh();
+};
 </script>
 </body>
 </html>

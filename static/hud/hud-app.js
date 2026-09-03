@@ -41,18 +41,18 @@ const canvas = $('hud'), ctx = canvas.getContext('2d');
 function drawHud() {
     const W = canvas.width, H = canvas.height;
     const theme = {
-        IDLE:     { bg: '#263238', fg: '#eceff1', title: 'SPORTELLO PRENOTAZIONI', line1: 'in attesa di una richiesta', line2: '' },
-        CHECKING: { bg: '#f9a825', fg: '#1a1a1a', title: 'VERIFICA IN CORSO...', line1: `${hud.date} ${hud.time}`, line2: 'attendere' },
-        OK:       { bg: '#2e7d32', fg: '#ffffff', title: 'RISULTATO', line1: `${hud.date} ${hud.time}`, line2: 'LIBERO' },
-        NO:       { bg: '#c62828', fg: '#ffffff', title: 'RISULTATO', line1: `${hud.date} ${hud.time}`, line2: 'OCCUPATO' },
-        ERR:      { bg: '#b71c1c', fg: '#ffffff', title: 'ERRORE / TIMEOUT', line1: `${hud.date} ${hud.time}`, line2: 'verifica fallita' },
+        IDLE:     { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: 'waiting for a request', line2: '' },
+        CHECKING: { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: `${hud.date} ${hud.time}`, line2: 'please wait' },
+        OK:       { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time}`, line2: 'AVAILABLE' },
+        NO:       { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time}`, line2: 'BOOKED' },
+        ERR:      { bg: '#b71c1c', fg: '#ffffff', title: 'ERROR / TIMEOUT', line1: `${hud.date} ${hud.time}`, line2: 'check failed' },
     }[hud.state];
     ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = theme.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = 'bold 34px system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);
     ctx.font = 'bold 44px system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.50);
     ctx.font = 'bold 56px system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.70);
-    ctx.font = '18px system-ui, sans-serif'; ctx.globalAlpha = 0.7; ctx.fillText('schermo operatore', W / 2, H * 0.92); ctx.globalAlpha = 1;
+    ctx.font = '18px system-ui, sans-serif'; ctx.globalAlpha = 0.7; ctx.fillText('operator screen', W / 2, H * 0.92); ctx.globalAlpha = 1;
     $('hudState').textContent = hud.state;
 }
 
@@ -111,9 +111,11 @@ class MicCapture {
 let session = null, mic = null, running = false, awaitingReaction = false;
 
 async function loadRefAudio() {
-    if ($('refChoice').value !== 'italiano') return null;
+    const choice = $('refChoice').value;
+    if (choice === 'none') return null;
+    const id = choice === 'italiano' ? 'italiano' : 'english_call';
     try {
-        const r = await fetch('/api/presets/audio_duplex/italiano/audio');
+        const r = await fetch(`/api/presets/audio_duplex/${id}/audio`);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const d = await r.json();
         const ra = d.ref_audio || {};

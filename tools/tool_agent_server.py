@@ -27,28 +27,28 @@ DEFAULT_TOOLS = [{
     "type": "function",
     "function": {
         "name": "check_availability",
-        "description": "Verifica sul gestionale se uno slot di prenotazione e' libero. Da chiamare SOLO quando "
-                       "l'operatore ha appena detto che controlla una data e un'ora precise richieste dall'utente.",
+        "description": "Checks in the booking system whether a slot is available. Call it ONLY when the operator "
+                       "has just said they will check a specific date and time requested by the user.",
         "parameters": {
             "type": "object",
             "properties": {
-                "date": {"type": "string", "description": "la data richiesta, es. '31 marzo'"},
-                "time": {"type": "string", "description": "l'ora richiesta in formato HH:MM, es. '15:00'"},
+                "date": {"type": "string", "description": "the requested date as spoken, e.g. 'March 31'"},
+                "time": {"type": "string", "description": "the requested time in 24h HH:MM, e.g. '15:00'"},
             },
             "required": ["date", "time"],
         },
     },
 }]
 
-SYSTEM = ("Sei l'estrattore di azioni di uno sportello prenotazioni. Leggi la trascrizione (utente e operatore) "
-          "e chiama check_availability SOLO se l'operatore sta per verificare una data e un'ora precise. "
-          "Se mancano data o ora, o non c'e' una richiesta di verifica, non chiamare nulla e rispondi 'NESSUNA AZIONE'.\n"
-          "REGOLE PER L'ORA (formato HH:MM a 24 ore, converti l'italiano parlato):\n"
-          "- 'le dieci e mezza' -> 10:30; 'le nove e un quarto' -> 09:15; 'le sei meno un quarto' -> 05:45\n"
-          "- 'le quindici' -> 15:00; 'le tre del pomeriggio' -> 15:00; 'le otto di sera' -> 20:00; 'mezzogiorno' -> 12:00\n"
-          "- 'alle 15' -> 15:00; 'alle 9' -> 09:00; 'le 17 e 20' -> 17:20\n"
-          "REGOLE PER LA DATA: copia la data cosi' com'e' detta, in minuscolo ('31 marzo', '2 aprile', 'domani').\n"
-          "Non inventare mai un'ora non detta.")
+SYSTEM = ("You are the action extractor for a booking desk. Read the transcript (USER and OPERATOR) and call "
+          "check_availability ONLY when the operator is about to check a specific date and time. If the date or the time "
+          "is missing, or there is no availability check, call nothing and answer 'NO ACTION'.\n"
+          "TIME RULES (24h HH:MM, convert spoken English):\n"
+          "- 'half past ten' -> 10:30; 'quarter past nine' -> 09:15; 'quarter to six' -> 05:45; 'ten thirty' -> 10:30\n"
+          "- '3 pm' / 'three in the afternoon' -> 15:00; '8 in the evening' -> 20:00; 'noon' -> 12:00; '9 am' -> 09:00\n"
+          "- 'at 15' / 'fifteen hundred' -> 15:00; '5:20 pm' -> 17:20\n"
+          "DATE RULES: copy the date as spoken ('March 31', 'April 2nd', 'tomorrow', 'next Monday').\n"
+          "Never invent a time that was not said.")
 
 tok = None
 model = None

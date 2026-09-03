@@ -79,3 +79,10 @@ testo dell'omni, che di norma ripete data e ora. Se servisse l'ASR lato tool age
 | "controllo un attimo il 31 marzo alle 15" | check_availability(31 marzo, 15:00) | 0.8 s |
 | "mi dica pure la data e l'ora che preferisce" | nessuna azione | 0.2 s |
 (prima delle regole sull'ora nel prompt, "dieci e mezza" veniva reso 15:00: corretto con regole+esempi.)
+
+### Lingua del test: INGLESE (decisione di Alessandro, 03/09)
+Il test si fa nella distribuzione nativa del base: prompt come l'English Call del ramo originale ("You are in
+duplex mode…" + ruolo di operatore), voce di riferimento inglese (preset English Call), schermo in inglese
+(BOOKING DESK / CHECKING... / AVAILABLE / BOOKED / ERROR), tool agent con regole per gli orari parlati in inglese.
+Prove EN: "let me check March 31st at 3 pm" → (March 31st, 15:00) 1.9 s; "April 2nd, half past ten" → 10:30;
+"tomorrow at quarter past nine" → 09:15; "Hi there! How can I help?" → nessuna azione (0.1 s).

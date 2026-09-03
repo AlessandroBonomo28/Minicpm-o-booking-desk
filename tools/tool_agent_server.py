@@ -46,6 +46,8 @@ DEFAULT_TOOLS = [{
 SYSTEM = ("You are the action extractor for a booking desk. Read the transcript (USER and OPERATOR) and call "
           "check_availability ONLY when the operator is about to check a specific date and time. If the date or the time "
           "is missing, or there is no availability check, call nothing and answer 'NO ACTION'.\n"
+          "The date and time must come from the USER lines only; OPERATOR lines are context, never a source of dates. "
+          "If the USER did not mention a date, answer 'NO ACTION'.\n"
           "TIME RULES (24h HH:MM, convert spoken English):\n"
           "- 'half past ten' -> 10:30; 'quarter past nine' -> 09:15; 'quarter to six' -> 05:45; 'ten thirty' -> 10:30\n"
           "- '3 pm' / 'three in the afternoon' -> 15:00; '8 in the evening' -> 20:00; 'noon' -> 12:00; '9 am' -> 09:00\n"
@@ -117,7 +119,11 @@ class H(BaseHTTPRequestHandler):
                     else:
                         transcript.append({"role": "user", "text": user_text})
             t_llm = time.time()
-            res = decide(transcript, req.get("tools") or DEFAULT_TOOLS)
+            if req.get("user_audio_b64") and not user_text:
+                # il trigger e' il turno dell'utente: senza parole dell'utente non c'e' nulla da decidere
+                res = {"tool_calls": [], "raw": "NO ACTION (nessun testo utente)"}
+            else:
+                res = decide(transcript, req.get("tools") or DEFAULT_TOOLS)
             res["user_text"] = user_text; res["asr_s"] = asr_s; res["llm_s"] = round(time.time() - t_llm, 2); res["total_s"] = round(time.time() - t_all, 2)
             self._send(200, json.dumps(res, ensure_ascii=False).encode())
         except Exception as e:

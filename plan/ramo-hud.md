@@ -69,3 +69,13 @@ L'omni non chiama tool (sonda sopra). Il tool calling lo fa un modello a parte, 
 - Launcher `tools/run_demo_hud.sh` avvia anche il tool agent (dopo il backend) e ne verifica la salute.
 Limite noto: la "trascrizione utente" non esiste nell'e2e (l'omni non produce ASR); il tool agent legge il
 testo dell'omni, che di norma ripete data e ora. Se servisse l'ASR lato tool agent, è un'aggiunta separata.
+
+### Prove del tool agent (03/09, Qwen3-1.7B, via proxy del gateway)
+| Testo dell'operatore | Decisione | Latenza |
+|---|---|---|
+| "verifico subito per il 2 aprile alle dieci e mezza" | check_availability(2 aprile, **10:30**) | 1.6 s |
+| "controllo un attimo per il 5 maggio alle nove e un quarto" | check_availability(5 maggio, **09:15**) | 0.9 s |
+| "guardo se domani alle tre del pomeriggio è libero" | check_availability(domani, **15:00**) | 0.6 s |
+| "controllo un attimo il 31 marzo alle 15" | check_availability(31 marzo, 15:00) | 0.8 s |
+| "mi dica pure la data e l'ora che preferisce" | nessuna azione | 0.2 s |
+(prima delle regole sull'ora nel prompt, "dieci e mezza" veniva reso 15:00: corretto con regole+esempi.)

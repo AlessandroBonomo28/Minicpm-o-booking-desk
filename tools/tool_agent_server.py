@@ -42,7 +42,13 @@ DEFAULT_TOOLS = [{
 
 SYSTEM = ("Sei l'estrattore di azioni di uno sportello prenotazioni. Leggi la trascrizione (utente e operatore) "
           "e chiama check_availability SOLO se l'operatore sta per verificare una data e un'ora precise. "
-          "Se mancano data o ora, o non c'e' una richiesta di verifica, non chiamare nulla e rispondi 'NESSUNA AZIONE'.")
+          "Se mancano data o ora, o non c'e' una richiesta di verifica, non chiamare nulla e rispondi 'NESSUNA AZIONE'.\n"
+          "REGOLE PER L'ORA (formato HH:MM a 24 ore, converti l'italiano parlato):\n"
+          "- 'le dieci e mezza' -> 10:30; 'le nove e un quarto' -> 09:15; 'le sei meno un quarto' -> 05:45\n"
+          "- 'le quindici' -> 15:00; 'le tre del pomeriggio' -> 15:00; 'le otto di sera' -> 20:00; 'mezzogiorno' -> 12:00\n"
+          "- 'alle 15' -> 15:00; 'alle 9' -> 09:00; 'le 17 e 20' -> 17:20\n"
+          "REGOLE PER LA DATA: copia la data cosi' com'e' detta, in minuscolo ('31 marzo', '2 aprile', 'domani').\n"
+          "Non inventare mai un'ora non detta.")
 
 tok = None
 model = None

@@ -97,10 +97,16 @@ class MicCapture {
         await this.ctx.audioWorklet.addModule('/static/duplex/lib/capture-processor.js');
         const src = this.ctx.createMediaStreamSource(this.stream);
         this.node = new AudioWorkletNode(this.ctx, 'capture-processor', { processorOptions: { chunkSize: SR_IN } });
-        this.node.port.onmessage = (e) => { if (e.data.type === 'chunk') this.onChunk(e.data.audio); };
+        this.node.port.onmessage = (e) => { if (e.data.type === 'chunk' && !e.data.final) this.onChunk(e.data.audio); };
         src.connect(this.node);
+        // tiene vivo il grafo audio (il worklet gira solo se collegato a un'uscita); guadagno 0 = niente eco
+        this.sink = this.ctx.createGain(); this.sink.gain.value = 0;
+        this.node.connect(this.sink); this.sink.connect(this.ctx.destination);
+        // il worklet accumula SOLO dopo il comando start (bug del primo test: zero chunk inviati)
+        this.node.port.postMessage({ command: 'start' });
     }
     stop() {
+        try { this.node && this.node.port.postMessage({ command: 'stop' }); } catch (_) {}
         try { this.node && this.node.disconnect(); } catch (_) {}
         try { this.stream && this.stream.getTracks().forEach(t => t.stop()); } catch (_) {}
         try { this.ctx && this.ctx.close(); } catch (_) {}

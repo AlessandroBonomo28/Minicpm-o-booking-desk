@@ -13,13 +13,13 @@ from PIL import Image as PILImage
 S = "/tmp/claude-1000/-home-alex-progetti-MiniCPM-o-Demo/f961457c-85a6-44a5-a2a1-96bdcf75b1aa/scratchpad/tc"
 OUT = "/home/alex/progetti/MiniCPM-o-Demo/docs/schema-tool-calling-hud.pdf"
 
-def box(ax, x, y, w, h, text, fc, fs=9.5, ec="#37474f", bold=False):
+def box(ax, x, y, w, h, text, fc, fs=10.5, ec="#37474f", bold=False):
     ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.15", fc=fc, ec=ec, lw=1.3))
     ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=fs, fontweight=("bold" if bold else "normal"), wrap=True)
 
 def arrow(ax, x1, y1, x2, y2, text="", color="#37474f", ls="-", lw=1.4, tx=0, ty=0.15):
     ax.add_patch(FancyArrowPatch((x1, y1), (x2, y2), arrowstyle="->", mutation_scale=14, color=color, lw=lw, linestyle=ls))
-    if text: ax.text((x1 + x2) / 2 + tx, (y1 + y2) / 2 + ty, text, ha="center", va="bottom", fontsize=8, color=color)
+    if text: ax.text((x1 + x2) / 2 + tx, (y1 + y2) / 2 + ty, text, ha="center", va="bottom", fontsize=9, color=color)
 
 # ---------- Figura 1: come avviene ORA ----------
 fig, ax = plt.subplots(figsize=(11.5, 6.8)); ax.set_xlim(0, 12); ax.set_ylim(0, 7); ax.axis("off")
@@ -87,10 +87,10 @@ E = [Paragraph("Tool calling con l'omni: come avviene, cosa rallenta, come migli
 E += bl(["<b>Trigger</b>: la decisione parte quando una <b>frase dell'omni</b> si è assestata (1,2 s senza nuovi delta), non sulle tue parole.",
          "<b>Ingresso della decisione</b>: le frasi dell'omni + la trascrizione degli <b>ultimi 12 s del tuo microfono</b> (Whisper su CPU, ~1 s).",
          "<b>Uscita</b>: <i>check_availability(data, ora)</i> → gestionale → schermo HUD → frame all'omni, che lo legge e riprende da solo (misurato: 0,4-0,7 s dopo il frame)."])
-E += [Paragraph("2. Cosa stiamo rallentando", H1), img(f"{S}/fig_risorse.png", 15.5),
+E += [PageBreak(), Paragraph("2. Cosa stiamo rallentando", H1), img(f"{S}/fig_risorse.png", 15.5),
       Paragraph("Niente sta <b>sul percorso</b> dell'omni: non aspetta la trascrizione né il tool agent. La sola interferenza è la <b>contesa di risorse</b>: il tool agent usa la stessa GPU per 1-2 s a ogni chiamata; Whisper usa un po' di CPU. Effetto misurato: 2-4 singhiozzi di 1,5-1,8 s per sessione, cadenza altrimenti a 1,00 s.", P),
       Paragraph("<b>Togliere l'ASR?</b> Si può, ma allora il tool agent vedrebbe solo le frasi dell'omni, che spesso non ripete data e ora («Let me check.» e basta): è il caso dei 30 secondi di silenzio visti nei test. Il tuo testo serve; va reso più leggero, non eliminato.", P),
-      PageBreak(), Paragraph("3. Perché oggi sbaglia (falsi positivi)", H1)]
+      Paragraph("3. Perché oggi sbaglia (falsi positivi)", H1)]
 E += bl(["Vede <b>una frase alla volta</b>, senza sapere chi ha introdotto la data: ha preso per richieste una domanda dell'operatore («…for today or tomorrow evening?») e un annuncio di esito («March 31 at 3 pm is available»).",
          "Non ha memoria delle verifiche già fatte → duplicati; e il buffer di 12 s mescola la tua domanda vecchia con le parole nuove."])
 E += [Paragraph("4. Proposta", H1), img(f"{S}/fig_proposta.png", 17.5),

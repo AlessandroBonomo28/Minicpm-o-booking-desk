@@ -79,6 +79,7 @@ function startQuery(reason) {
     const delay = Math.max(0, parseFloat($('qDelay').value) || 0);
     const outcome = $('qOutcome').value;
     hudLog('sys', `verifica avviata (${reason}): ${date} ${time}, esito tra ${delay}s`);
+    micRing.length = 0;
     setHud('CHECKING', date, time);
     clearTimeout(queryTimer);
     queryTimer = setTimeout(() => {
@@ -218,7 +219,7 @@ function onModelText(text) {
         try { re = new RegExp($('autoRegex').value, 'i'); } catch (_) {}
         if (re && re.test(text)) startQuery('regex: il modello ha detto "' + (text.match(re) || [''])[0] + '"');
     }
-    if (mode === 'tool' && hud.state === 'IDLE') scheduleToolDecision(text);
+    if (mode === 'tool' && hud.state !== 'CHECKING') scheduleToolDecision(text);
     lastSeenText = text;
 }
 
@@ -246,7 +247,7 @@ function scheduleToolDecision(text) {
     toolTimer = setTimeout(() => askToolAgent(text), 1200);
 }
 async function askToolAgent(text) {
-    if (toolBusy || hud.state !== 'IDLE' || text === lastDecidedText || (text || '').length < 8) return;
+    if (toolBusy || hud.state === 'CHECKING' || text === lastDecidedText || (text || '').length < 8) return;
     toolBusy = true; lastDecidedText = text;
     try {
         const t0 = performance.now();
@@ -260,7 +261,7 @@ async function askToolAgent(text) {
         if (!calls.length) { hudLog('sys', `tool agent (${dt}s): nessuna azione — "${(d.raw || '').slice(0, 60)}"`); return; }
         for (const c of calls) {
             hudLog('hud', `TOOL AGENT (${dt}s): ${c.name}(${JSON.stringify(c.arguments)})`);
-            if (c.name === 'check_availability' && hud.state === 'IDLE') {
+            if (c.name === 'check_availability' && hud.state !== 'CHECKING') {
                 const a = c.arguments || {};
                 if (a.date) $('qDate').value = String(a.date);
                 if (a.time) $('qTime').value = String(a.time);

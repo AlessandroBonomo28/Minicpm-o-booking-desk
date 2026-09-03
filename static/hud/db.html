@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Stato del gestionale (DB prenotazioni) — ramo HUD</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#f6f7f9; color:#1f2933; }
+  header { display:flex; align-items:center; gap:14px; padding:10px 18px; background:#fff; border-bottom:1px solid #dfe3e8; }
+  header h1 { font-size:16px; margin:0; } .sub { color:#6b7280; font-size:12px; }
+  .wrap { padding:14px 18px; display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  .card { background:#fff; border:1px solid #dfe3e8; border-radius:8px; padding:12px; }
+  .card h2 { font-size:13px; margin:0 0 8px; color:#1a237e; text-transform:uppercase; letter-spacing:.04em; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid #eceff1; }
+  th { color:#6b7280; font-weight:600; font-size:12px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600; color:#fff; }
+  .available { background:#2e7d32; } .booked { background:#c62828; } .error { background:#b71c1c; }
+  .IDLE { background:#546e7a; } .CHECKING { background:#f9a825; color:#1a1a1a; } .OK { background:#2e7d32; } .NO { background:#c62828; } .ERR { background:#b71c1c; }
+  .hudbox { font-size:15px; margin:6px 0 10px; }
+  .small { font-size:12px; color:#6b7280; }
+  .log { max-height: 60vh; overflow:auto; }
+  .fresh { animation: flash 1.2s ease-out; } @keyframes flash { from { background:#fff9c4; } to { background:transparent; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Stato del gestionale (DB prenotazioni)</h1>
+  <span class="sub">sola lettura · si aggiorna da solo ogni secondo · sorgente: <code>/api/hud_db</code> (scritto dalla pagina HUD a ogni verifica)</span>
+  <span class="sub" style="margin-left:auto" id="upd">—</span>
+</header>
+<div class="wrap">
+  <div>
+    <div class="card">
+      <h2>Schermo dell'operatore (stato corrente dell'HUD)</h2>
+      <div class="hudbox"><span class="pill IDLE" id="hudState">IDLE</span> <span id="hudSlot"></span> <span class="small" id="hudUpd"></span></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2>Slot conosciuti dal gestionale</h2>
+      <table><thead><tr><th>Data</th><th>Ora</th><th>Stato</th><th>Ultima verifica</th></tr></thead><tbody id="slots"><tr><td colspan="4" class="small">nessuno slot ancora</td></tr></tbody></table>
+      <div class="small" style="margin-top:6px">Uno slot entra nel gestionale la prima volta che viene verificato; lo stato è quello scelto nel pannello dell'HUD (LIBERO/OCCUPATO). Le verifiche in ERRORE non creano slot.</div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Registro delle verifiche (dal più recente)</h2>
+    <div class="log"><table><thead><tr><th>Quando</th><th>Richiesta</th><th>Esito</th><th>Avviata da</th><th>Ritardo</th></tr></thead><tbody id="log"><tr><td colspan="5" class="small">nessuna verifica ancora</td></tr></tbody></table></div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const labelStatus = { available: 'LIBERO', booked: 'OCCUPATO', error: 'ERRORE' };
+const labelHud = { IDLE: 'IDLE', CHECKING: 'VERIFICA IN CORSO', OK: 'LIBERO', NO: 'OCCUPATO', ERR: 'ERRORE' };
+let lastLogLen = -1;
+async function refresh() {
+  try {
+    const r = await fetch('/api/hud_db', { cache: 'no-store' });
+    const d = await r.json();
+    const h = d.hud || {};
+    const st = h.state || 'IDLE';
+    $('hudState').className = 'pill ' + st; $('hudState').textContent = labelHud[st] || st;
+    $('hudSlot').textContent = (h.date || h.time) ? `${(h.date || '').toUpperCase()} ${h.time || ''}` : '';
+    $('hudUpd').textContent = h.updated ? `(aggiornato ${h.updated.slice(11, 19)})` : '';
+    const slots = Object.values(d.slots || {}).sort((a, b) => (b.last_check || '').localeCompare(a.last_check || ''));
+    $('slots').innerHTML = slots.length ? slots.map(s => `<tr><td>${esc(s.date).toUpperCase()}</td><td>${esc(s.time)}</td><td><span class="pill ${esc(s.status)}">${labelStatus[s.status] || esc(s.status)}</span></td><td class="small">${esc((s.last_check || '').slice(11, 19))}</td></tr>`).join('')
+      : '<tr><td colspan="4" class="small">nessuno slot ancora</td></tr>';
+    const log = (d.log || []).slice().reverse();
+    const fresh = lastLogLen >= 0 && log.length > lastLogLen; lastLogLen = log.length;
+    $('log').innerHTML = log.length ? log.map((e, i) => `<tr class="${fresh && i === 0 ? 'fresh' : ''}"><td class="small">${esc((e.ts || '').slice(11, 19))}</td><td>${esc(e.date).toUpperCase()} ${esc(e.time)}</td><td><span class="pill ${esc(e.result)}">${labelStatus[e.result] || esc(e.result)}</span></td><td class="small">${esc(e.source)}</td><td class="small">${e.delay_s ?? ''} s</td></tr>`).join('')
+      : '<tr><td colspan="5" class="small">nessuna verifica ancora</td></tr>';
+    $('upd').textContent = 'ultimo aggiornamento ' + new Date().toLocaleTimeString();
+  } catch (e) { $('upd').textContent = 'non raggiungibile: ' + e.message; }
+}
+refresh(); setInterval(refresh, 1000);
+</script>
+</body>
+</html>

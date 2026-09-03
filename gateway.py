@@ -741,6 +741,70 @@ async def get_presets():
     return _presets_cache
 
 
+# ============ Ramo HUD: stato del "gestionale" (DB simulato, sola lettura dalla pagina db.html) ============
+_HUD_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "hud_db.json")
+_HUD_DB: Dict[str, Any] = {"slots": {}, "log": [], "hud": {"state": "IDLE", "date": "", "time": "", "updated": None}}
+
+
+def _hud_db_load():
+    global _HUD_DB
+    try:
+        with open(_HUD_DB_PATH) as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            _HUD_DB.update({k: d.get(k, _HUD_DB[k]) for k in _HUD_DB})
+    except Exception:
+        pass
+
+
+def _hud_db_save():
+    try:
+        os.makedirs(os.path.dirname(_HUD_DB_PATH), exist_ok=True)
+        with open(_HUD_DB_PATH, "w") as f:
+            json.dump(_HUD_DB, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        logger.warning(f"[hud_db] salvataggio fallito: {e}")
+
+
+_hud_db_load()
+
+
+@app.get("/api/hud_db")
+async def hud_db_get():
+    return JSONResponse(content=_HUD_DB)
+
+
+@app.post("/api/hud_db/check")
+async def hud_db_check(request: Request):
+    """La verifica dell'HUD: registra la richiesta, aggiorna/legge lo slot, ritorna l'esito.
+    outcome (ok|no|err) arriva dal pannello dell'HUD (controllo manuale dell'esperimento)."""
+    body = await request.json()
+    date = str(body.get("date") or "").strip().lower(); tm = str(body.get("time") or "").strip()
+    outcome = body.get("outcome") or "ok"
+    key = f"{date} {tm}".strip()
+    status = {"ok": "available", "no": "booked", "err": "error"}.get(outcome, "available")
+    if status != "error":
+        _HUD_DB["slots"][key] = {"date": date, "time": tm, "status": status, "last_check": datetime.now().isoformat(timespec="seconds")}
+    _HUD_DB["log"].append({"ts": datetime.now().isoformat(timespec="seconds"), "date": date, "time": tm, "result": status,
+                           "source": body.get("source") or "?", "delay_s": body.get("delay_s")})
+    _HUD_DB["log"] = _HUD_DB["log"][-200:]
+    _hud_db_save()
+    return JSONResponse(content={"date": date, "time": tm, "status": status})
+
+
+@app.post("/api/hud_db/hud_state")
+async def hud_db_hud_state(request: Request):
+    body = await request.json()
+    _HUD_DB["hud"] = {"state": body.get("state"), "date": body.get("date"), "time": body.get("time"), "updated": datetime.now().isoformat(timespec="seconds")}
+    return JSONResponse(content={"ok": True})
+
+
+@app.post("/api/hud_db/reset")
+async def hud_db_reset():
+    _HUD_DB["slots"].clear(); _HUD_DB["log"].clear(); _hud_db_save()
+    return JSONResponse(content={"ok": True})
+
+
 @app.post("/api/tool_agent/decide")
 async def tool_agent_decide(request: Request):
     """Ramo HUD: inoltra al modello SEPARATO di tool calling (tools/tool_agent_server.py, :22700)."""

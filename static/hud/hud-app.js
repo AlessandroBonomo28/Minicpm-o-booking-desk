@@ -69,6 +69,8 @@ function hudSync(force = false) {
 function setHud(state, date, time) {
     hud.state = state; if (date !== undefined) hud.date = date; if (time !== undefined) hud.time = time;
     hudSync();
+    fetch('/api/hud_db/hud_state', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ state: hud.state, date: hud.date, time: hud.time }) }).catch(() => {});
 }
 
 // simulatore del backend: IN CORSO → (ritardo) → esito
@@ -82,6 +84,9 @@ function startQuery(reason) {
     micRing.length = 0;
     setHud('CHECKING', date, time);
     clearTimeout(queryTimer);
+    // la verifica passa dal "gestionale" del server (stato visibile in /static/hud/db.html)
+    fetch('/api/hud_db/check', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ date, time, outcome, source: reason, delay_s: delay }) }).catch(() => {});
     queryTimer = setTimeout(() => {
         setHud(outcome === 'ok' ? 'OK' : outcome === 'no' ? 'NO' : 'ERR');
         hudLog('sys', `backend ha risposto: ${hud.state}`);

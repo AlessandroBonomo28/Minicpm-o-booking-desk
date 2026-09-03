@@ -113,3 +113,10 @@ sugli ultimi 12 s del microfono (così il tool agent legge ANCHE le parole dell'
 (c) al frame dell'esito ha parlato DA SOLO (senza che tu parlassi) e dopo quanti secondi (registro: REAZIONE +x s)?
 (d) l'esito detto è quello sullo schermo? (e) data/ora sull'HUD giuste (registro: TOOL AGENT …)?
 (f) qualsiasi cosa strana (loop, silenzio lungo, risposta a una domanda vecchia).
+
+## Pagina "stato del gestionale" (03/09)
+`https://localhost:8006/static/hud/db.html` — sola lettura, si aggiorna ogni secondo: stato corrente dello
+schermo HUD, slot conosciuti (data, ora, LIBERO/OCCUPATO, ultima verifica), registro delle verifiche (quando,
+richiesta, esito, avviata da: modello separato/regex/manuale, ritardo). Sorgente: `GET /api/hud_db` (gateway del
+ramo italiano, persistito in `data/hud_db.json`); la pagina HUD scrive a ogni verifica (`/api/hud_db/check`)
+e a ogni cambio di schermo (`/api/hud_db/hud_state`). `POST /api/hud_db/reset` azzera.

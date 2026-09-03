@@ -64,6 +64,14 @@ bash tools/run_demo_v13.sh
 bash tools/run_demo_base.sh
 ```
 
+
+### Ramo HUD (sperimentale: frame come segnale + tool calling con modello separato)
+
+```bash
+bash tools/run_demo_hud.sh
+```
+→ codice del ramo italiano + **pesi BASE** + tool agent Qwen3-1.7B (porta 22700). Pagina: `https://localhost:8006/static/hud/hud.html`. Doc: `plan/ramo-hud.md`.
+
 Tempi: 1-4 minuti (il caricamento dei pesi dipende dalla cache del disco). Lo script
 stampa le verifiche alla fine (`worker: OK`, `gateway: OK`, `DEMO ... SU`).
 Log in `logs_demo/` (`backend.log`, `worker.log`, `gateway.log`, `launch.log`).

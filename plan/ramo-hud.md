@@ -53,3 +53,19 @@ MiniCPM-o 4.5, con i token speciali `<tool_call>`/`<tool_response>`), funzione `
 Verdetto: la grammatica dei tool esiste nel tokenizer/template (ereditata da Qwen3-8B) ma il modello omni
 NON la usa: il comportamento di chiamata è stato smussato dal training omni. Il tool calling va costruito
 fuori dal modello (estrazione dallo stream di testo / frase-segnale) — coerente con la spec §6.
+
+## Tool calling con MODELLO SEPARATO (decisione di Alessandro, 03/09)
+
+L'omni non chiama tool (sonda sopra). Il tool calling lo fa un modello a parte, nato per questo:
+- `tools/tool_agent_server.py` (porta 22700, env minicpm): **Qwen3-1.7B** (stessa famiglia del cervello,
+  tool calling nativo via chat template, ~3.4 GB bf16 sulla stessa GPU accanto all'omni).
+  `POST /decide {transcript:[{role,text}]}` → `{tool_calls:[{name,arguments}], raw}`. Funzione di default
+  `check_availability(date,time)`; prompt: chiama SOLO se l'operatore sta per verificare data+ora precise.
+- Gateway (ramo italiano): proxy `POST /api/tool_agent/decide` → 22700 (la pagina è HTTPS, niente mixed content).
+- Pagina HUD, selettore "Trigger": **modello separato** (default) / regex / solo manuale. Nel modo "modello
+  separato" il testo dell'omni (turno che si assesta, ~1.2 s senza nuovi delta) viene mandato al tool agent;
+  se risponde `check_availability`, data/ora estratte finiscono sull'HUD (eco della richiesta) e parte la
+  verifica simulata → frame. Il registro mostra `TOOL AGENT (x s): check_availability({...})`.
+- Launcher `tools/run_demo_hud.sh` avvia anche il tool agent (dopo il backend) e ne verifica la salute.
+Limite noto: la "trascrizione utente" non esiste nell'e2e (l'omni non produce ASR); il tool agent legge il
+testo dell'omni, che di norma ripete data e ora. Se servisse l'ASR lato tool agent, è un'aggiunta separata.

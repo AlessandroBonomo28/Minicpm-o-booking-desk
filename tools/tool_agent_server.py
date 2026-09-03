@@ -19,6 +19,8 @@ import json
 import re
 import sys
 import threading
+import urllib.request
+ASR_URL = "http://127.0.0.1:22710/transcribe"
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL_DIR = "/home/alex/progetti/MiniCPM-o-Demo/modelli/Qwen3-1.7B"
@@ -97,7 +99,24 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         try:
             req = json.loads(self.rfile.read(n) or b"{}")
-            res = decide(req.get("transcript") or [], req.get("tools") or DEFAULT_TOOLS)
+            transcript = list(req.get("transcript") or [])
+            user_text = ""
+            if req.get("user_audio_b64"):
+                # ASR degli ultimi secondi del microfono (servizio separato, env cosyvoice2)
+                try:
+                    body = json.dumps({"audio_b64": req["user_audio_b64"], "language": req.get("language") or "en"}).encode()
+                    r = urllib.request.urlopen(urllib.request.Request(ASR_URL, data=body, headers={"content-type": "application/json"}), timeout=20)
+                    user_text = (json.loads(r.read()).get("text") or "").strip()
+                except Exception as e:
+                    user_text = ""; sys.stderr.write(f"[tool-agent] ASR non disponibile: {e}\n")
+                if user_text:
+                    # la voce dell'utente precede l'ultima battuta dell'operatore
+                    if transcript and transcript[-1].get("role") == "assistant":
+                        transcript.insert(len(transcript) - 1, {"role": "user", "text": user_text})
+                    else:
+                        transcript.append({"role": "user", "text": user_text})
+            res = decide(transcript, req.get("tools") or DEFAULT_TOOLS)
+            res["user_text"] = user_text
             self._send(200, json.dumps(res, ensure_ascii=False).encode())
         except Exception as e:
             self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}).encode())

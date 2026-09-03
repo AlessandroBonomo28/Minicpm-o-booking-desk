@@ -86,3 +86,30 @@ duplex mode…" + ruolo di operatore), voce di riferimento inglese (preset Engli
 (BOOKING DESK / CHECKING... / AVAILABLE / BOOKED / ERROR), tool agent con regole per gli orari parlati in inglese.
 Prove EN: "let me check March 31st at 3 pm" → (March 31st, 15:00) 1.9 s; "April 2nd, half past ten" → 10:30;
 "tomorrow at quarter past nine" → 09:15; "Hi there! How can I help?" → nessuna azione (0.1 s).
+
+## Caso d'uso unico e protocollo di test standard (03/09)
+
+**Caso d'uso**: sportello prenotazioni, UNA funzione `check_availability(date, time)`, UNO schermo a semaforo
+(CHECKING → AVAILABLE / BOOKED / ERROR). Prompt essenziale (3 frasi):
+*"You are in duplex mode, where you can listen and speak at the same time. You work at a booking desk. When the
+user asks about a date and time, say "let me check" and wait. When the screen shows the result, read it out."*
+
+**Sistema semplificato**: omni (parla/ascolta) · tool agent Qwen3-1.7B (decide la chiamata) + ASR whisper-small
+sugli ultimi 12 s del microfono (così il tool agent legge ANCHE le parole dell'utente: prima leggeva solo l'omni e
+"Let me check." da solo non bastava) · schermo HUD (frame solo al cambio).
+
+**Domande standard** (in inglese, una per sessione salvo D5; esito scelto prima nel pannello):
+| # | Cosa dire | Esito impostato | Comportamento atteso |
+|---|---|---|---|
+| D1 | "Is March 31st at 3 pm available?" | AVAILABLE | dice "let me check" → tace → al frame dell'esito riprende da solo e dice che è disponibile |
+| D2 | "Is March 31st at 3 pm available?" | BOOKED | come D1, ma dice che è occupato |
+| D3 | "Is March 31st at 3 pm available?" | ERROR | come D1, ma segnala l'errore (non inventa) |
+| D4 | "Is April 2nd at half past ten free?" | AVAILABLE | tool agent estrae `April 2nd, 10:30`; HUD mostra 10:30 |
+| D5 | "Is March 31st at 3 pm available?" … poi subito "And April 3rd at 9?" | AVAILABLE / BOOKED | due verifiche in fila, ogni risposta attribuita alla data giusta |
+| D6 | "How are you today?" | — | chiacchiera, NESSUNA verifica avviata |
+| D7 | "Is March 31st at 3 pm available?" poi, durante CHECKING: "Actually, never mind." | AVAILABLE | vediamo cosa fa quando il frame arriva dopo un ripensamento |
+
+**Feedback che serve, per ogni domanda**: (a) ha detto "let me check"? (b) è stato zitto durante CHECKING?
+(c) al frame dell'esito ha parlato DA SOLO (senza che tu parlassi) e dopo quanti secondi (registro: REAZIONE +x s)?
+(d) l'esito detto è quello sullo schermo? (e) data/ora sull'HUD giuste (registro: TOOL AGENT …)?
+(f) qualsiasi cosa strana (loop, silenzio lungo, risposta a una domanda vecchia).

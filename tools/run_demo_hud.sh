@@ -13,6 +13,8 @@ pkill -f "py_backend.server" 2>/dev/null
 pkill -f "worker.py --host" 2>/dev/null
 pkill -f "gateway.py --host" 2>/dev/null
 pkill -f "cascade_tts_server" 2>/dev/null
+pkill -f "tool_agent_server" 2>/dev/null
+pkill -f "asr_server.py" 2>/dev/null
 sleep 3
 
 echo "=== backend BASE + codice ramo italiano, pagina HUD (carica ~4 min) — $(date '+%H:%M')"
@@ -28,6 +30,8 @@ for i in $(seq 1 90); do
 done
 curl -sf http://127.0.0.1:22500/health >/dev/null || { echo "BACKEND NON RISPONDE"; exit 1; }
 
+echo "=== ASR di servizio (whisper small, env cosyvoice2) — $(date '+%H:%M')"
+setsid /home/alex/miniconda3/envs/cosyvoice2/bin/python tools/asr_server.py --port 22710 --model small > "$LOGS/asr_server.log" 2>&1 < /dev/null &
 echo "=== tool agent (Qwen3-1.7B, modello separato per il tool calling) — $(date '+%H:%M')"
 setsid "$PY" tools/tool_agent_server.py --port 22700 > "$LOGS/tool_agent.log" 2>&1 < /dev/null &
 echo "=== worker + gateway — $(date '+%H:%M')"
@@ -45,6 +49,7 @@ curl -s -X PUT -H "content-type: application/json" \
 
 for i in $(seq 1 40); do curl -sf http://127.0.0.1:22700/health >/dev/null 2>&1 && break; sleep 3; done
 echo "--- verifiche — $(date '+%H:%M')"
+curl -sf http://127.0.0.1:22710/health >/dev/null && echo "asr: OK" || { echo "asr: KO"; tail -3 "$LOGS/asr_server.log"; }
 curl -sf http://127.0.0.1:22700/health >/dev/null && echo "tool agent: OK" || { echo "tool agent: KO"; tail -3 "$LOGS/tool_agent.log"; }
 curl -sf http://127.0.0.1:22400/health >/dev/null && echo "worker: OK" || echo "worker: KO"
 curl -skf https://127.0.0.1:8006/ >/dev/null && echo "gateway: OK" || echo "gateway: KO"

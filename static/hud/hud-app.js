@@ -142,7 +142,7 @@ async function startSession() {
     setHud('IDLE', '', '');
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
-    transcript.length = 0; lastDecidedText = '';
+    transcript.length = 0; lastDecidedText = ''; micRing.length = 0;
 
     session = new RealtimeSession('hud', {
         getMaxKvTokens: () => 8192,
@@ -175,6 +175,7 @@ async function startSession() {
         await session.start($('systemPrompt').value, preparePayload, async () => {
             if ($('sendInitial').checked) hudSync(true);
             mic = new MicCapture((audioF32) => {
+                micRing.push(new Float32Array(audioF32)); if (micRing.length > MIC_RING_SEC) micRing.shift();
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
                 if (hud.pendingFrame) {
                     msg.frame_base64_list = [hud.pendingFrame];
@@ -223,6 +224,14 @@ function onModelText(text) {
 
 // ---- modello SEPARATO di tool calling: legge la trascrizione e decide la chiamata
 const transcript = [];          // [{role:'assistant'|'user', text}]
+const MIC_RING_SEC = 12;        // ultimi secondi di microfono da far trascrivere al tool agent
+const micRing = [];
+function micRingB64() {
+    if (!micRing.length) return null;
+    const n = micRing.reduce((a, c) => a + c.length, 0); const out = new Float32Array(n); let o = 0;
+    for (const c of micRing) { out.set(c, o); o += c.length; }
+    return arrayBufferToBase64(out.buffer);
+}
 let toolTimer = null, toolBusy = false, lastDecidedText = '';
 function noteAssistantText(text) {
     if (!text) return;
@@ -242,10 +251,11 @@ async function askToolAgent(text) {
     try {
         const t0 = performance.now();
         const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ transcript }) });
+            body: JSON.stringify({ transcript, user_audio_b64: micRingB64(), language: 'en' }) });
         const d = await r.json();
         const dt = ((performance.now() - t0) / 1000).toFixed(1);
         if (!r.ok) { hudLog('warn', `tool agent: ${d.error || r.status}`); return; }
+        if (d.user_text) conv('sys', 'TU (ASR): ' + d.user_text);
         const calls = d.tool_calls || [];
         if (!calls.length) { hudLog('sys', `tool agent (${dt}s): nessuna azione — "${(d.raw || '').slice(0, 60)}"`); return; }
         for (const c of calls) {

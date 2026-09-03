@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>HUD — segnale visivo asincrono (ramo sperimentale)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#f6f7f9; --panel:#fff; --line:#dfe3e8; --ink:#1f2933; --mute:#6b7280; --accent:#1a237e; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:14px; padding:10px 18px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; }
+  header .sub { color:var(--mute); font-size:12px; }
+  .wrap { display:grid; grid-template-columns: 500px 1fr; gap:14px; padding:14px 18px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .card h2 { font-size:13px; margin:0 0 8px; color:var(--accent); text-transform:uppercase; letter-spacing:.04em; }
+  canvas#hud { width:448px; height:448px; border:2px solid #263238; border-radius:6px; display:block; background:#111; }
+  .row { display:flex; gap:8px; align-items:center; margin:6px 0; flex-wrap:wrap; font-size:13px; }
+  .row label { color:var(--mute); min-width:110px; }
+  input[type=text], input[type=number], textarea, select { font: inherit; padding:5px 7px; border:1px solid var(--line); border-radius:5px; }
+  textarea { width:100%; min-height:88px; box-sizing:border-box; }
+  button { font:inherit; padding:7px 12px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.danger { background:#c62828; color:#fff; border-color:#c62828; }
+  button:disabled { opacity:.45; cursor:default; }
+  .log { height:260px; overflow:auto; font-size:13px; line-height:1.45; border:1px solid var(--line); border-radius:6px; padding:8px; background:#fafbfc; }
+  .log .ai { color:#0d47a1; } .log .sys { color:var(--mute); } .log .hud { color:#2e7d32; font-weight:600; } .log .warn { color:#c62828; }
+  .log .t { color:#9aa3ad; font-variant-numeric: tabular-nums; margin-right:6px; }
+  .lamp { display:inline-block; width:10px; height:10px; border-radius:50%; background:#9e9e9e; margin-right:6px; }
+  .lamp.on { background:#43a047; } .lamp.speak { background:#fb8c00; }
+  .small { font-size:12px; color:var(--mute); }
+</style>
+</head>
+<body>
+<header>
+  <h1>HUD — segnale visivo asincrono</h1>
+  <span class="sub">ramo sperimentale · il frame è un <b>clock</b>, non uno store · modello: quello del backend in esecuzione (usare il BASE)</span>
+  <span style="margin-left:auto" class="small"><span class="lamp" id="lamp"></span><span id="stateText">disconnesso</span></span>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="card">
+      <h2>Schermo dell'operatore (quello che il modello vede)</h2>
+      <canvas id="hud" width="448" height="448"></canvas>
+      <div class="row" style="margin-top:8px">
+        <label>Stato HUD</label><b id="hudState">IDLE</b>
+        <span class="small" id="frameInfo">nessun frame inviato</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Simulatore del backend (la "query sul DB")</h2>
+      <div class="row"><label>Data / ora</label>
+        <input type="text" id="qDate" value="31 MARZO" style="width:110px"> <input type="text" id="qTime" value="15:00" style="width:70px"></div>
+      <div class="row"><label>Esito</label>
+        <select id="qOutcome"><option value="ok">LIBERO (verde)</option><option value="no">OCCUPATO (rosso)</option><option value="err">ERRORE / TIMEOUT (rosso)</option></select>
+        <label style="min-width:auto">ritardo</label><input type="number" id="qDelay" value="4" min="0" max="60" style="width:60px"> s</div>
+      <div class="row">
+        <button class="primary" id="btnQuery" disabled>Avvia verifica → HUD "IN CORSO", poi esito</button>
+        <button id="btnReset" disabled>Reset HUD (IDLE)</button>
+      </div>
+      <div class="row"><label>Auto-trigger</label>
+        <input type="checkbox" id="autoTrig" checked> <span class="small">avvia la verifica quando il modello dice:</span>
+        <input type="text" id="autoRegex" value="controll|verific|un attimo|un momento|guardo" style="width:230px"></div>
+      <div class="row"><label>Frame iniziale</label>
+        <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
+      <div class="row"><label>Frame manuale</label><button id="btnFrame" disabled>Invia il frame corrente ora</button></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Sessione</h2>
+      <div class="row"><label>Prompt di sistema</label></div>
+      <textarea id="systemPrompt">Streaming Omni Conversation. Sei l'operatore di uno sportello prenotazioni e parli sempre in italiano. Davanti a te c'è uno schermo: quando l'utente chiede una disponibilità, rispondi "controllo un attimo", poi taci e guarda lo schermo. Quando lo schermo mostra il risultato della verifica, comunicalo subito all'utente. Se lo schermo dice "verifica in corso", aspetta in silenzio.</textarea>
+      <div class="row">
+        <label>Voce di riferimento</label>
+        <select id="refChoice"><option value="italiano">preset italiano (audio_duplex)</option><option value="none">nessuna (default backend)</option></select>
+        <label style="min-width:auto">Delay riproduzione</label><input type="number" id="playbackDelay" value="600" step="50" style="width:70px"> ms
+        <label style="min-width:auto">Length penalty</label><input type="number" id="lengthPenalty" value="1.0" step="0.05" style="width:70px">
+      </div>
+      <div class="row">
+        <button class="primary" id="btnStart">Avvia sessione (mic + HUD)</button>
+        <button class="danger" id="btnStop" disabled>Stop</button>
+        <button id="btnForceListen" disabled>Force Listen</button>
+        <span class="small">chunk inviati: <b id="chunks">0</b> · frame inviati: <b id="framesSent">0</b></span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Conversazione</h2>
+      <div class="log" id="conv"></div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Registro eventi HUD (per misurare la reazione al frame)</h2>
+      <div class="log" id="hudLog" style="height:180px"></div>
+      <div class="small" style="margin-top:6px">Test 1 = dopo un cambio di frame il modello riprende a parlare da solo e cita l'esito. Il registro segna "REAZIONE +x s" al primo testo del modello dopo ogni frame.</div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/static/hud/hud-app.js"></script>
+</body>
+</html>

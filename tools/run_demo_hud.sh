@@ -31,7 +31,7 @@ done
 curl -sf http://127.0.0.1:22500/health >/dev/null || { echo "BACKEND NON RISPONDE"; exit 1; }
 
 echo "=== ASR di servizio (whisper small, env cosyvoice2) — $(date '+%H:%M')"
-setsid /home/alex/miniconda3/envs/cosyvoice2/bin/python tools/asr_server.py --port 22710 --model small > "$LOGS/asr_server.log" 2>&1 < /dev/null &
+setsid /home/alex/miniconda3/envs/cosyvoice2/bin/python tools/asr_server.py --port 22710 --model small --device cpu > "$LOGS/asr_server.log" 2>&1 < /dev/null &
 echo "=== tool agent (Qwen3-1.7B, modello separato per il tool calling) — $(date '+%H:%M')"
 setsid "$PY" tools/tool_agent_server.py --port 22700 > "$LOGS/tool_agent.log" 2>&1 < /dev/null &
 echo "=== worker + gateway — $(date '+%H:%M')"

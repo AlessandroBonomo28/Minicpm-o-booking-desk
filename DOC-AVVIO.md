@@ -92,6 +92,13 @@ Preset disponibili nel pannello: `Chiamata in italiano` (prompt lungo, quello de
 penalità 1.05), `Italiano (prompt nativo)` (`Streaming Omni Conversation. Parla sempre in italiano.`,
 penalità 1.0), `English Call`, `中文通话`.
 
+### Rileggere le conversazioni registrate (con le parole dell'utente trascritte)
+
+```bash
+/home/alex/miniconda3/envs/cosyvoice2/bin/python tools/transcribe_sessions.py --last 3
+```
+(`--sessions-dir ../MiniCPM-o-Demo-upstream-puro/data/sessions` per le sessioni fatte sul ramo puro.)
+
 ---
 
 ## 3. Avvio manuale, comando per comando (se vuoi capire cosa fa lo script)

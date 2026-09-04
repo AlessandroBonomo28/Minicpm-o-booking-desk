@@ -27,6 +27,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from threading import Thread
+from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -4473,6 +4474,41 @@ class DuplexCapability:
         # 格式: [[unit0_prefill_tokens], [unit1_prefill_tokens], ...]
         self.prefill_schema_tokens = []
         self._current_unit_prefill_tokens = []
+
+    def set_sliding_window(self, mode: str = "off", high_tokens: int = 4000, low_tokens: int = 3500) -> None:
+        """Finestra scorrevole PER SESSIONE (da chiamare prima di prepare): "off" | "basic" | "context".
+        Upstream la configura solo all'init (default off): qui la si accende dal payload di prepare."""
+        mode = (mode or "off").lower()
+        if mode not in ("off", "basic", "context"):
+            mode = "off"
+        cur = self.decoder._window_config
+        self.decoder.set_window_config(
+            DuplexWindowConfig(
+                sliding_window_mode=mode,
+                basic_window_high_tokens=int(high_tokens),
+                basic_window_low_tokens=int(low_tokens),
+                context_previous_max_tokens=cur.context_previous_max_tokens,
+                context_max_units=cur.context_max_units,
+            )
+        )
+        self.decoder.set_window_enabled(mode != "off")
+        logger.info("[Duplex] sliding window (session): mode=%s high=%d low=%d", mode, int(high_tokens), int(low_tokens))
+
+    def window_stats(self) -> Dict[str, Any]:
+        """Stato compatto della finestra per le metriche: modalita', soglie, scorrimenti, token/unita' scartati."""
+        d = self.decoder
+        cfg = d._window_config
+        return {
+            "mode": cfg.sliding_window_mode,
+            "enabled": bool(d._window_enabled),
+            "high": int(cfg.basic_window_high_tokens),
+            "low": int(cfg.basic_window_low_tokens),
+            "events": int(d._sliding_event_count),
+            "dropped_tokens": int(d._total_dropped_tokens),
+            "dropped_units": int(d._total_dropped_units),
+            "units": len(d._unit_history),
+            "preserved": int(d._system_preserve_length),
+        }
 
     def prepare(
         self,

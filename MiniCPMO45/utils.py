@@ -1481,6 +1481,11 @@ class StreamDecoder:
             self._sliding_event_count += 1
             self._total_dropped_tokens += cache_len_before - cache_len
             self._total_dropped_units += dropped_count
+            logger.info(
+                "[Duplex] sliding window #%d: dropped %d units (%d tokens), cache %d -> %d (preserved %d)",
+                self._sliding_event_count, dropped_count, cache_len_before - cache_len, cache_len_before, cache_len,
+                self._system_preserve_length,
+            )
 
             # consistency check
             expected = self._system_preserve_length + sum(u["length"] for u in self._unit_history)

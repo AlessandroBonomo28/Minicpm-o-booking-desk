@@ -1069,11 +1069,16 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     # merge: si riparte da zero se non si stava raccogliendo; un campo si sovrascrive solo con un valore non vuoto e valido
     rejected = {}
     clean = lambda v: "" if str(v if v is not None else "").strip().lower() in ("", "none", "null", "unknown", "n/a") else str(v).strip()
+    inherit = False
+    if fsm.get("state") == "CONFIRM":
+        # offerta in sospeso e nessun mese detto: "yes" / "that day" / "the 6th" / "at 3 pm" si riferiscono all'offerta
+        inherit = not clean(args.get("month")) and not clean(args.get("date"))
+    elif fsm.get("state") == "DONE" and (fsm.get("slots") or {}).get("month"):
+        # richiesta chiusa: "the next day" / "the same day at 5" = nuovi parametri sulla stessa base (solo se si dice qualcosa)
+        inherit = not clean(args.get("month")) and not clean(args.get("date")) and any(clean(args.get(k)) for k in ("day", "time"))
     if fsm.get("state") == "COLLECTING":
         slots = dict(_HUD_EMPTY_SLOTS, **(fsm.get("slots") or {}))
-    elif fsm.get("state") == "CONFIRM" and not clean(args.get("month")) and not clean(args.get("date")):
-        # offerta in sospeso e nessun mese detto: "yes" / "that day" / "the 6th" / "at 3 pm" si riferiscono all'offerta ->
-        # si parte da mese, giorno (e ora se l'offerta ne aveva una) dell'offerta; cio' che viene detto sovrascrive
+    elif inherit:
         off = fsm.get("slots") or {}
         slots = dict(_HUD_EMPTY_SLOTS, month=off.get("month", ""), day=off.get("day", ""))
         if off.get("time") and off.get("time") != "all-day":
@@ -1119,6 +1124,11 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     if fsm.get("state") == "COLLECTING" and not any(clean(args.get(k)) for k in ("date", "month", "day", "time")) and user_text:
         _route_bare_number(user_text)   # il modello non ha estratto nulla ma la battuta era un numero secco
     slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
+    if fsm.get("state") == "DONE" and intent == "book" and fsm.get("status") == "confirmed":
+        last = fsm.get("slots") or {}
+        if slots["date"] == last.get("date") and _hud_norm_time(slots.get("time")) == last.get("time"):
+            _hud_db_save()   # stessa prenotazione appena fatta ("thank you" letto come book): azione vuota, non un doppione
+            return fsm, False
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
     if "time" in rejected and "time" not in missing:
         missing.append("time")   # verifica con un'ora detta ma non capita: si richiede l'ora, non si assume la giornata

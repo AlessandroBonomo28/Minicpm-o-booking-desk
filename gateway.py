@@ -1098,6 +1098,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     fsm = _HUD_DB.get("fsm") or _hud_fsm_reset()
     fsm["last_user_text"] = user_text or ""
     now_s = datetime.now().isoformat(timespec="seconds")
+    confirmed = False   # True solo con accept: e' l'unico modo di SCRIVERE una prenotazione
     call = next((c for c in (calls or []) if isinstance(c, dict) and c.get("name")), None)
     state = fsm.get("state")
     clean = lambda v: "" if str(v if v is not None else "").strip().lower() in ("", "none", "null", "unknown", "n/a") else str(v).strip()
@@ -1106,24 +1107,27 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         fsm.update(kw); fsm["updated"] = now_s; fsm["seq"] = int(fsm.get("seq") or 0) + 1; _hud_db_save(); return fsm, True
 
     if not call or str(call["name"]).lower() == "none":
-        if state == "CONFIRM":
-            return bump(state="DONE")   # l'offerta vale solo per la risposta del cliente
-        _hud_db_save(); return fsm, False
+        if state == "CONFIRM" and fsm.get("intent") == "check":
+            return bump(state="DONE")   # l'offerta di una verifica vale solo per la risposta del cliente
+        _hud_db_save(); return fsm, False   # una prenotazione in attesa di conferma resta in attesa (esce con accept/decline/cancel)
     name = str(call["name"]).lower(); args = dict(call.get("arguments") or {})
     ref = fsm.get("slots") or {}
 
     if name == "cancel":
         return _hud_fsm_reset(note="REQUEST CANCELLED" if state == "COLLECTING" else ""), True
     if name == "decline":
+        if state == "CONFIRM" and fsm.get("intent") == "book":
+            return _hud_fsm_reset(note="BOOKING NOT CONFIRMED"), True   # prenotazione rifiutata alla conferma: nulla scritto
         if state == "CONFIRM": return bump(state="DONE")
         _hud_db_save(); return fsm, False
     if name == "accept":
         if state != "CONFIRM":
             _hud_db_save(); return fsm, False
-        # prenota lo slot offerto: se l'offerta era a giornata, manca l'ora
+        # prenota lo slot offerto / conferma la prenotazione in sospeso: se manca l'ora la si chiede
         intent = "book"; args = {"time": args.get("time")}; slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
         if ref.get("time") and ref.get("time") != "all-day":
             slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
+        confirmed = True
     elif name == "shift_day":
         if not ref.get("month") or state not in ("CONFIRM", "DONE", "COLLECTING"):
             _hud_db_save(); return fsm, False
@@ -1154,8 +1158,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         if state == "COLLECTING":
             intent = fsm["intent"]; slots = dict(_HUD_EMPTY_SLOTS, **ref)
         elif state == "CONFIRM":
-            # correzione/aggiunta sull'offerta: eredita l'offerta, l'intento resta check (una modifica non prenota)
-            intent = "check"; slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
+            # correzione/aggiunta sull'offerta o sulla prenotazione in sospeso: eredita, stesso intento, torna in conferma
+            intent = fsm.get("intent") or "check"; slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
             if ref.get("time") and ref.get("time") != "all-day":
                 slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
         else:
@@ -1212,10 +1216,17 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     date = slots["date"]; tm = _hud_norm_time(slots.get("time"))
     if intent == "check":
         res = _hud_exec_check(date, tm, outcome or "auto", source, delay_s)
-    else:
+    elif confirmed:
         res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)
+    else:
+        # prenotazione completa ma NON confermata: si verifica lo slot e, se libero, si chiede conferma
+        # (schermo "WAIT FOR USER CONFIRMATION / BOOKING FOR ...?"): e' li' che un mese/giorno capito male si becca a voce
+        found, detail = ("error", "") if outcome == "err" else (("available", "") if outcome == "ok" else (("booked", _hud_time_label(tm)) if outcome == "no" else _hud_lookup(date, tm)))
+        if found == "available": res = {"status": "pending", "detail": ""}
+        elif found == "error": res = {"status": "error", "detail": ""}
+        else: res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)   # registra il tentativo: taken
     shown = dict(slots, date=date, time=tm)
-    new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) else "DONE"
+    new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] == "pending" else "DONE"
     return bump(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, status=res["status"], detail=res.get("detail") or "", note="")
 
 

@@ -103,6 +103,8 @@ TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 def fsm_line(fsm):
     """Riga di stato per l'estrattore: mai valori (li tiene la FSM); dice in che situazione siamo."""
     st = (fsm or {}).get("state") if isinstance(fsm, dict) else None
+    if st == "CONFIRM" and fsm.get("intent") == "book":
+        return "STATE: a booking is complete and waiting for the customer's confirmation (not written yet): accept to book it, provide to change a field, decline/cancel to drop it."
     if st == "CONFIRM":
         return "STATE: an offer is pending (the desk found a free slot and is waiting for the customer's answer)."
     if st == "COLLECTING":

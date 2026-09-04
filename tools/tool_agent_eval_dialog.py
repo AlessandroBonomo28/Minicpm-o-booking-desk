@@ -37,6 +37,15 @@ CASES = [
     # in CONFIRM la FSM eredita il mese dell'offerta se non se ne dice un altro: basta il giorno
     (RES_CHECK("april", "4"), [A("April 4th is available all day. Would you like to book?"), U("No, the 6th.")],
      ("check", {"day": "6"}), ()),
+    # --- prenotazione in attesa di conferma (CONFIRM con intent book)
+    ({"state": "CONFIRM", "intent": "book", "status": "pending", "slots": {"month": "march", "day": "2", "time": "15:00"}},
+     [A("Booking for March 2nd at 15:00, shall I confirm?"), U("Yes.")], ("book", {"month": "march", "day": "2", "time": "15:00"}), ()),
+    ({"state": "CONFIRM", "intent": "book", "status": "pending", "slots": {"month": "march", "day": "2", "time": "15:00"}},
+     [A("Booking for March 2nd at 15:00, shall I confirm?"), U("Yes, go ahead.")], ("book", {"month": "march", "day": "2", "time": "15:00"}), ()),
+    ({"state": "CONFIRM", "intent": "book", "status": "pending", "slots": {"month": "march", "day": "2", "time": "15:00"}},
+     [A("Booking for March 2nd at 15:00, shall I confirm?"), U("At 5 pm instead.")], ("book", {"time": "17:00"}), ("day",)),
+    ({"state": "CONFIRM", "intent": "book", "status": "pending", "slots": {"month": "march", "day": "2", "time": "15:00"}},
+     [A("Booking for March 2nd at 15:00, shall I confirm?"), U("No, never mind.")], ("cancel", {}), ()),
     # --- rifiuto dell'offerta
     (RES_CHECK("april", "4"), [A("April 4th is available all day. Would you like to book?"), U("No, thank you.")], None, ()),
     (RES_CHECK("april", "4"), [A("April 4th is available all day. Would you like to book?"), U("Not now, thanks.")], None, ()),

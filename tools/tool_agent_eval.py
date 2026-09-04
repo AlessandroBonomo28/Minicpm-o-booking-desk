@@ -115,8 +115,10 @@ def canon(st, got):
     if got is None:
         return None
     name, a = got[0], dict(got[1]); state = st.get("state"); ref = st.get("slots") or {}
-    if name in ("none", "decline"):
+    if name == "none":
         return None
+    if name == "decline":
+        return ("cancel", {}) if (state == "CONFIRM" and st.get("intent") == "book") else None
     if name == "cancel":
         return ("cancel", {})
     if name in ("book", "check"):
@@ -125,7 +127,7 @@ def canon(st, got):
         kind = a.pop("kind", "check") or "check"
         return (kind, a)
     if name == "provide":
-        intent = st.get("intent") if state == "COLLECTING" else "check"
+        intent = st.get("intent") if state in ("COLLECTING", "CONFIRM") else "check"
         return (intent or "check", a)
     if name == "accept":
         if state != "CONFIRM": return None

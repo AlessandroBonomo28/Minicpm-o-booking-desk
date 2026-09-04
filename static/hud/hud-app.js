@@ -43,7 +43,7 @@ const hud = {
         // un valore respinto e' un evento: entra nell'impronta con il numero di sequenza, cosi' produce un frame anche se
         // lo schermo e' uguale a prima (il frame e' il clock: "April" due volte -> due frame)
         const rej = Object.keys(f.rejected || {}).length ? `|rej${f.seq || 0}:${JSON.stringify(f.rejected)}` : '';
-        return JSON.stringify(themeFor()) + rej;
+        return JSON.stringify(themeForSeq()) + rej;   // il colore alternato entra nell'impronta: ogni cambio di stato = un frame
     },
 };
 const canvas = $('hud'), ctx = canvas.getContext('2d');
@@ -91,8 +91,21 @@ function themeFor() {
     }
 }
 
+/** Due tonalita' dello stesso colore, alternate a ogni cambio di stato (seq): cosi' anche quando il testo resta uguale
+ *  (stesso MISSING dopo un valore respinto, conferma -> conferma con valori simili) i pixel cambiano e l'omni rilegge. */
+function shade(hex, k) {
+    const n = parseInt(hex.slice(1), 16);
+    const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => Math.max(0, Math.min(255, Math.round(v * k))));
+    return '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
+}
+function themeForSeq() {
+    const theme = themeFor();
+    if ((hud.fsm.seq || 0) % 2 === 1) theme.bg = shade(theme.bg, 0.78);
+    return theme;
+}
+
 function drawHud() {
-    const W = canvas.width, H = canvas.height, theme = themeFor();
+    const W = canvas.width, H = canvas.height, theme = themeForSeq();
     ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = theme.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = (theme.title.length > 16 ? 'bold 28px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);

@@ -87,11 +87,6 @@ def fsm_line(fsm):
         when = f"{str(sl.get('month', '')).capitalize()} {sl.get('day', '')}"
         if sl.get("time") and sl.get("time") != "all-day":
             when += f" at {sl['time']}"
-        if fsm.get("intent") == "book":
-            return (f"STATE: BOOKING WAITING FOR CONFIRMATION: {when} (slot is free, NOT written yet). "
-                    f"If the customer confirms ('yes', 'ok', 'sure', 'go ahead', 'confirm') -> intent=book with month, day and time ALL null. "
-                    f"If they change something ('no, the 3rd', 'at 5 pm instead') -> intent=book with only the changed field. "
-                    f"If they decline or cancel ('no', 'never mind', 'cancel') -> intent=cancel. Chat/thanks -> intent=none.")
         return (f"STATE: OFFER PENDING. The desk just checked {when} and it is FREE (not booked yet). "
                 f"If the customer accepts ('yes', 'ok', 'sure', 'book it', 'that day', 'the same day') -> intent=book with that month and day "
                 f"(and time if it was part of the offer or is said now). A QUESTION about another date/time ('and the day after?', "

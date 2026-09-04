@@ -67,7 +67,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const labelStatus = { available: 'LIBERO', booked: 'OCCUPATO', partial: 'PARZIALE', error: 'ERRORE', confirmed: 'PRENOTATO', taken: 'SLOT OCCUPATO', pending: 'ATTENDE CONFERMA' };
+const labelStatus = { available: 'LIBERO', booked: 'OCCUPATO', partial: 'PARZIALE', error: 'ERRORE', confirmed: 'PRENOTATO', taken: 'SLOT OCCUPATO' };
 const labelHud = { IDLE: 'IDLE', COLLECTING: 'RACCOLTA DATI', CHECKING: 'VERIFICA IN CORSO', OK: 'OK', PARTIAL: 'PARZIALE', NO: 'OCCUPATO', ERR: 'ERRORE' };
 let lastLogLen = -1;
 async function refresh() {

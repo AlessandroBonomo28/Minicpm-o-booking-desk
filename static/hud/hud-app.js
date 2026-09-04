@@ -77,8 +77,8 @@ function themeFor() {
                 return { bg: '#c62828', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'SLOT TAKEN', line3: d ? 'BOOKED ' + d : '' };
             }
             if (hud.screen === 'CONFIRM') {
-                // offerta / prenotazione in sospeso: lo schermo dice esplicitamente che si aspetta il si' del cliente
-                const avail = s === 'partial' ? 'PARTLY BOOKED' : (s === 'pending' ? 'SAY YES TO BOOK' : 'AVAILABLE');
+                // offerta in sospeso: lo schermo dice esplicitamente che si aspetta il si' del cliente
+                const avail = s === 'partial' ? 'PARTLY BOOKED' : 'AVAILABLE';
                 return { bg: s === 'partial' ? '#ef6c00' : '#2e7d32', fg: '#ffffff', title: 'WAIT FOR USER CONFIRMATION',
                          line1: `BOOKING FOR ${slotLine(f)}?`, line2: avail, line3: d };
             }
@@ -118,7 +118,7 @@ function screenLabel() {
     const f = hud.fsm;
     if (hud.screen !== 'CONFIRM' && hud.screen !== 'DONE') return hud.screen;
     if (f.status === 'error') return 'ERR';
-    if (f.status === 'available' || f.status === 'confirmed' || f.status === 'pending') return 'OK';
+    if (f.status === 'available' || f.status === 'confirmed') return 'OK';
     if (f.status === 'partial') return 'PARTIAL';
     return 'NO';
 }

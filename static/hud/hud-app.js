@@ -76,6 +76,12 @@ function themeFor() {
                 if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: 'BOOKING DONE', line1: slotLine(f), line2: 'CONFIRMED', line3: '' };
                 return { bg: '#c62828', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'SLOT TAKEN', line3: d ? 'BOOKED ' + d : '' };
             }
+            if (hud.screen === 'CONFIRM') {
+                // offerta in sospeso: lo schermo dice esplicitamente che si aspetta il si' del cliente
+                const avail = s === 'partial' ? 'PARTLY BOOKED' : 'AVAILABLE';
+                return { bg: s === 'partial' ? '#ef6c00' : '#2e7d32', fg: '#ffffff', title: 'WAIT FOR USER CONFIRMATION',
+                         line1: `BOOKING FOR ${slotLine(f)}?`, line2: avail, line3: d };
+            }
             if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
             if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'PARTLY BOOKED', line3: d };
             return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: d };
@@ -89,8 +95,8 @@ function drawHud() {
     const W = canvas.width, H = canvas.height, theme = themeFor();
     ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = theme.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = 'bold 34px system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);
-    ctx.font = 'bold 44px system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.50);
+    ctx.font = (theme.title.length > 16 ? 'bold 28px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);
+    ctx.font = (theme.line1.length > 18 ? 'bold 30px' : 'bold 44px') + ' system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.50);
     ctx.font = (theme.line2.length > 12 ? 'bold 40px' : 'bold 56px') + ' system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.68);
     if (theme.line3) { ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(String(theme.line3).slice(0, 40), W / 2, H * 0.82); }
     ctx.font = '18px system-ui, sans-serif'; ctx.globalAlpha = 0.7; ctx.fillText('operator screen', W / 2, H * 0.92); ctx.globalAlpha = 1;

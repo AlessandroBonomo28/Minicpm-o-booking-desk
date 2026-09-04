@@ -367,3 +367,18 @@ result, tell the customer. Otherwise just talk."*
   basic contro off. Predizione: con basic il primo scorrimento arriva a ~3,5 min (4.000 token) e le divagazioni del
   minuto 2-3 NON spariscono (arrivano prima della soglia); per vederle sparire va abbassata la soglia (es. 2500/2000),
   variabile da provare dopo. L'omni, dimenticando l'inizio, può richiedere dati che lo schermo mostra: la FSM li tiene.
+
+### 04/09 (18:00) — quinto test (sess_0e363beeb3e4, 4,5 min, finestra basic ON): la finestra taglia ma il degrado è prima
+- Scorrimenti a 231 s (3999→3507, 26 unità) e 261 s (4009→3492, 53 unità): la finestra fa il suo. Il degrado però
+  inizia a ~110 s con KV ≈ 2000: niente si "riempie". Predizione confermata.
+- **Firma del degrado**: sparisce la punteggiatura, frasi senza fine, lessico raro ("sure-fire deal", "planting
+  seeds outdoors"), memoria dei fatti intatta. È la firma di una **penalità di ripetizione che si accumula**:
+  `text_repetition_penalty` 1,15 (nostro, alzato da 1,05 upstream per i loop della v1.3) su 512 token generati: dopo
+  3-4 risposte tutti i token comuni, "." e "," inclusi, sono già nella storia e vengono penalizzati → il modello
+  preferisce token mai usati. Alternativa meno probabile: sessioni lunghe fuori distribuzione (indizio: la modalità
+  "context" upstream tiene 24 unità + riassunto).
+- **Esperimento** (variabile singola): campo `Text repetition penalty` aggiunto al pannello HUD (default 1,0 per la prova;
+  schema resta 1,15), length penalty 1,0 e finestra basic invariate. Predizioni: (a) a 1,0 tornano punteggiatura e lessico
+  normale oltre i 3 min → causa trovata, poi si sceglie il valore o una penalità limitata al turno; (b) riparte a
+  ripetere/loop → la penalità serve ma va ripensata la finestra dei 512; (c) sbrodola uguale → è la lunghezza di
+  sessione → modalità "context", oltre = training.

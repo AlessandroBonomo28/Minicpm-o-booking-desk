@@ -306,6 +306,7 @@ async function startSessionInner() {
     session.onForceListenChange = (a) => { $('btnForceListen').style.background = a ? '#ffe0b2' : '#fff'; };
 
     const preparePayload = { config: { length_penalty: parseFloat($('lengthPenalty').value) || 1.0,
+                                       text_repetition_penalty: parseFloat($('textRepPenalty').value) || 1.0,
                                        sliding_window_mode: $('slidingWindow').value, sliding_window_high_tokens: 4000, sliding_window_low_tokens: 3500 },
                              use_tts: true, max_slice_nums: 1 };
     lastWindowEvents = 0; $('kvInfo').textContent = 'KV: — · finestra: ' + $('slidingWindow').value;

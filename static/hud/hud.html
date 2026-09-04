@@ -89,6 +89,7 @@
         <select id="refChoice"><option value="english_call">inglese (preset English Call)</option><option value="italiano">italiano (preset italiano)</option><option value="none">nessuna (default backend)</option></select>
         <label style="min-width:auto">Delay riproduzione</label><input type="number" id="playbackDelay" value="600" step="50" style="width:70px"> ms
         <label style="min-width:auto">Length penalty</label><input type="number" id="lengthPenalty" value="1.0" step="0.05" style="width:70px">
+        <label style="min-width:auto" title="penalità sulle PAROLE già generate (finestra 512 token); schema = 1.15; 1.0 = spenta">Text repetition penalty</label><input type="number" id="textRepPenalty" value="1.0" step="0.05" min="1" max="2" style="width:70px">
       </div>
       <div class="row">
         <label>Finestra KV</label>

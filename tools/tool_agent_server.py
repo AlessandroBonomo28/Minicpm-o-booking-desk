@@ -48,36 +48,50 @@ DEFAULT_TOOLS = [
             "required": ["intent", "month", "day", "time"]}}},
 ]
 
-# ---- Due prompt (05/09, Alessandro): LOCAL_PROMPT per il 1,7B locale (minimo, valori verbatim, niente contesto: ogni
-#      ingresso in piu' e' una fonte da cui copia), PROMPT_API per i modelli cloud (piu' potenti: risolvono riferimenti,
-#      calcolano, e ricevono le ultime righe del dialogo, operatore compreso).
-LOCAL_PROMPT = ("You are the booking desk's request extractor. Read STATE and the customer's last sentence, then call `request` once.\n"
-                "Copy month, day and time words exactly as the customer said them in this sentence; null when not said. Never guess.\n"
-                "If STATE says a request is in progress, a bare number or a bare date/time word is the answer to what is still missing "
-                "(day if the day is missing, otherwise time), with the same intent as the request in progress.\n"
-                "If nothing is requested, intent is none.")
+# ---- 05/09 sera (Alessandro): il modello sceglie l'OPERAZIONE, il codice calcola. Strumenti piccoli, filtrati per stato:
+#      in IDLE 'yes' non puo' diventare una prenotazione; 'the next day' e' shift_day(+1) sul riferimento che tiene la FSM.
+_FIELDS = {"month": {"type": ["string", "null"], "description": "month NAME as the customer said it ('April'); null if not said"},
+           "day": {"type": ["string", "null"], "description": "day of the month as said ('2nd', 'the second', '30'); null if not said"},
+           "time": {"type": ["string", "null"], "description": "time as said ('3 pm', 'half past ten', '15'); null if not said"}}
+def _fn(name, desc, props=None, required=None):
+    return {"type": "function", "function": {"name": name, "description": desc,
+            "parameters": {"type": "object", "properties": props or {}, "required": required or []}}}
+TOOL_DEFS = {
+    "none": _fn("none", "Nothing to do: greeting, thanks, hesitation, thinking aloud, off-topic, or an answer that is not about a booking."),
+    "new_request": _fn("new_request", "The customer starts a NEW request: asks whether a date/time is free (kind=check) or asks to reserve (kind=book). Pass only the month/day/time words said.",
+                       {"kind": {"type": "string", "enum": ["check", "book"]}, **_FIELDS}, ["kind"]),
+    "provide": _fn("provide", "The customer gives or corrects a month, a day or a time for the request in progress ('the 20th', 'at 5 pm instead', 'no, the 3rd', 'April'). Pass only what was said.", dict(_FIELDS)),
+    "accept": _fn("accept", "The customer accepts the pending offer / confirms: 'yes', 'ok', 'sure', 'book it', 'that day', 'go ahead'. If they add a time ('yes, at 3 pm'), pass it.",
+                  {"time": _FIELDS["time"]}),
+    "decline": _fn("decline", "The customer declines the pending offer: 'no thanks', 'not that one', 'I'll think about it'."),
+    "cancel": _fn("cancel", "The customer gives up the request in progress: 'never mind', 'forget it', 'cancel', 'stop'."),
+    "shift_day": _fn("shift_day", "The customer refers to the reference date shifted by N days: 'the next day' / 'the day after' = 1, 'the day before' = -1, 'two days later' = 2, 'a week later' = 7.",
+                     {"delta": {"type": "integer", "description": "days to add (negative = before)"}}, ["delta"]),
+    "next_free": _fn("next_free", "The customer asks the system for the next available slot: 'the next free slot', 'first available', 'anything later that day?' (after=same_day) or 'the next free day' (after=next_days).",
+                     {"after": {"type": "string", "enum": ["same_day", "next_days"]}}, ["after"]),
+}
+TOOLS_BY_STATE = {
+    "IDLE":       ["new_request", "none"],
+    "COLLECTING": ["provide", "cancel", "new_request", "none"],
+    "CONFIRM":    ["accept", "decline", "provide", "shift_day", "next_free", "new_request", "none"],
+    "DONE":       ["new_request", "shift_day", "next_free", "none"],
+}
+def tools_for_state(fsm):
+    st = (fsm or {}).get("state") or "IDLE"
+    names = TOOLS_BY_STATE.get(st, TOOLS_BY_STATE["IDLE"])
+    if BACKEND != "cline":
+        names = [n for n in names if n != "none"]   # il 1,7B sceglie 'none' anche davanti a "I want to book": senza lo strumento, testo = nessuna azione
+    return [TOOL_DEFS[n] for n in names]
 
-PROMPT_API = ("You are the request extractor of a booking desk. The desk is a voice operator; the customer speaks; an ASR transcribes "
-              "the customer (expect small transcription errors: 'book 49' = 'book at 9', 'mount march' = 'month March').\n"
-              "You receive: STATE (what the booking system is doing right now), the last lines of the conversation (OPERATOR = the desk, "
-              "USER = the customer), and the customer's NOW line. Call `request` exactly once, about the NOW line.\n"
-              "Fields: month = month name; day = number 1-31; time = 24h HH:MM (convert spoken times: 'half past ten' -> 10:30, "
-              "'3 pm' -> 15:00, 'nine thirty' -> 09:30). Fill only what the NOW line says or clearly refers to; null otherwise.\n"
-              "Intent: check = a question about availability (no reservation asked); book = an explicit request to reserve, or "
-              "the customer accepting an offer / answering a question the operator just asked while a request is in progress; "
-              "cancel = the customer gives up the request in progress; none = greetings, thanks, hesitation, thinking aloud, "
-              "off-topic talk, or an answer to something that is not a booking request.\n"
-              "References: use STATE and the previous lines only to resolve what the NOW line refers to. With an offer pending, "
-              "'yes'/'ok'/'sure'/'book it'/'that day' -> book the offered date; 'the day after'/'the next day' -> offered day + 1, "
-              "'the day before' -> offered day - 1 (same month); a different day ('no, the 6th') or a question about another date "
-              "-> check with the new values. If the operator just asked for a month/day/time, a bare answer ('20', 'nine', 'April') "
-              "fills that field with the intent of the request in progress.\n"
-              "Never invent: after a CLOSED request (nothing pending) a sentence without a date has month=null and day=null, even if "
-              "earlier lines mention dates. 'thank you', 'bye', 'let me think' -> intent=none, all fields null.")
-
+LOCAL_PROMPT = ("You are the request extractor of a booking desk. Read STATE and the customer's last sentence, then call exactly ONE "
+                "of the available functions. Copy month, day and time words exactly as said; never guess values. "
+                "If the sentence is not a request (greeting, thanks, hesitation), call no function and answer NO ACTION.")
+PROMPT_API = ("You are the request extractor of a voice booking desk (OPERATOR = the desk, USER = the customer, transcribed by an ASR "
+              "with small errors). Read STATE, the last lines of the conversation and the customer's NOW line, then call exactly ONE "
+              "of the available functions, about the NOW line. Copy month, day and time words as said (you may convert spoken times "
+              "to HH:MM). Do not compute dates yourself: use shift_day / next_free. If the sentence is not a request, call none.")
 SYSTEM = LOCAL_PROMPT
-if os.environ.get("TA_PROMPT") == "api":
-    SYSTEM = PROMPT_API
+DEFAULT_TOOLS = None   # per stato: vedi tools_for_state
 
 
 tok = None
@@ -87,29 +101,19 @@ TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 
 
 def fsm_line(fsm):
-    """Stato della macchina (dal gateway) reso in una riga per l'estrattore.
-    CONFIRM: verifica con posto LIBERO in sospeso -> lo stato porta la data offerta: 'yes' / 'that day' si risolvono da
-    stato + domanda, senza righe di dialogo (idea di Alessandro, misurata 15/20 contro 13/20 del dialogo).
-    COLLECTING: solo i NOMI dei campi raccolti e mancanti, mai i valori (copiabili).
-    DONE/IDLE: nessun valore: una nuova richiesta riparte da zero (il "thank you" -> book(April 2, 15:00) veniva da qui)."""
-    if not isinstance(fsm, dict):
-        return "STATE: no request in progress."
-    if fsm.get("state") == "CONFIRM":
+    """Riga di stato per l'estrattore: mai valori (li tiene la FSM); dice in che situazione siamo."""
+    st = (fsm or {}).get("state") if isinstance(fsm, dict) else None
+    if st == "CONFIRM":
+        return "STATE: an offer is pending (the desk found a free slot and is waiting for the customer's answer)."
+    if st == "COLLECTING":
         sl = fsm.get("slots") or {}
-        when = f"{str(sl.get('month', '')).capitalize()} {sl.get('day', '')}"
-        if sl.get("time") and sl.get("time") != "all-day":
-            when += f" at {sl['time']}"
-        return (f"STATE: OFFER PENDING. The desk just checked {when} and it is FREE (not booked yet). "
-                f"If the customer accepts ('yes', 'ok', 'sure', 'book it', 'that day', 'the same day') -> intent=book with that month and day "
-                f"(and time if it was part of the offer or is said now). A QUESTION about another date/time ('and the day after?', "
-                f"'what about the 6th?') -> intent=check with only what they say. If they decline, thank or chat -> intent=none, all null.")
-    if fsm.get("state") != "COLLECTING":
-        return "STATE: no request in progress."
-    sl = fsm.get("slots") or {}
-    got = [k for k in ("month", "day", "time") if sl.get(k)]
-    miss = [k for k in (fsm.get("missing") or []) if k in ("month", "day", "time")]
-    return (f"STATE: {fsm.get('intent')} IN PROGRESS; already collected: {', '.join(got) or 'nothing'}; "
-            f"still missing: {', '.join(miss) or 'nothing'}.")
+        got = [k for k in ("month", "day", "time") if sl.get(k)]
+        miss = [k for k in (fsm.get("missing") or []) if k in ("month", "day", "time")]
+        return (f"STATE: a {fsm.get('intent')} request is in progress; collected: {', '.join(got) or 'nothing'}; "
+                f"missing: {', '.join(miss) or 'nothing'} (a bare number answers the first missing field).")
+    if st == "DONE":
+        return "STATE: the last request is closed (it can be a reference for 'the next day' / 'next free slot')."
+    return "STATE: no request in progress."
 
 
 _EMPTY = {"", "none", "null", "unknown", "n/a", "not specified", "not mentioned"}
@@ -141,7 +145,7 @@ def load_env_file(path):
 def decide_cloud(messages, tools):
     """Una chiamata chat/completions con tool_choice forzato su `request`. Ritorna (raw_arguments_json, model, ms) o solleva."""
     body = json.dumps({"model": CLOUD["model"], "messages": messages, "tools": tools, "temperature": 0, "max_tokens": 200,
-                       "tool_choice": {"type": "function", "function": {"name": "request"}}}).encode()
+                       "tool_choice": "required"}).encode()
     req = urllib.request.Request(CLOUD["base_url"].rstrip("/") + "/chat/completions", data=body,
                                  headers={"Authorization": f"Bearer {CLOUD['key']}", "content-type": "application/json"})
     t0 = time.time()
@@ -150,11 +154,11 @@ def decide_cloud(messages, tools):
     ch = d["choices"][0]["message"]
     tc = ch.get("tool_calls") or []
     if not tc:
-        return "", d.get("model"), (time.time() - t0) * 1000
-    return tc[0]["function"]["arguments"], d.get("model"), (time.time() - t0) * 1000
+        return "", "", d.get("model"), (time.time() - t0) * 1000
+    return tc[0]["function"]["name"], tc[0]["function"]["arguments"], d.get("model"), (time.time() - t0) * 1000
 
 
-def decide(transcript, tools, fsm=None, context=0):
+def decide(transcript, _tools_unused, fsm=None, context=0):
     """context=0: SOLO la battuta corrente (contratto attuale: le righe precedenti erano una fonte da cui copiare campi).
     context=N: esperimento (05/09, richiesta di Alessandro): anche le ultime N righe del dialogo, operatore compreso,
     per risolvere 'yes' / 'that day' / 'the next day'."""
@@ -165,6 +169,7 @@ def decide(transcript, tools, fsm=None, context=0):
         return {"tool_calls": [], "raw": "NO ACTION (nessuna riga utente)"}
     last_user_idx = max(i for i, (r, _) in enumerate(lines) if r == "user")
     convo = f"NOW USER: {lines[last_user_idx][1]}"
+    tools = tools_for_state(fsm)
     # cloud: PROMPT_API + ultime righe del dialogo; locale: LOCAL_PROMPT e SOLO la battuta corrente
     system = PROMPT_API if BACKEND == "cline" else LOCAL_PROMPT
     if context == "state":
@@ -174,16 +179,15 @@ def decide(transcript, tools, fsm=None, context=0):
     if context and last_user_idx > 0:
         prev = lines[max(0, last_user_idx - int(context)):last_user_idx]
         convo = "\n".join(f"{'OPERATOR' if r == 'assistant' else 'USER'}: {x}" for r, x in prev) + "\n" + convo
-        if BACKEND != "cline":
-            system = LOCAL_PROMPT + CONTEXT_RULES
+
     messages = [{"role": "system", "content": system},
-                {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall request() about the NOW line."}]
+                {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall one function about the NOW line."}]
     backend_used = BACKEND
     raw = ""
     if BACKEND == "cline":
         try:
-            args_json, used_model, ms = decide_cloud(messages, tools)
-            raw = f'<tool_call>{{"name": "request", "arguments": {args_json or "{}"}}}</tool_call>'
+            fname, args_json, used_model, ms = decide_cloud(messages, tools)
+            raw = f'<tool_call>{{"name": "{fname or "none"}", "arguments": {args_json or "{}"}}}</tool_call>'
             backend_used = f"cline:{used_model} {ms:.0f}ms"
         except Exception as e:
             sys.stderr.write(f"[tool-agent] cloud non disponibile ({type(e).__name__}: {str(e)[:80]}): fallback locale\n")
@@ -195,6 +199,7 @@ def decide(transcript, tools, fsm=None, context=0):
             out = model.generate(**ids, max_new_tokens=120, do_sample=False)
             raw = tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=False)
     calls = []
+    allowed = {x["function"]["name"] for x in tools}
     for m in TOOL_CALL_RE.finditer(raw):
         try:
             c = json.loads(m.group(1))
@@ -202,21 +207,23 @@ def decide(transcript, tools, fsm=None, context=0):
             continue
         if not isinstance(c, dict):
             continue
-        a = c.get("arguments") or {}
-        intent = str(a.get("intent") or c.get("name") or "none").lower()
-        if intent not in ("book", "check", "cancel"):
-            continue
+        name = str(c.get("name") or "none").lower(); a = c.get("arguments") or {}
+        if name == "request":   # vecchio contratto (compat): intent -> operazione
+            name = {"book": "new_request", "check": "new_request", "cancel": "cancel"}.get(str(a.get("intent", "")).lower(), "none")
+            if name == "new_request": a = dict(a, kind=a.get("intent"))
+        if name not in allowed or name == "none":
+            break
         args = {}
-        for k in ("month", "day", "time", "date"):
+        for k in ("kind", "delta", "after", "month", "day", "time", "date"):
             v = a.get(k)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 args[k] = str(int(v))
             elif isinstance(v, str) and v.strip().lower() not in _EMPTY:
                 if k == "time" and not re.search(r"\d|noon|midnight|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|half|quarter", v.lower()):
-                    continue   # 'time' / 'later': non e' un orario, non si passa alla FSM
+                    continue
                 args[k] = v.strip()
-        calls.append({"name": intent, "arguments": args})
-        break   # una sola decisione per turno
+        calls.append({"name": name, "arguments": args})
+        break
     return {"tool_calls": calls, "raw": raw.replace("<|im_end|>", "").strip()[:400], "backend": backend_used}
 
 
@@ -269,7 +276,7 @@ class H(BaseHTTPRequestHandler):
                     # devono prendere la data dall'offerta; in ogni altro stato il contesto e' solo una fonte di copie
                     f = req.get("fsm") or {}
                     ctxmode = 3 if f.get("state") == "CONFIRM" else 0
-                res = decide(transcript, req.get("tools") or DEFAULT_TOOLS, req.get("fsm"), ctxmode if ctxmode == "state" else int(ctxmode))
+                res = decide(transcript, None, req.get("fsm"), ctxmode if ctxmode == "state" else int(ctxmode))
             res["user_text"] = user_text; res["asr_s"] = asr_s; res["llm_s"] = round(time.time() - t_llm, 2); res["total_s"] = round(time.time() - t_all, 2)
             self._send(200, json.dumps(res, ensure_ascii=False).encode())
         except Exception as e:

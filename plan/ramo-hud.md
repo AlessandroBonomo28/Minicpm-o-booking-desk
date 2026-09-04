@@ -507,3 +507,8 @@ un solo numero nella battuta non è insieme giorno e ora. La regressione applica
 | **minimo** | **52** | **17** | spariti "let me think" → none e "yes" dopo conferma → none; persi: "the second of April" (day='of'), "tomorrow at 9" (mese 'Tomorrow' respinto → chiede il mese), "Um…" → book vuoto in raccolta (nessun effetto) |
 | minimo + riga ordinali | 52 | 17 | nessuna differenza: la riga non serve, la FSM instrada |
 Adottato il minimo. L'aritmetica ("next day") resta fuori con l'1,7B. Rumore di misura ±1 caso (GPU non deterministica).
+
+## 05/09 — Estrattore: cloud (provider Cline) e operazioni sullo stato
+Vedi `analisi-toolcalling.md` §4-7: backend `cline` (flash-lite, PROMPT_API con le ultime righe del dialogo), locale come
+fallback; strumenti per stato (`new_request`, `provide`, `accept`, `decline`, `cancel`, `shift_day`, `next_free`, `none`);
+FSM che calcola (`_hud_shift`, `_hud_next_free`). Misure: cloud 53/55 e 20/20; locale 47/55 e 17/20.

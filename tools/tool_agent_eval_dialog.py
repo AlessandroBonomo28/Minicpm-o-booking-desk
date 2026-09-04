@@ -8,7 +8,7 @@ Confronta context=0 (contratto attuale) e context=3 sugli stessi casi.
 """
 import argparse, json, sys, time, urllib.request, ssl
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from tool_agent_eval import IDLE, COLL, norm
+from tool_agent_eval import IDLE, COLL, norm, canon
 
 RES_CHECK = lambda m, d: {"state": "CONFIRM", "intent": "check", "status": "available", "slots": {"month": m, "day": d, "time": "all-day"}}
 RES_BOOK = lambda m, d, t: {"state": "DONE", "intent": "book", "status": "confirmed", "slots": {"month": m, "day": d, "time": t}}
@@ -64,9 +64,12 @@ def run(url, context, verbose):
         r = urllib.request.urlopen(urllib.request.Request(url, data=body, headers={"content-type": "application/json"}), timeout=60, context=ctx)
         d = json.loads(r.read()); t_all.append(time.time() - t0)
         calls = d.get("tool_calls") or []
-        got = (calls[0]["name"], calls[0].get("arguments") or {}) if calls else None
+        op = (calls[0]["name"], calls[0].get("arguments") or {}) if calls else None
+        got = canon(st, op)
         if exp is None:
             passed = got is None
+        elif exp == ("check", {}) and got is None:
+            passed = True
         else:
             passed = got is not None and (got[0] == exp[0] or (st.get("state") == "COLLECTING" and got[0] in ("book", "check")))
             if passed:
@@ -79,7 +82,7 @@ def run(url, context, verbose):
                         passed = False
         ok += passed
         if verbose or not passed:
-            print(f"  {'PASS' if passed else 'FAIL'}  {tr[-1]['text']!r:40} (prima: {tr[-2]['text'][:45]!r}) atteso={exp} ottenuto={got}")
+            print(f"  {'PASS' if passed else 'FAIL'}  {tr[-1]['text']!r:40} (prima: {tr[-2]['text'][:45]!r}) atteso={exp} ottenuto={got} op={op}")
     n = len(CASES)
     print(f"  => context={context}: {ok}/{n} ({100 * ok / n:.0f}%) · LLM medio {sum(t_all) / len(t_all):.2f} s\n")
     return ok

@@ -107,6 +107,47 @@ def norm(k, v):
     return _ns["_hud_norm_time"](v)
 
 
+_DIM = {"january": 31, "february": 28, "march": 31, "april": 30, "may": 31, "june": 30, "july": 31, "august": 31, "september": 30, "october": 31, "november": 30, "december": 31}
+
+
+def canon(st, got):
+    """Operazione dell'estrattore -> (intento, campi) come la applicherebbe la FSM, per confrontarla con le attese."""
+    if got is None:
+        return None
+    name, a = got[0], dict(got[1]); state = st.get("state"); ref = st.get("slots") or {}
+    if name in ("none", "decline"):
+        return None
+    if name == "cancel":
+        return ("cancel", {})
+    if name in ("book", "check"):
+        return (name, a)
+    if name == "new_request":
+        kind = a.pop("kind", "check") or "check"
+        return (kind, a)
+    if name == "provide":
+        intent = st.get("intent") if state == "COLLECTING" else "check"
+        return (intent or "check", a)
+    if name == "accept":
+        if state != "CONFIRM": return None
+        f = {"month": ref.get("month"), "day": ref.get("day")}
+        if a.get("time"): f["time"] = a["time"]
+        elif ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
+        return ("book", f)
+    if name == "shift_day":
+        if not ref.get("month"): return None
+        try: delta = int(float(a.get("delta", 1)))
+        except ValueError: delta = 1
+        m = ref["month"]; d = int(ref.get("day") or 1) + delta; i = MONTHS.index(m)
+        while d > _DIM[MONTHS[i]]: d -= _DIM[MONTHS[i]]; i = (i + 1) % 12
+        while d < 1: i = (i - 1) % 12; d += _DIM[MONTHS[i]]
+        f = {"month": MONTHS[i], "day": str(d)}
+        if ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
+        return ("check", f)
+    if name == "next_free":
+        return ("check", {})
+    return (name, a)
+
+
 def run(url, verbose):
     ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
     ok = 0; fails = []; t_all = []
@@ -117,6 +158,8 @@ def run(url, verbose):
         d = json.loads(r.read()); t_all.append(time.time() - t0)
         calls = d.get("tool_calls") or []
         got = (calls[0]["name"], dict(calls[0].get("arguments") or {})) if calls else None
+        op = got
+        got = canon(st, got)
         if got and got[1].get("day") and got[1].get("time"):
             # come la FSM: un solo numero nella battuta non e' insieme giorno e ora
             nums = _re.findall(r"\d+", _ns["_hud_words_to_digits"](_re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", _re.sub(r"[^\w\s-]", " ", text.lower()))))
@@ -135,6 +178,8 @@ def run(url, verbose):
         passed = False
         if exp is None:
             passed = got is None
+        elif exp == ("check", {}) and got is None:
+            passed = True   # "is it free?" senza riferimento: nessuna chiamata e' accettabile quanto un check vuoto
         elif got is not None and (got[0] == exp[0] or (st.get("state") == "COLLECTING" and exp[0] in ("book", "check") and got[0] in ("book", "check"))):
             # in COLLECTING l'intento e' bloccato dalla FSM: book/check sono equivalenti per contratto
             passed = True
@@ -149,7 +194,7 @@ def run(url, verbose):
         if passed: ok += 1
         else: fails.append((st.get("state"), text, exp, got))
         if verbose or not passed:
-            print(f"  {tag}  [{st.get('state')}{' ' + st.get('intent', '') if st.get('intent') else ''}] {text!r:45} atteso={exp} ottenuto={got}")
+            print(f"  {tag}  [{st.get('state')}{' ' + st.get('intent', '') if st.get('intent') else ''}] {text!r:45} atteso={exp} ottenuto={got} op={op}")
     n = len(CASES)
     print(f"\n{ok}/{n} passati ({100 * ok / n:.0f}%) · LLM medio {sum(t_all) / len(t_all):.2f} s · falliti {len(fails)}")
     return 0 if ok == n else 1

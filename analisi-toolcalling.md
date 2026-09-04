@@ -98,3 +98,28 @@ non si rompe; un picco di rete (3-4 s) riporta l'effetto "let me check… ah, è
 Residui: "is it free?" subito dopo una prenotazione → nessuna chiamata (ambiguo, accettabile); "No, I want a book for May"
 → nessuna chiamata nonostante `tool_choice` forzato (flash-lite a volte non chiama: da tenere d'occhio, se pesa si prova
 qwen3.8-flash o haiku con lo stesso prompt); "tomorrow" → giorno 'tomorrow' respinto → chiede la data (accettabile).
+
+## 7. Operazioni sullo stato invece di valori calcolati (05/09, proposta di Alessandro)
+Il modello sceglie l'**operazione**, il codice calcola. Strumenti piccoli e **filtrati per stato** (in IDLE 'yes' non può
+diventare una prenotazione; 'the next day' dopo una richiesta chiusa funziona senza che il modello veda la data):
+| operazione | stati | il codice |
+|---|---|---|
+| `new_request(kind, month?, day?, time?)` | tutti | apre una richiesta con i valori detti (verbatim) |
+| `provide(month?, day?, time?)` | COLLECTING, CONFIRM | riempie/corregge; intento = quello in corso (in CONFIRM: ri-verifica) |
+| `accept(time?)` | CONFIRM | prenota lo slot offerto (chiede l'ora se manca; "yes, at 3 pm" la porta) |
+| `decline()` | CONFIRM | chiude l'offerta senza scrivere |
+| `cancel()` | COLLECTING | IDLE |
+| `shift_day(delta)` | CONFIRM, DONE, COLLECTING con data | nuova verifica su riferimento ± delta (cambio mese gestito), stesso orario |
+| `next_free(same_day \| next_days)` | CONFIRM, DONE | ricerca vera nel DB: prossimo slot orario libero (9-18) / primo giorno libero entro 60 |
+| `none` | tutti (solo cloud) | nulla; locale: nessuna chiamata = nulla |
+Prompt: 2-3 righe (LOCAL_PROMPT / PROMPT_API); riga di stato **senza valori** anche in CONFIRM ("an offer is pending").
+| backend | base 55 | dialogo 20 | latenza |
+|---|---|---|---|
+| gemini-3.5-flash-lite + dialogo | **53** | **20** | 0,9-1,0 s |
+| Qwen3-1.7B locale (fallback) | 47 | 17 | 0,5 s |
+Cloud: sale da 19 a 20 sul dialogo ("the day after" = shift_day(1), "that day" = accept) con prompt più corto; i due mancati
+sono "I need an appointment on May 5th" → check invece di book (ambiguo) e "tomorrow at 9" (giorno respinto → chiede la
+data). Locale: senza lo strumento `none` in lista (lo sceglieva anche su "I want to book a desk") 47/55: le operazioni gli
+costano di più del vecchio contratto (52), ma il dialogo regge (17). Tutte le operazioni verificate via curl (shift a
+cavallo del mese: April 30 +1 → May 1; next_free same_day → 09:00; accept da DONE → nulla).
+Configurazione: `--backend cline` (flash-lite, PROMPT_API, dialogo), locale come fallback.

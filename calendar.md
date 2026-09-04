@@ -334,3 +334,7 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 04/09 (17:30) — **Contesto misurato** (~18 tok/s, 3.5k in 3 min) e **finestra scorrevole duplex accesa per
   sessione** (upstream l'aveva a off; 8k era solo l'auto-stop del client). Pannello HUD mostra KV e scorrimenti.
   Prossimo: basic vs off a variabile singola, poi soglie più basse se il degrado del minuto 2-3 resta.
+- 04/09 (19:30) — **Sessione da 6,5 min coerente** con trp 1,0 + finestra basic (4 tagli, nessun degrado): la
+  penalità di ripetizione era la causa dello sbrodolamento. Timeout gateway video 300→900 s. Richiesta su
+  **tre campi indipendenti** (mese/giorno/ora, ordine libero) in estrattore e FSM; regressione dell'estrattore
+  `tools/tool_agent_eval.py` 55/55. Prossimo: puntatore senza valore per "yes"/"that day".

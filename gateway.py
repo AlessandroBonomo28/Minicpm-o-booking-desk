@@ -743,10 +743,10 @@ async def get_presets():
 
 # ============ Ramo HUD: stato del "gestionale" (DB simulato, sola lettura dalla pagina db.html) ============
 _HUD_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "hud_db.json")
-_HUD_FSM_IDLE: Dict[str, Any] = {"state": "IDLE", "intent": None, "slots": {"date": "", "time": ""}, "missing": [], "rejected": {},
+_HUD_FSM_IDLE: Dict[str, Any] = {"state": "IDLE", "intent": None, "slots": {"month": "", "day": "", "time": "", "time_raw": "", "date": ""}, "missing": [], "rejected": {},
                                  "status": None, "detail": "", "note": "", "last_user_text": "", "updated": None}
 _HUD_DB: Dict[str, Any] = {"slots": {}, "log": [], "hud": {"state": "IDLE", "date": "", "time": "", "updated": None},
-                           "fsm": dict(_HUD_FSM_IDLE, slots={"date": "", "time": ""}, missing=[])}
+                           "fsm": dict(_HUD_FSM_IDLE, slots={"month": "", "day": "", "time": "", "time_raw": "", "date": ""}, missing=[])}
 
 
 def _hud_db_load():
@@ -1012,14 +1012,31 @@ async def hud_db_check(request: Request):
 
 
 # ---- FSM della prenotazione (plan/ramo-hud.md, 04/09): la macchina a stati la fa il codice, il modello estrae soltanto
-_HUD_REQUIRED = {"check": ["date"], "book": ["date", "time"]}
+# Campi della richiesta, INDIPENDENTI dall'ordine (Alessandro, 04/09 sera): mese, giorno, ora arrivano in qualunque
+# ordine e in qualunque combinazione; la FSM tiene quelli validi e chiede il primo mancante in quest'ordine.
+_HUD_REQUIRED = {"check": ["month", "day"], "book": ["month", "day", "time"]}
+_HUD_EMPTY_SLOTS = {"month": "", "day": "", "time": "", "time_raw": "", "date": ""}
 
 
 def _hud_fsm_reset(note: str = ""):
-    _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots={"date": "", "time": ""}, missing=[], rejected={}, note=note,
+    _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots=dict(_HUD_EMPTY_SLOTS), missing=[], rejected={}, note=note,
                           updated=datetime.now().isoformat(timespec="seconds"))
     _hud_db_save()
     return _HUD_DB["fsm"]
+
+
+def _hud_split_date(text: str):
+    """'April 2nd' -> ('april', '2'); 'the second of April' -> ('april', '2'); 'April' -> ('april', ''); 'the 2nd' -> ('', '2');
+    non riconoscibile -> (None, None)."""
+    nd = _hud_norm_date(text)
+    if _hud_date_valid(nd):
+        m, d = nd.split(); return m, d
+    if nd in _MONTHS:
+        return nd, ""
+    m = re.fullmatch(r"(the )?([1-9]|[12]\d|3[01])", nd)
+    if m:
+        return "", m.group(2)
+    return None, None
 
 
 def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=None):
@@ -1043,28 +1060,32 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         # mentre si raccolgono i campi l'intento in corso non cambia ("30" in risposta a una verifica resta una verifica,
         # anche se l'estrattore dice book); per cambiare richiesta si annulla prima
         intent = fsm["intent"]
-    # merge: si riparte da zero se non si stava raccogliendo; un campo si sovrascrive solo con un valore non vuoto
-    slots = dict(fsm.get("slots") or {}) if fsm.get("state") == "COLLECTING" else {"date": "", "time": "", "time_raw": "", "month": ""}
-    for k in ("date", "time"):
-        v = str(args.get(k) or "").strip()
-        if v and v.lower() not in ("none", "null", "unknown", "n/a"):
-            slots[k] = v
-            if k == "time":
-                slots["time_raw"] = v
-    # un campo vale solo se si riduce alla forma canonica: altrimenti e' "non capito" e resta mancante (si richiede).
-    # Data parziale: solo il mese ("April") -> si tiene il mese e manca il giorno; solo il giorno con mese gia' noto -> si compone.
+    # merge: si riparte da zero se non si stava raccogliendo; un campo si sovrascrive solo con un valore non vuoto e valido
+    slots = dict(_HUD_EMPTY_SLOTS, **(fsm.get("slots") or {})) if fsm.get("state") == "COLLECTING" else dict(_HUD_EMPTY_SLOTS)
     rejected = {}
-    if slots.get("date"):
-        nd = _hud_norm_date(slots["date"])
-        if not _hud_date_valid(nd):
-            if nd in _MONTHS:
-                slots["month"] = nd; slots["date"] = ""
-            elif re.fullmatch(r"(the )?([1-9]|[12]\d|3[01])", nd) and slots.get("month"):
-                slots["date"] = f"{slots['month']} {nd.split()[-1]}"
-            else:
-                rejected["date"] = slots["date"]; slots["date"] = ""
-    if slots.get("time") and not _hud_time_valid(_hud_norm_time(slots["time"]), intent):
-        rejected["time"] = slots["time"]; slots["time"] = ""; slots["time_raw"] = ""
+    clean = lambda v: "" if str(v if v is not None else "").strip().lower() in ("", "none", "null", "unknown", "n/a") else str(v).strip()
+    # 'date' (form manuale / vecchio contratto): si spacca in mese e giorno
+    if clean(args.get("date")):
+        m, d = _hud_split_date(clean(args["date"]))
+        if m is None:
+            rejected["date"] = clean(args["date"])
+        else:
+            if m: slots["month"] = m
+            if d: slots["day"] = d
+    if clean(args.get("month")):
+        m = _hud_norm_date(clean(args["month"]))
+        if m in _MONTHS: slots["month"] = m
+        else: rejected["month"] = clean(args["month"])
+    if clean(args.get("day")):
+        d = _hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", clean(args["day"]).lower()))
+        d = d.replace("the ", "").strip()
+        if re.fullmatch(r"([1-9]|[12]\d|3[01])", d): slots["day"] = d
+        else: rejected["day"] = clean(args["day"])
+    if clean(args.get("time")):
+        t = clean(args["time"])
+        if _hud_time_valid(_hud_norm_time(t), intent): slots["time"] = t; slots["time_raw"] = t
+        else: rejected["time"] = t
+    slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
     if "time" in rejected and "time" not in missing:
         missing.append("time")   # verifica con un'ora detta ma non capita: si richiede l'ora, non si assume la giornata
@@ -1074,17 +1095,15 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
                     "status": None, "detail": "", "note": "", "updated": now_s, "seq": int(fsm.get("seq") or 0) + 1})
         _hud_db_save()
         return fsm, True
-    date = _hud_norm_date(slots["date"]); tm = _hud_norm_time(slots.get("time"))
+    date = slots["date"]; tm = _hud_norm_time(slots.get("time"))
     if intent == "check":
         res = _hud_exec_check(date, tm, outcome or "auto", source, delay_s)
     else:
         res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)
     shown = dict(slots, date=date, time=tm)
-    shown.pop("month", None)
     fsm.update({"state": "RESULT", "intent": intent, "slots": shown, "missing": [], "rejected": {}, "status": res["status"],
                 "detail": res.get("detail") or "", "note": "", "updated": now_s, "seq": int(fsm.get("seq") or 0) + 1})
     _hud_db_save()   # da RESULT una nuova book()/check() riparte comunque da zero (merge solo in COLLECTING)
-
     return fsm, True
 
 
@@ -1797,7 +1816,7 @@ async def realtime_ws(ws: WebSocket):
         await ws.close(code=1008, reason=f"Unsupported realtime mode: {mode}")
         return
 
-    max_duration_s = 300 if mode == "video" else 600
+    max_duration_s = 900 if mode == "video" else 600   # video: 300 upstream; 900 per i test lunghi dell'HUD (04/09)
     request_type = "omni_duplex" if mode == "video" else "audio_duplex"
 
     await _api_worker_passthrough_ws(

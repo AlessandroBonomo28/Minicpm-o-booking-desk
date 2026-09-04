@@ -31,41 +31,42 @@ MODEL_DIR = "/home/alex/progetti/MiniCPM-o-Demo/modelli/Qwen3-1.7B"
 DEFAULT_TOOLS = [
     {"type": "function", "function": {
         "name": "request",
-        "description": "Classify what the CUSTOMER just said (the NOW line) and extract the date/time they said in it.",
+        "description": "Classify what the CUSTOMER just said (the NOW line) and extract the month, the day of the month and the time they said in it. Each field is independent: fill only the ones actually said.",
         "parameters": {"type": "object", "properties": {
             "intent": {"type": "string", "enum": ["book", "check", "cancel", "none"],
                        "description": "check = a QUESTION about availability, no reservation asked ('is X available?', 'is X free?', "
                                       "'do you have anything on X?', 'any slot on X?'); "
                                       "book = an explicit request to reserve ('I'd like to book', 'book it', 'reserve', 'make an appointment'); "
-                                      "when STATE says a request is IN PROGRESS and the customer just gives a date, a day or a time, "
+                                      "when STATE says a request is IN PROGRESS and the customer just gives a month, a day or a time, "
                                       "use the intent of the request in progress (book or check); "
                                       "cancel = gives up the request in progress ('never mind', 'forget it', 'cancel that', 'stop'); "
                                       "none = anything else (chat, thanks, greetings)."},
-            "date": {"type": ["string", "null"], "description": "the date the customer said in the NOW line: 'Month D' (e.g. month name + day number), or the month alone if only the month was said; null if no date or month was said"},
+            "month": {"type": ["string", "null"], "description": "the month name the customer said in the NOW line ('April'); null if no month was said"},
+            "day": {"type": ["integer", "null"], "description": "the day of the month the customer said in the NOW line, as a number (1-31): 'the 2nd' -> 2, 'the twentieth' -> 20, 'April 2nd' -> 2; null if no day was said"},
             "time": {"type": ["string", "null"], "description": "the time the customer said in the NOW line, as 24h HH:MM; null if they did not say a time"}},
-            "required": ["intent", "date", "time"]}}},
+            "required": ["intent", "month", "day", "time"]}}},
 ]
 
 SYSTEM = ("You are the action extractor for a booking desk. You see ONE sentence the CUSTOMER just said (the NOW line) and the "
           "STATE of the booking system. Always call the function `request` exactly once, about that sentence.\n"
           "A question about whether a date/time is free is a check, NOT a booking: book only when the customer asks to reserve.\n"
-          "date and time: ONLY if the customer said them in this sentence, otherwise null. Never guess, never fill from the STATE, "
-          "never invent. A sentence without a date has date=null; without a time has time=null.\n"
-          "If a request is IN PROGRESS (see STATE) and the customer answers with a date, a day or a time, keep the intent in progress "
-          "(book stays book, check stays check) with just that field. If they correct a field ('no, the 3rd'), same intent with the "
-          "corrected value (use the month from STATE if only the day is said).\n"
-          "A bare number as the whole answer, in digits OR in words ('30', 'nine', 'the twentieth'): if STATE says the day of the month "
-          "is missing, it is the day (with the month from STATE: '30' -> 'March 30', 'the twentieth' -> 'April 20'); if STATE says the "
-          "time is missing, it is the hour ('15' -> 15:00, 'nine' / 'at nine' -> 09:00, 'nine thirty' -> 09:30).\n"
+          "month, day, time are INDEPENDENT fields: fill each one ONLY if the customer said it in this sentence, otherwise null. "
+          "The customer may give them in any order and any combination ('April' alone -> month only; 'the 2nd' alone -> day only; "
+          "'at 3 pm' alone -> time only; 'April 2nd at 3 pm' -> all three). Never guess, never fill from the STATE, never invent: "
+          "a day without a month has month=null, a month without a day has day=null. A day is a number or an ordinal "
+          "('25', 'the 3rd', 'third', 'the twentieth'); a month is ONLY an explicit month name (January...December). "
+          "Never turn an ordinal or a number into a month: 'third' -> day 3, month=null; '25' -> day 25, month=null.\n"
+          "If a request is IN PROGRESS (see STATE) and the customer answers with a month, a day or a time, keep the intent in progress "
+          "(book stays book, check stays check) with just the fields said. A bare number as the whole answer, in digits or in words: "
+          "if STATE says the day is missing it is the day ('30' -> day 30, 'the twentieth' -> day 20); if STATE says the time is "
+          "missing it is the hour ('15' -> 15:00, 'nine' -> 09:00, 'nine thirty' -> 09:30).\n"
           "cancel only while a request is in progress; after a finished request, 'thanks'/'bye' is intent=none.\n"
           "TIME RULES (24h HH:MM, convert spoken English): 'half past ten' -> 10:30; 'quarter past nine' -> 09:15; 'quarter to six' -> 05:45; "
           "'ten thirty' -> 10:30; '3 pm' / 'three in the afternoon' -> 15:00; '8 in the evening' -> 20:00; 'noon' -> 12:00; '9 am' -> 09:00; "
           "'at 15' -> 15:00; '5:20 pm' -> 17:20.\n"
-          "DATE RULES ('Month D', month name + day in digits): 'the second of April' -> April 2; 'March thirty-first' -> March 31; "
-          "'the twenty-first of May' -> May 21; 'April 2nd' -> April 2. A MONTH ALONE IS A VALID DATE VALUE: 'book for May', "
-          "'something in June', 'on March' -> date='May' / 'June' / 'March' (the system will then ask for the day). "
-          "If only the day is said ('the 3rd', 'the third') and STATE has a month, use that month ('April 3'). "
-          "'tomorrow' / 'next Monday' stay as said (the system will ask for a calendar date).")
+          "DATE EXPRESSIONS: 'the second of April' -> month April, day 2; 'March thirty-first' -> month March, day 31; "
+          "'the twenty-first of May' -> month May, day 21; 'book for May' / 'something in June' -> month only; "
+          "'tomorrow' / 'next Monday' -> month=null, day=null (the system will ask for a calendar date).")
 
 tok = None
 model = None
@@ -75,15 +76,15 @@ TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 
 def fsm_line(fsm):
     """Stato della macchina (dal gateway) reso in una riga per l'estrattore. In RESULT/IDLE NON si passano i campi:
-    una nuova richiesta riparte da zero e il modello, se li vede, li ricopia ("thank you" -> book(April 2, 15:00))."""
+    una nuova richiesta riparte da zero e il modello, se li vede, li ricopia ("thank you" -> book(April 2, 15:00)).
+    In COLLECTING si dice solo COSA c'e' e COSA manca, senza i valori (mai copiabili)."""
     if not isinstance(fsm, dict) or fsm.get("state") != "COLLECTING":
         return "STATE: no request in progress."
     sl = fsm.get("slots") or {}
-    got = [f"{k}={sl.get(k)}" for k in ("date", "time") if sl.get(k)]
-    if not sl.get("date") and sl.get("month"):
-        got.append(f"month={sl['month']} (day not said yet)")
-    miss = [("day of the month" if (m == "date" and sl.get("month")) else m) for m in (fsm.get("missing") or [])]
-    return f"STATE: {fsm.get('intent')} IN PROGRESS, collected: {', '.join(got) or 'nothing yet'}; still missing: {', '.join(miss)}."
+    got = [k for k in ("month", "day", "time") if sl.get(k)]
+    miss = [k for k in (fsm.get("missing") or []) if k in ("month", "day", "time")]
+    return (f"STATE: {fsm.get('intent')} IN PROGRESS; already collected: {', '.join(got) or 'nothing'}; "
+            f"still missing: {', '.join(miss) or 'nothing'}.")
 
 
 _EMPTY = {"", "none", "null", "unknown", "n/a", "not specified", "not mentioned"}
@@ -117,9 +118,13 @@ def decide(transcript, tools, fsm=None):
         if intent not in ("book", "check", "cancel"):
             continue
         args = {}
-        for k in ("date", "time"):
+        for k in ("month", "day", "time", "date"):
             v = a.get(k)
-            if isinstance(v, str) and v.strip().lower() not in _EMPTY:
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                args[k] = str(int(v))
+            elif isinstance(v, str) and v.strip().lower() not in _EMPTY:
+                if k == "time" and not re.search(r"\d|noon|midnight|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|half|quarter", v.lower()):
+                    continue   # 'time' / 'later': non e' un orario, non si passa alla FSM
                 args[k] = v.strip()
         calls.append({"name": intent, "arguments": args})
         break   # una sola decisione per turno

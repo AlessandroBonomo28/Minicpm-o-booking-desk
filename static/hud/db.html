@@ -81,7 +81,7 @@ async function refresh() {
     $('hudUpd').textContent = h.updated ? `(aggiornato ${h.updated.slice(11, 19)})` : '';
     const f = d.fsm || {}; const sl = f.slots || {};
     $('fsm').innerHTML = [['stato', `<span class="pill ${esc(f.state || 'IDLE')}">${esc(f.state || 'IDLE')}</span>`], ['intento', esc(f.intent || '—')],
-      ['data', esc(sl.date || (sl.month ? sl.month + ' ?' : '—'))], ['ora', esc(sl.time_raw || sl.time || '—')], ['manca', esc((f.missing || []).join(', ') || '—')],
+      ['data', esc(sl.date || ((sl.month || sl.day) ? `${sl.month || '?'} ${sl.day || '?'}` : '—'))], ['ora', esc(sl.time_raw || sl.time || '—')], ['manca', esc((f.missing || []).join(', ') || '—')],
       ['esito', f.status ? `<span class="pill ${esc(f.status)}">${labelStatus[f.status] || esc(f.status)}</span> ${esc(f.detail || '')}` : '—'],
       ['non capito', Object.keys(f.rejected || {}).length ? esc(Object.entries(f.rejected).map(([k, v]) => `${k}: "${v}"`).join(', ')) : '—'],
       ['nota', esc(f.note || '—')], ['ultima battuta', esc(f.last_user_text || '—')], ['aggiornato', esc((f.updated || '').slice(11, 19) || '—')]]

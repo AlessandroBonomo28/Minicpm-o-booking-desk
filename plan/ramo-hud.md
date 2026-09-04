@@ -396,3 +396,26 @@ result, tell the customer. Otherwise just talk."*
   e ciò che segna deve essere coerente con la chiamata.
 - Non risolvibile per costruzione: "book for that day" (riferimento all'ultima verifica): l'estrattore vede solo la
   frase corrente e in RESULT non riceve i campi. Candidato: campo esplicito "same as last result" risolto dalla FSM.
+
+### 04/09 (19:30) — settimo test (sess_c87e0377aeb7, 6,5 min, trp 1,0, finestra basic): il migliore; poi campi indipendenti
+- **Esito**: punteggiatura e coerenza intatte per 5 minuti, 5 richieste corrette (3 conferme, 1 SLOT TAKEN, 3 verifiche),
+  4 tagli della finestra (197/226/263/296 s) senza degrado. Il silenzio finale era il **timeout del gateway** (300 s per
+  le sessioni video, upstream) → portato a 900 s. Errori: "For the second." → February inventato; "Yes." dopo l'offerta
+  dell'omni e "the next day" → nessuna azione (per costruzione, vedi puntatore); "June 1st" → solo June; battute a <1 s
+  scartate ("estrattore occupato"); ASR 3,3 s sul rumore (fallback di Whisper).
+- **Campi indipendenti dall'ordine** (decisione di Alessandro): la richiesta è fatta di tre campi separati — mese,
+  giorno, ora — che arrivano in qualunque ordine e combinazione. Estrattore: `request(intent, month|null, day|null,
+  time|null)` (niente più "date" composta, niente più "usa il mese dallo stato": il modello non compone mai). FSM:
+  slot `month/day/time`, richiesti `check`=[month, day], `book`=[month, day, time]; ogni campo si accetta solo se
+  valido (mese = nome, giorno 1-31, ora HH:MM), altrimenti respinto e richiesto; `date` = mese+giorno composta dal
+  codice; l'ordine è solo quello in cui si CHIEDE il primo mancante. Schermo: `DATE: APRIL ?` / `DATE: ? 2` / `DATE: ?`
+  + `MISSING: MONTH|DAY|TIME` (+ `TIME: 15:00` se già dato). Riga di stato all'estrattore: solo nomi dei campi raccolti
+  e mancanti, mai i valori. Il form manuale (`date`) viene spaccato dal gateway. Verifica curl: ora → giorno → mese →
+  RESULT; giorno senza mese → chiede il mese; "tomorrow"/"45"/"soonish" respinti.
+- **Regressione dell'estrattore**: `tools/tool_agent_eval.py`, 55 casi presi dai test dal vivo (intenti, mese in frase,
+  date parlate, giorno con/senza mese, ora a parole, ordine sparso, dopo-esito, annulla, rumore). Prima delle ultime
+  regole 49/55 (ordinali scambiati per mesi: "third" → March, "25" → May; intento book/check in raccolta, che la FSM
+  blocca e la regressione ora considera equivalente) → dopo **55/55**, LLM medio 0,83 s. Da rilanciare a ogni modifica
+  del prompt o del modello.
+- **Da fare**: puntatore senza valore per "Yes"/"that day"/"next day" (`relative_to_last`, valore messo dalla FSM);
+  coda invece di scarto per le battute ravvicinate.

@@ -29,7 +29,7 @@ const conv = (cls, t) => logTo($('conv'), cls, t);
 const hudLog = (cls, t) => logTo($('hudLog'), cls, t);
 
 // ------------------------------------------------------------------ HUD (schermo) = stato della FSM
-const IDLE_FSM = () => ({ state: 'IDLE', intent: null, slots: { date: '', time: '' }, missing: [], status: null, detail: '', note: '' });
+const IDLE_FSM = () => ({ state: 'IDLE', intent: null, slots: { month: '', day: '', time: '', date: '' }, missing: [], status: null, detail: '', note: '' });
 const hud = {
     fsm: IDLE_FSM(),
     screen: 'IDLE',         // IDLE | COLLECTING | CHECKING | RESULT  (CHECKING: solo lato pagina, con ritardo simulato > 0)
@@ -42,7 +42,7 @@ const hud = {
         // un valore respinto e' un evento: entra nell'impronta con il numero di sequenza, cosi' produce un frame anche se
         // lo schermo e' uguale a prima (il frame e' il clock: "April" due volte -> due frame)
         const rej = Object.keys(f.rejected || {}).length ? `|rej${f.seq || 0}:${JSON.stringify(f.rejected)}` : '';
-        return `${this.screen}|${f.intent}|${f.slots.date}|${f.slots.month || ''}|${f.slots.time}|${(f.missing || []).join(',')}|${f.status}|${f.detail}|${f.note}${rej}`;
+        return `${this.screen}|${f.intent}|${f.slots.month || ''}|${f.slots.day || ''}|${f.slots.time}|${(f.missing || []).join(',')}|${f.status}|${f.detail}|${f.note}${rej}`;
     },
 };
 const canvas = $('hud'), ctx = canvas.getContext('2d');
@@ -55,15 +55,15 @@ function themeFor() {
     const f = hud.fsm;
     switch (hud.screen) {
         case 'COLLECTING': {
+            // campi indipendenti: si mostra quello che c'e' ('APRIL ?' / '? 2' / 'APRIL 2') e il primo che manca
             const miss = (f.missing || [])[0] || '';
-            const month = f.slots.month || '';
+            const month = (f.slots.month || '').toUpperCase(), day = f.slots.day || '';
             const rejKeys = Object.keys(f.rejected || {});
-            let line3 = (f.slots.time && miss === 'date') ? `TIME: ${timeLabel(f.slots.time)}` : '';
+            const dateLine = (month || day) ? `DATE: ${month || '?'} ${day || '?'}` : 'DATE: ?';
+            let line3 = (f.slots.time && miss !== 'time') ? `TIME: ${timeLabel(f.slots.time)}` : '';
             if (rejKeys.length) line3 = `"${String(f.rejected[rejKeys[0]]).toUpperCase()}" NOT VALID`;
             return { bg: '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'AVAILABILITY CHECK' : 'NEW BOOKING',
-                     line1: f.slots.date ? f.slots.date.toUpperCase() : (month ? `DATE: ${month.toUpperCase()} ?` : 'DATE: ?'),
-                     line2: `MISSING: ${(miss === 'date' && month) ? 'DAY' : miss.toUpperCase()}`,
-                     line3 };
+                     line1: dateLine, line2: `MISSING: ${miss.toUpperCase()}`, line3 };
         }
         case 'CHECKING':
             return { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: slotLine(f), line2: 'please wait', line3: '' };
@@ -125,7 +125,7 @@ function syncScreen() {
 let queryTimer = null;
 function applyFsm(fsm, delay = 0) {
     clearTimeout(queryTimer);
-    fsm = Object.assign(IDLE_FSM(), fsm || {}); fsm.slots = Object.assign({ date: '', time: '' }, fsm.slots || {});
+    fsm = Object.assign(IDLE_FSM(), fsm || {}); fsm.slots = Object.assign({ month: '', day: '', time: '', date: '' }, fsm.slots || {});
     const changed = JSON.stringify(fsm) !== JSON.stringify(hud.fsm);
     hud.fsm = fsm;
     if (fsm.state === 'RESULT' && delay > 0 && changed) {
@@ -143,8 +143,8 @@ async function fsmEvent(toolCalls, userText, source) {
     const d = await r.json();
     if (!r.ok) { hudLog('warn', 'FSM: ' + (d.error || r.status)); return null; }
     const f = d.fsm;
-    hudLog(d.changed ? 'hud' : 'sys', `FSM → ${f.state}${f.intent ? ' ' + f.intent : ''} ${f.slots.date || ''} ${f.slots.time || ''}` +
-        ((f.missing || []).length ? ' · manca ' + f.missing.join(', ') : '') + (f.slots.month && !f.slots.date ? ` · mese ${f.slots.month}` : '') +
+    hudLog(d.changed ? 'hud' : 'sys', `FSM → ${f.state}${f.intent ? ' ' + f.intent : ''} ${f.slots.month || '?'} ${f.slots.day || '?'} ${f.slots.time || ''}` +
+        ((f.missing || []).length ? ' · manca ' + f.missing.join(', ') : '') +
         (Object.keys(f.rejected || {}).length ? ' · NON CAPITO ' + Object.entries(f.rejected).map(([k, v]) => `${k}="${v}"`).join(' ') : '') + (f.status ? ' · ' + f.status : '') + (f.detail ? ' (' + f.detail + ')' : '') + (f.note ? ' · ' + f.note : '') + (d.changed ? '' : ' · invariato'));
     applyFsm(f, delay);
     return f;
@@ -237,7 +237,7 @@ let lastMetrics = {}, lastModelState = '';
 function stateLine(tag) {
     const m = lastMetrics, w = m.windowStats || {}, f = hud.fsm;
     const win = w.mode ? `${w.mode} ${w.high}/${w.low} scorr ${w.events ?? 0} scartati ${w.dropped_tokens ?? 0}` : '?';
-    const fsm = `${f.state}${f.intent ? ' ' + f.intent : ''}${f.slots.date ? ' ' + f.slots.date : (f.slots.month ? ' ' + f.slots.month + ' ?' : '')}${f.slots.time ? ' ' + f.slots.time : ''}` +
+    const fsm = `${f.state}${f.intent ? ' ' + f.intent : ''}${(f.slots.month || f.slots.day) ? ' ' + (f.slots.month || '?') + ' ' + (f.slots.day || '?') : ''}${f.slots.time ? ' ' + f.slots.time : ''}` +
         ((f.missing || []).length ? ' manca ' + f.missing.join(',') : '') + (f.status ? ' ' + f.status : '') + (f.note ? ' ' + f.note : '');
     return `STATO [${tag}] KV ${m.kvCacheLength ?? '?'} · finestra ${win} · FSM ${fsm} · lp ${$('lengthPenalty').value} trp ${$('textRepPenalty').value}`;
 }

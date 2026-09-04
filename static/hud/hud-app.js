@@ -244,7 +244,17 @@ function setRunning(on) {
     $('lamp').className = 'lamp' + (on ? ' on' : ''); $('stateText').textContent = on ? 'sessione attiva' : 'disconnesso';
 }
 
+let starting = false;
 async function startSession() {
+    // una pagina = una sessione: il 04/09 tre click su "Avvia" hanno aperto tre websocket (2 in coda) e il
+    // microfono spediva i chunk a quello in coda -> il backend non ha mai ricevuto audio
+    if (running || starting) return;
+    starting = true; $('btnStart').disabled = true;
+    try { await startSessionInner(); }
+    finally { starting = false; if (!running) $('btnStart').disabled = false; }
+}
+
+async function startSessionInner() {
     $('conv').innerHTML = ''; $('hudLog').innerHTML = '';
     hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false;
     await fsmReset();                                // ogni sessione parte da IDLE (le prenotazioni in db.html restano)
@@ -279,8 +289,9 @@ async function startSession() {
     const ref = await loadRefAudio();
     if (ref) preparePayload.ref_audio_base64 = ref;
 
+    const sess = session;   // il microfono spedisce SOLO alla sessione per cui e' stato creato
     try {
-        await session.start($('systemPrompt').value, preparePayload, async () => {
+        await sess.start($('systemPrompt').value, preparePayload, async () => {
             if ($('sendInitial').checked) hudSync(true);
             const turns = new TurnDetector((utterance) => onUserTurnEnd(utterance));
             mic = new MicCapture((audioF32) => {
@@ -290,10 +301,10 @@ async function startSession() {
                     hud.pendingFrame = null; hud.framesSent++; hud.lastFrameAt = now(); awaitingReaction = true;
                     $('framesSent').textContent = hud.framesSent;
                     $('frameInfo').textContent = `ultimo frame inviato a ${hud.lastFrameAt.toFixed(1)}s (${$('hudState').textContent})`;
-                    hudLog('hud', `FRAME INVIATO (${$('hudState').textContent}) con il chunk #${session.chunksSent + 1}`);
+                    hudLog('hud', `FRAME INVIATO (${$('hudState').textContent}) con il chunk #${sess.chunksSent + 1}`);
                 }
-                session.sendChunk(msg);
-                $('chunks').textContent = session.chunksSent;
+                sess.sendChunk(msg);
+                $('chunks').textContent = sess.chunksSent;
             }, (frame100) => turns.feed(frame100));
             await mic.start();
             conv('sys', 'microfono attivo — parla con lo sportello (VAD attivo: la decisione parte quando finisci di parlare; CUFFIE)');

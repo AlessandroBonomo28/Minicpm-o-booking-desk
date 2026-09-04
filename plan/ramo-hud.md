@@ -277,3 +277,12 @@ result, tell the customer. Otherwise just talk."*
   Codice morto del vecchio flusso (anello microfono 12 s, trigger sul testo dell'omni, regex) rimosso. `db.html` mostra la
   FSM (stato, intento, campi, manca, esito, nota, ultima battuta ASR grezza = controllo della precisione delle date).
 - Il registro delle verifiche contiene le prove `curl` di oggi (colonna "avviata da": curl).
+- **Primo test dal vivo (15:37): l'omni non ha mai parlato — causa trovata nei log, non nel modello.** Tre websocket aperti
+  in 140 ms (tre `startSession`: il bottone "Avvia" restava attivo fino a fine avvio, click ripetuti): il primo ha preso
+  il worker, gli altri due sono finiti in coda; il microfono spediva alla variabile globale `session` = l'ultima creata
+  (in coda) → 40 chunk mai arrivati al backend (nessun `input.append` registrato, backend fermo dopo il prepare); alle
+  +42 s il socket in coda è stato chiuso e il contatore si è fermato a 40. Fix strutturale nella pagina: `startSession`
+  non rientrante (bottone disabilitato al click) e microfono legato alla propria sessione. L'estrattore+FSM in quel test
+  hanno funzionato: "I'd like to book a call" → book() → MISSING date,time; "31 March" → check (frase ambigua, senza
+  "book"); "the second of April" → manca time; "At 12" → book(April 2, 12:00) → SLOT TAKEN (2 aprile tutto il giorno).
+  Nota ASR: "31 March", "2nd April" trascritti bene. P2 (l'omni chiede la data) resta da verificare.

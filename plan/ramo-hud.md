@@ -332,3 +332,19 @@ result, tell the customer. Otherwise just talk."*
   `BOOKING DONE / CONFIRMED`; prenotazione fallita = `BOOKING / SLOT TAKEN / BOOKED <ora>`; verifica su slot occupato =
   `RESULT / ALREADY BOOKED / <ora>`.
 - DB azzerato di nuovo (il test aveva creato april 2 15:00).
+
+### 04/09 (17:00) — quarto test dal vivo (sess_5430cccc790e): mese parziale OK; campi copiati dallo storico
+- **OK**: "I want to book a desk" → chiede quando → "on May" → `DATE: MAY ? / MISSING: DAY` → "Which day of May?" →
+  "25" → chiede l'ora → "15" → BOOKING DONE → "Your booking is confirmed at 15:00 on 25th May". Il mese parziale guida
+  l'omni come previsto.
+- **Difetto**: "Okay, thank you. And is it free?" → `check(May, 15)`: "May" e "15" ripescati dalle **battute utente
+  precedenti** (passavo le ultime 4 come EARLIER USER). Stesso meccanismo delle righe dell'operatore: ogni testo in
+  ingresso è una fonte da cui il 1,7B copia. Ora l'estrattore riceve **solo la battuta corrente + lo stato**; il contesto
+  multi-turno è tutto nella riga di stato (intento, mese, campi, mancanti). "And is it free?" → `check()` → la FSM chiede
+  la data (l'omni infatti aveva chiesto "What date are you asking about again?").
+- **Difetto 2**: "30" in risposta a una verifica → `book(March 30)`: l'intento saltava. Ora (a) il prompt dice che una
+  data/giorno/ora in risposta prende l'intento in corso, (b) la **FSM in COLLECTING non cambia intento** (per cambiare
+  richiesta si annulla): anche se l'estrattore dice book, resta check. Verificato via curl.
+- Regola per i numeri secchi: manca il giorno → è il giorno (mese dallo stato); manca l'ora → è l'ora.
+- L'omni ha letto AVAILABLE e detto "March thirty-fifth … fifteen hundred hours available": lo schermo diceva
+  MARCH 30 15:00; errore di lettura/pronuncia suo, da osservare se si ripete.

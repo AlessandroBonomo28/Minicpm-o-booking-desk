@@ -90,15 +90,30 @@ def fsm_line(fsm):
 _EMPTY = {"", "none", "null", "unknown", "n/a", "not specified", "not mentioned"}
 
 
-def decide(transcript, tools, fsm=None):
+CONTEXT_RULES = ("\nThe lines before NOW are the conversation so far (OPERATOR = the desk, USER = the customer). Use them ONLY to "
+                 "understand what the NOW line refers to: if the customer accepts an offer ('yes', 'ok', 'sure', 'book it') or refers "
+                 "to a date the operator or the customer just mentioned ('that day', 'the same day'), take month/day/time from that "
+                 "mention; 'the next day' / 'the day after' = that day + 1, 'the day before' = that day - 1. If the NOW line does not "
+                 "refer to them, ignore the earlier lines completely: 'thank you', 'let me think', chit-chat -> intent none, all null.")
+
+
+def decide(transcript, tools, fsm=None, context=0):
+    """context=0: SOLO la battuta corrente (contratto attuale: le righe precedenti erano una fonte da cui copiare campi).
+    context=N: esperimento (05/09, richiesta di Alessandro): anche le ultime N righe del dialogo, operatore compreso,
+    per risolvere 'yes' / 'that day' / 'the next day'."""
     import torch
-    users = [t.get("text", "") for t in transcript if t.get("role") == "user" and (t.get("text") or "").strip()]
+    lines = [(t.get("role"), (t.get("text") or "").strip()) for t in transcript if (t.get("text") or "").strip()]
+    users = [x for r, x in lines if r == "user"]
     if not users:
         return {"tool_calls": [], "raw": "NO ACTION (nessuna riga utente)"}
-    # SOLO la battuta appena detta: le righe precedenti erano una fonte da cui copiare campi ("is it free?" dopo una
-    # prenotazione -> check(May, 15) ripescati dai turni prima). Il contesto multi-turno lo porta la riga di stato.
-    convo = f"NOW USER: {users[-1]}"
-    messages = [{"role": "system", "content": SYSTEM},
+    last_user_idx = max(i for i, (r, _) in enumerate(lines) if r == "user")
+    convo = f"NOW USER: {lines[last_user_idx][1]}"
+    system = SYSTEM
+    if context and last_user_idx > 0:
+        prev = lines[max(0, last_user_idx - int(context)):last_user_idx]
+        convo = "\n".join(f"{'OPERATOR' if r == 'assistant' else 'USER'}: {x}" for r, x in prev) + "\n" + convo
+        system = SYSTEM + CONTEXT_RULES
+    messages = [{"role": "system", "content": system},
                 {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall request() about the NOW line."}]
     prompt = tok.apply_chat_template(messages, tools=tools, add_generation_prompt=True, tokenize=False, enable_thinking=False)
     with lock:
@@ -172,7 +187,13 @@ class H(BaseHTTPRequestHandler):
                 # il trigger e' il turno dell'utente: senza parole dell'utente non c'e' nulla da decidere
                 res = {"tool_calls": [], "raw": "NO ACTION (nessun testo utente)"}
             else:
-                res = decide(transcript, req.get("tools") or DEFAULT_TOOLS, req.get("fsm"))
+                ctxmode = req.get("context") or 0
+                if ctxmode == "auto":
+                    # contesto SOLO con un'offerta in sospeso (ultimo esito: verifica con posto libero): li' 'yes'/'that day'
+                    # devono prendere la data dall'offerta; in ogni altro stato il contesto e' solo una fonte di copie
+                    f = req.get("fsm") or {}
+                    ctxmode = 3 if (f.get("state") == "RESULT" and f.get("intent") == "check" and f.get("status") in ("available", "partial")) else 0
+                res = decide(transcript, req.get("tools") or DEFAULT_TOOLS, req.get("fsm"), int(ctxmode))
             res["user_text"] = user_text; res["asr_s"] = asr_s; res["llm_s"] = round(time.time() - t_llm, 2); res["total_s"] = round(time.time() - t_all, 2)
             self._send(200, json.dumps(res, ensure_ascii=False).encode())
         except Exception as e:

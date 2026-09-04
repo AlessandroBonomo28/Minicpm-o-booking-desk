@@ -419,3 +419,9 @@ result, tell the customer. Otherwise just talk."*
   del prompt o del modello.
 - **Da fare**: puntatore senza valore per "Yes"/"that day"/"next day" (`relative_to_last`, valore messo dalla FSM);
   coda invece di scarto per le battute ravvicinate.
+- (19:50) Ottavo test (sess_5d14e35b5649): "20" come giorno → l'estrattore lo ha messo in `month` (respinto → NOT VALID)
+  e il primo "20" perso (`check({})`); nella regressione "25"/"30" passano: sui numeri secchi il 1,7B è instabile.
+  **Regola strutturale nella FSM**: un numero secco è la risposta alla domanda che lo schermo sta facendo; se il
+  modello lo mette nel campo sbagliato o non lo estrae, il gateway lo instrada sul primo campo numerico mancante
+  (giorno, poi ora), solo in COLLECTING (dopo un esito un numero non è una risposta). Battute ravvicinate: coda (max 2)
+  invece dello scarto "estrattore occupato".

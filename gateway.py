@@ -1072,10 +1072,25 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         else:
             if m: slots["month"] = m
             if d: slots["day"] = d
+    # Numero secco = risposta alla domanda che lo schermo sta facendo (lo sa la FSM, non il modello): se il modello lo ha
+    # messo nel campo sbagliato (month="20") o non lo ha messo affatto, lo si instrada sul primo campo numerico mancante
+    # nell'ordine in cui si chiede (giorno, poi ora).
+    def _route_bare_number(raw):
+        n = _hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", str(raw).strip().lower().rstrip(".!? ")))
+        n = re.sub(r"^(the|at)\s+", "", n).strip()
+        if not re.fullmatch(r"\d{1,2}(:\d{2})?(\s*(am|pm))?", n):
+            return False
+        want_day = not slots.get("day") and "day" in _HUD_REQUIRED[intent]
+        want_time = not slots.get("time") and "time" in _HUD_REQUIRED[intent]
+        if want_day and re.fullmatch(r"\d{1,2}", n) and 1 <= int(n) <= 31:
+            slots["day"] = n; return True
+        if want_time and _hud_time_valid(_hud_norm_time(n), intent):
+            slots["time"] = n; slots["time_raw"] = n; return True
+        return False
     if clean(args.get("month")):
         m = _hud_norm_date(clean(args["month"]))
         if m in _MONTHS: slots["month"] = m
-        else: rejected["month"] = clean(args["month"])
+        elif not _route_bare_number(clean(args["month"])): rejected["month"] = clean(args["month"])
     if clean(args.get("day")):
         d = _hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", clean(args["day"]).lower()))
         d = d.replace("the ", "").strip()
@@ -1085,6 +1100,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         t = clean(args["time"])
         if _hud_time_valid(_hud_norm_time(t), intent): slots["time"] = t; slots["time_raw"] = t
         else: rejected["time"] = t
+    if fsm.get("state") == "COLLECTING" and not any(clean(args.get(k)) for k in ("date", "month", "day", "time")) and user_text:
+        _route_bare_number(user_text)   # il modello non ha estratto nulla ma la battuta era un numero secco
     slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
     if "time" in rejected and "time" not in missing:

@@ -374,13 +374,14 @@ function onModelText(text) {
 // ---- estrattore (modello SEPARATO): riceve SOLO le battute dell'utente + lo stato della FSM
 const userLines = [];           // ultime battute dell'utente (ASR), contesto per l'estrattore
 let toolBusy = false;
+const pendingTurns = [];        // battute arrivate mentre l'estrattore era occupato: si accodano, non si scartano
 
 /** Fine del tuo turno: ASR della sola battuta (GPU) + estrazione + evento alla FSM. */
 async function onUserTurnEnd(utterance) {
     const secs = (utterance.length / SR_IN).toFixed(1);
     hudLog('sys', `TURNO UTENTE finito (${secs} s di voce)`);
     if ($('trigMode').value !== 'tool') return;
-    if (toolBusy) { hudLog('warn', 'estrattore occupato: battuta saltata'); return; }
+    if (toolBusy) { pendingTurns.push(utterance); if (pendingTurns.length > 2) pendingTurns.shift(); hudLog('sys', `estrattore occupato: battuta in coda (${pendingTurns.length})`); return; }
     toolBusy = true;
     try {
         const t0 = performance.now();
@@ -398,7 +399,7 @@ async function onUserTurnEnd(utterance) {
         await fsmEvent(calls, d.user_text, 'estrattore (turno utente)');
         conv('sys', stateLine(`dopo la tua battuta: ${calls.map(c => c.name + JSON.stringify(c.arguments)).join(' ')}`));
     } catch (e) { hudLog('warn', 'estrattore errore: ' + e.message); }
-    finally { toolBusy = false; }
+    finally { toolBusy = false; if (pendingTurns.length) onUserTurnEnd(pendingTurns.shift()); }
 }
 
 async function checkToolAgent() {

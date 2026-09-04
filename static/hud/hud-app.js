@@ -231,6 +231,16 @@ class MicCapture {
 
 // ------------------------------------------------------------------ sessione
 let session = null, mic = null, running = false, awaitingReaction = false, lastWindowEvents = 0;
+let lastMetrics = {}, lastModelState = '';
+
+/** Riga di stato compatta nella conversazione (dopo ogni turno), per rileggere i test dal log incollato. */
+function stateLine(tag) {
+    const m = lastMetrics, w = m.windowStats || {}, f = hud.fsm;
+    const win = w.mode ? `${w.mode} ${w.high}/${w.low} scorr ${w.events ?? 0} scartati ${w.dropped_tokens ?? 0}` : '?';
+    const fsm = `${f.state}${f.intent ? ' ' + f.intent : ''}${f.slots.date ? ' ' + f.slots.date : (f.slots.month ? ' ' + f.slots.month + ' ?' : '')}${f.slots.time ? ' ' + f.slots.time : ''}` +
+        ((f.missing || []).length ? ' manca ' + f.missing.join(',') : '') + (f.status ? ' ' + f.status : '') + (f.note ? ' ' + f.note : '');
+    return `STATO [${tag}] KV ${m.kvCacheLength ?? '?'} · finestra ${win} · FSM ${fsm} · lp ${$('lengthPenalty').value} trp ${$('textRepPenalty').value}`;
+}
 
 async function loadRefAudio() {
     const choice = $('refChoice').value;
@@ -293,6 +303,11 @@ async function startSessionInner() {
     session.onMetrics = (d) => {
         if (!d) return;
         if (d.sessionState) $('stateText').textContent = d.sessionState;
+        if (d.kvCacheLength !== undefined) lastMetrics = d;
+        if (d.modelState && d.modelState !== lastModelState) {
+            if (d.modelState === 'end_of_turn') conv('sys', stateLine('fine turno AI'));
+            lastModelState = d.modelState;
+        }
         if (d.kvCacheLength !== undefined) {
             const w = d.windowStats || {};
             const win = w.mode ? `${w.mode}${w.enabled ? '' : ' (spenta)'} ${w.high}/${w.low} · scorrimenti ${w.events ?? 0} · scartati ${w.dropped_tokens ?? 0} tok (${w.dropped_units ?? 0} unità)` : '?';
@@ -309,7 +324,7 @@ async function startSessionInner() {
                                        text_repetition_penalty: parseFloat($('textRepPenalty').value) || 1.0,
                                        sliding_window_mode: $('slidingWindow').value, sliding_window_high_tokens: 4000, sliding_window_low_tokens: 3500 },
                              use_tts: true, max_slice_nums: 1 };
-    lastWindowEvents = 0; $('kvInfo').textContent = 'KV: — · finestra: ' + $('slidingWindow').value;
+    lastWindowEvents = 0; lastMetrics = {}; lastModelState = ''; $('kvInfo').textContent = 'KV: — · finestra: ' + $('slidingWindow').value;
     const ref = await loadRefAudio();
     if (ref) preparePayload.ref_audio_base64 = ref;
 
@@ -381,6 +396,7 @@ async function onUserTurnEnd(utterance) {
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
         for (const c of calls) hudLog('hud', `ESTRATTORE (${tim}): ${c.name}(${JSON.stringify(c.arguments)})`);
         await fsmEvent(calls, d.user_text, 'estrattore (turno utente)');
+        conv('sys', stateLine(`dopo la tua battuta: ${calls.map(c => c.name + JSON.stringify(c.arguments)).join(' ')}`));
     } catch (e) { hudLog('warn', 'estrattore errore: ' + e.message); }
     finally { toolBusy = false; }
 }

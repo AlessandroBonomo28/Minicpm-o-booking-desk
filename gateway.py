@@ -1130,11 +1130,6 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         return fsm, True
     date = slots["date"]; tm = _hud_norm_time(slots.get("time"))
     said_fields = any(clean(args.get(k)) for k in ("date", "month", "day", "time"))
-    if fsm.get("state") == "CONFIRM" and fsm.get("intent") == "book" and said_fields:
-        # in conferma, ripetere gli stessi valori ("yes, March 2 at 3 pm") e' una conferma, non un cambiamento
-        prev = fsm.get("slots") or {}
-        if date == prev.get("date") and tm == prev.get("time"):
-            said_fields = False
     if intent == "check":
         res = _hud_exec_check(date, tm, outcome or "auto", source, delay_s)
     elif fsm.get("state") == "CONFIRM" and not said_fields:

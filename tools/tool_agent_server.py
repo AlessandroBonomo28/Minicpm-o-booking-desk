@@ -88,8 +88,7 @@ def fsm_line(fsm):
         if sl.get("time") and sl.get("time") != "all-day":
             when += f" at {sl['time']}"
         if fsm.get("intent") == "book":
-            # niente valori: il modello li ricopierebbe come "cambiamento" ("yes" -> book(March 2, 15:00)); la FSM li ha gia'
-            return (f"STATE: BOOKING WAITING FOR CONFIRMATION (the date and time are already collected and shown on the desk screen; slot is free, NOT written yet). "
+            return (f"STATE: BOOKING WAITING FOR CONFIRMATION: {when} (slot is free, NOT written yet). "
                     f"If the customer confirms ('yes', 'ok', 'sure', 'go ahead', 'confirm') -> intent=book with month, day and time ALL null. "
                     f"If they change something ('no, the 3rd', 'at 5 pm instead') -> intent=book with only the changed field. "
                     f"If they decline or cancel ('no', 'never mind', 'cancel') -> intent=cancel. Chat/thanks -> intent=none.")

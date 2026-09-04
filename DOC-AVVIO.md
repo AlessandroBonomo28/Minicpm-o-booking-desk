@@ -70,7 +70,7 @@ bash tools/run_demo_base.sh
 ```bash
 bash tools/run_demo_hud.sh
 ```
-→ codice del ramo italiano + **pesi BASE** + tool agent Qwen3-1.7B (porta 22700). Pagina: `https://localhost:8006/static/hud/hud.html`; stato del gestionale (sola lettura): `https://localhost:8006/static/hud/db.html`. Doc: `plan/ramo-hud.md`.
+→ codice del ramo italiano + **pesi BASE** + tool agent Qwen3-1.7B (porta 22700). Pagina: `https://localhost:8006/static/hud/hud.html`; gestionale (prenotazioni, stato della FSM, registro): `https://localhost:8006/static/hud/db.html`. Doc: `plan/ramo-hud.md`.
 
 Tempi: 1-4 minuti (il caricamento dei pesi dipende dalla cache del disco). Lo script
 stampa le verifiche alla fine (`worker: OK`, `gateway: OK`, `DEMO ... SU`).

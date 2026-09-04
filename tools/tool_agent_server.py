@@ -6,8 +6,10 @@ conversazione e decide se chiamare una funzione e con quali argomenti. Modello:
 Qwen3-1.7B (tool calling nativo via chat template, stessa famiglia del cervello
 dell'omni), ~3.4 GB bf16 sulla stessa GPU.
 
-  POST /decide  {"transcript":[{"role":"assistant"|"user","text":"..."}], "tools":[...opzionale...]}
-                -> {"tool_calls":[{"name":..., "arguments":{...}}], "raw": "..."}
+  POST /decide  {"transcript":[{"role":"assistant"|"user","text":"..."}], "user_audio_b64": ..., "language": "en",
+                 "fsm": {stato della macchina dal gateway, opzionale}, "tools":[...opzionale...]}
+                -> {"tool_calls":[{"name": book|check|cancel, "arguments":{...}}], "raw": "...", "user_text", "asr_s", "llm_s"}
+  La FSM (merge dei campi, cosa manca, esecuzione) sta nel gateway: qui si estrae SOLO cio' che l'utente ha detto.
   GET  /health  -> "ready"
 
 Avvio:  conda run -n minicpm python tools/tool_agent_server.py --port 22700
@@ -26,34 +28,35 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL_DIR = "/home/alex/progetti/MiniCPM-o-Demo/modelli/Qwen3-1.7B"
 
-DEFAULT_TOOLS = [{
-    "type": "function",
-    "function": {
-        "name": "check_availability",
-        "description": "Checks in the booking system whether a slot is available. Call it ONLY when the operator "
-                       "has just said they will check a specific date and time requested by the user.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "date": {"type": "string", "description": "the requested date as spoken, e.g. 'March 31'"},
-                "time": {"type": "string", "description": "the requested time in 24h HH:MM, e.g. '15:00'. OMIT it when the user asks about a whole day or gives no time."},
-            },
-            "required": ["date"],
-        },
-    },
-}]
+DEFAULT_TOOLS = [
+    {"type": "function", "function": {
+        "name": "request",
+        "description": "Classify what the CUSTOMER just said (the NOW line) and extract the date/time they said in it.",
+        "parameters": {"type": "object", "properties": {
+            "intent": {"type": "string", "enum": ["book", "check", "cancel", "none"],
+                       "description": "check = a QUESTION about availability, no reservation asked ('is X available?', 'is X free?', "
+                                      "'do you have anything on X?', 'any slot on X?'); "
+                                      "book = an explicit request to reserve ('I'd like to book', 'book it', 'reserve', 'make an appointment'), "
+                                      "or a date/time given while a booking is in progress; "
+                                      "cancel = gives up the request in progress ('never mind', 'forget it', 'cancel that', 'stop'); "
+                                      "none = anything else (chat, thanks, greetings)."},
+            "date": {"type": ["string", "null"], "description": "the date the customer said in the NOW line, copied as spoken; null if they did not say a date"},
+            "time": {"type": ["string", "null"], "description": "the time the customer said in the NOW line, as 24h HH:MM; null if they did not say a time"}},
+            "required": ["intent", "date", "time"]}}},
+]
 
-SYSTEM = ("You are the action extractor for a booking desk. Read the transcript (USER and OPERATOR) and call "
-          "check_availability ONLY when the operator is about to check a specific date and time. If the date or the time "
-          "is missing, or there is no availability check, call nothing and answer 'NO ACTION'.\n"
-          "The date and time must come from the USER lines only; OPERATOR lines are context, never a source of dates. "
-          "If the USER did not mention a date, answer 'NO ACTION'.\n"
-          "TIME RULES (24h HH:MM, convert spoken English):\n"
-          "- 'half past ten' -> 10:30; 'quarter past nine' -> 09:15; 'quarter to six' -> 05:45; 'ten thirty' -> 10:30\n"
-          "- '3 pm' / 'three in the afternoon' -> 15:00; '8 in the evening' -> 20:00; 'noon' -> 12:00; '9 am' -> 09:00\n"
-          "- 'at 15' / 'fifteen hundred' -> 15:00; '5:20 pm' -> 17:20\n"
-          "DATE RULES: copy the date as spoken ('March 31', 'April 2nd', 'tomorrow', 'next Monday').\n"
-          "If the user asks about a whole day or gives no time, call check_availability with the date ONLY (no time field). Never invent a time that was not said.")
+SYSTEM = ("You are the action extractor for a booking desk. You only see what the CUSTOMER said (USER lines) and the STATE of the "
+          "booking system. Always call the function `request` exactly once, about the NOW line only.\n"
+          "A question about whether a date/time is free is a check, NOT a booking: book only when the customer asks to reserve.\n"
+          "date and time: ONLY if the customer said them in the NOW line, otherwise null. Never guess, never fill from the STATE or "
+          "from earlier lines, never invent. A sentence without a date has date=null; without a time has time=null.\n"
+          "If a booking is IN PROGRESS and the customer answers with a date or a time, intent=book with just that field. "
+          "If they correct a field ('no, the 3rd'), intent=book with the corrected value (use the month from STATE if only the day is said).\n"
+          "cancel only while a request is in progress; after a finished request, 'thanks'/'bye' is intent=none.\n"
+          "TIME RULES (24h HH:MM, convert spoken English): 'half past ten' -> 10:30; 'quarter past nine' -> 09:15; 'quarter to six' -> 05:45; "
+          "'ten thirty' -> 10:30; '3 pm' / 'three in the afternoon' -> 15:00; '8 in the evening' -> 20:00; 'noon' -> 12:00; '9 am' -> 09:00; "
+          "'at 15' -> 15:00; '5:20 pm' -> 17:20.\n"
+          "DATE RULES: copy the date as spoken (month and day, ordinal removed is fine; 'tomorrow', 'next Monday' as said).")
 
 tok = None
 model = None
@@ -61,24 +64,53 @@ lock = threading.Lock()
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 
 
-def decide(transcript, tools):
+def fsm_line(fsm):
+    """Stato della macchina (dal gateway) reso in una riga per l'estrattore."""
+    if not isinstance(fsm, dict) or fsm.get("state") not in ("COLLECTING", "RESULT"):
+        return "STATE: no request in progress."
+    sl = fsm.get("slots") or {}
+    got = ", ".join(f"{k}={sl.get(k)}" for k in ("date", "time") if sl.get(k)) or "nothing yet"
+    if fsm.get("state") == "COLLECTING":
+        return f"STATE: {fsm.get('intent')} IN PROGRESS, collected: {got}; still missing: {', '.join(fsm.get('missing') or [])}."
+    return f"STATE: last {fsm.get('intent')} finished ({fsm.get('status')}) for {got}; a new request starts from scratch."
+
+
+_EMPTY = {"", "none", "null", "unknown", "n/a", "not specified", "not mentioned"}
+
+
+def decide(transcript, tools, fsm=None):
     import torch
-    convo = "\n".join(f"{'OPERATORE' if t.get('role') == 'assistant' else 'UTENTE'}: {t.get('text', '')}" for t in transcript)
+    users = [t.get("text", "") for t in transcript if t.get("role") == "user" and (t.get("text") or "").strip()]
+    if not users:
+        return {"tool_calls": [], "raw": "NO ACTION (nessuna riga utente)"}
+    earlier = "\n".join(f"EARLIER USER: {u}" for u in users[-4:-1])
+    convo = (earlier + "\n" if earlier else "") + f"NOW USER: {users[-1]}"
     messages = [{"role": "system", "content": SYSTEM},
-                {"role": "user", "content": f"Trascrizione:\n{convo}\n\nDecidi."}]
+                {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall request() about the NOW line."}]
     prompt = tok.apply_chat_template(messages, tools=tools, add_generation_prompt=True, tokenize=False, enable_thinking=False)
     with lock:
         ids = tok(prompt, return_tensors="pt").to(model.device)
-        out = model.generate(**ids, max_new_tokens=160, do_sample=False)
+        out = model.generate(**ids, max_new_tokens=120, do_sample=False)
         raw = tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=False)
     calls = []
     for m in TOOL_CALL_RE.finditer(raw):
         try:
             c = json.loads(m.group(1))
-            if isinstance(c, dict) and c.get("name"):
-                calls.append({"name": c["name"], "arguments": c.get("arguments") or {}})
         except Exception:
-            pass
+            continue
+        if not isinstance(c, dict):
+            continue
+        a = c.get("arguments") or {}
+        intent = str(a.get("intent") or c.get("name") or "none").lower()
+        if intent not in ("book", "check", "cancel"):
+            continue
+        args = {}
+        for k in ("date", "time"):
+            v = a.get(k)
+            if isinstance(v, str) and v.strip().lower() not in _EMPTY:
+                args[k] = v.strip()
+        calls.append({"name": intent, "arguments": args})
+        break   # una sola decisione per turno
     return {"tool_calls": calls, "raw": raw.replace("<|im_end|>", "").strip()[:400]}
 
 
@@ -123,7 +155,7 @@ class H(BaseHTTPRequestHandler):
                 # il trigger e' il turno dell'utente: senza parole dell'utente non c'e' nulla da decidere
                 res = {"tool_calls": [], "raw": "NO ACTION (nessun testo utente)"}
             else:
-                res = decide(transcript, req.get("tools") or DEFAULT_TOOLS)
+                res = decide(transcript, req.get("tools") or DEFAULT_TOOLS, req.get("fsm"))
             res["user_text"] = user_text; res["asr_s"] = asr_s; res["llm_s"] = round(time.time() - t_llm, 2); res["total_s"] = round(time.time() - t_all, 2)
             self._send(200, json.dumps(res, ensure_ascii=False).encode())
         except Exception as e:

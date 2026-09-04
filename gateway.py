@@ -743,7 +743,10 @@ async def get_presets():
 
 # ============ Ramo HUD: stato del "gestionale" (DB simulato, sola lettura dalla pagina db.html) ============
 _HUD_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "hud_db.json")
-_HUD_DB: Dict[str, Any] = {"slots": {}, "log": [], "hud": {"state": "IDLE", "date": "", "time": "", "updated": None}}
+_HUD_FSM_IDLE: Dict[str, Any] = {"state": "IDLE", "intent": None, "slots": {"date": "", "time": ""}, "missing": [],
+                                 "status": None, "detail": "", "note": "", "last_user_text": "", "updated": None}
+_HUD_DB: Dict[str, Any] = {"slots": {}, "log": [], "hud": {"state": "IDLE", "date": "", "time": "", "updated": None},
+                           "fsm": dict(_HUD_FSM_IDLE, slots={"date": "", "time": ""}, missing=[])}
 
 
 def _hud_db_load():
@@ -912,13 +915,8 @@ def _hud_lookup(date: str, tm: str):
     return "available", ""
 
 
-@app.post("/api/hud_db/check")
-async def hud_db_check(request: Request):
-    """La verifica dell'HUD. outcome: 'auto' (default) = legge il gestionale; 'ok'/'no' = forzatura manuale;
-    'err' = simula errore/timeout. L'ora puo' mancare (= giornata intera)."""
-    body = await request.json()
-    date = _hud_norm_date(body.get("date")); tm = _hud_norm_time(body.get("time"))
-    outcome = body.get("outcome") or "auto"
+def _hud_exec_check(date: str, tm: str, outcome: str, source: str, delay_s=None, intent: str = "check"):
+    """Esecuzione di una verifica. outcome: 'auto' = legge il gestionale; 'ok'/'no' = forzatura; 'err' = errore simulato."""
     key = f"{date} {tm}"
     detail = ""
     if outcome == "err":
@@ -932,12 +930,121 @@ async def hud_db_check(request: Request):
             _HUD_DB["slots"][key] = {"date": date, "time": tm, "status": "available", "name": ""}
     if key in _HUD_DB["slots"] and status != "error":
         _HUD_DB["slots"][key]["last_check"] = datetime.now().isoformat(timespec="seconds")
-    _HUD_DB["log"].append({"ts": datetime.now().isoformat(timespec="seconds"), "date": date, "time": tm, "result": status,
-                           "detail": detail, "source": body.get("source") or "?", "delay_s": body.get("delay_s"), "mode": outcome})
+    _HUD_DB["log"].append({"ts": datetime.now().isoformat(timespec="seconds"), "intent": intent, "date": date, "time": tm, "result": status,
+                           "detail": detail, "source": source or "?", "delay_s": delay_s, "mode": outcome})
     _HUD_DB["log"] = _HUD_DB["log"][-200:]
     _hud_db_save()
-    return JSONResponse(content={"date": date, "time": tm, "status": status, "detail": detail,
-                                 "name": (_HUD_DB["slots"].get(key) or {}).get("name", "")})
+    return {"date": date, "time": tm, "status": status, "detail": detail, "name": (_HUD_DB["slots"].get(key) or {}).get("name", "")}
+
+
+def _hud_exec_book(date: str, tm: str, time_raw: str, outcome: str, source: str, delay_s=None):
+    """Esecuzione di una prenotazione: slot libero -> scritto come OCCUPATO (confirmed); occupato -> taken; err -> error."""
+    key = f"{date} {tm}"
+    detail = ""
+    if outcome == "err":
+        status = "error"
+    else:
+        if outcome == "ok":
+            found, detail = "available", ""
+        elif outcome == "no":
+            found, detail = "booked", _hud_time_label(_HUD_DB["slots"].get(key) or tm)
+        else:
+            found, detail = _hud_lookup(date, tm)
+        if found == "available":
+            status = "confirmed"
+            _HUD_DB["slots"][key] = {"date": date, "time": tm, "time_raw": (time_raw or "").strip() or _hud_time_label(tm), "status": "booked",
+                                     "name": "voice", "created": datetime.now().isoformat(timespec="seconds"),
+                                     "last_check": datetime.now().isoformat(timespec="seconds")}
+        else:
+            status = "taken"
+    _HUD_DB["log"].append({"ts": datetime.now().isoformat(timespec="seconds"), "intent": "book", "date": date, "time": tm, "result": status,
+                           "detail": detail, "source": source or "?", "delay_s": delay_s, "mode": outcome})
+    _HUD_DB["log"] = _HUD_DB["log"][-200:]
+    _hud_db_save()
+    return {"date": date, "time": tm, "status": status, "detail": detail}
+
+
+@app.post("/api/hud_db/check")
+async def hud_db_check(request: Request):
+    """La verifica dell'HUD (manuale/regex). outcome: 'auto' (default) = legge il gestionale; 'ok'/'no' = forzatura;
+    'err' = simula errore/timeout. L'ora puo' mancare (= giornata intera)."""
+    body = await request.json()
+    date = _hud_norm_date(body.get("date")); tm = _hud_norm_time(body.get("time"))
+    return JSONResponse(content=_hud_exec_check(date, tm, body.get("outcome") or "auto", body.get("source"), body.get("delay_s")))
+
+
+# ---- FSM della prenotazione (plan/ramo-hud.md, 04/09): la macchina a stati la fa il codice, il modello estrae soltanto
+_HUD_REQUIRED = {"check": ["date"], "book": ["date", "time"]}
+
+
+def _hud_fsm_reset(note: str = ""):
+    _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots={"date": "", "time": ""}, missing=[], note=note,
+                          updated=datetime.now().isoformat(timespec="seconds"))
+    _hud_db_save()
+    return _HUD_DB["fsm"]
+
+
+def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=None):
+    """Applica UNA decisione dell'estrattore allo stato. Ritorna (fsm, changed)."""
+    fsm = _HUD_DB.get("fsm") or _hud_fsm_reset()
+    fsm["last_user_text"] = user_text or ""
+    call = next((c for c in (calls or []) if isinstance(c, dict) and c.get("name")), None)
+    if not call:
+        _hud_db_save()
+        return fsm, False
+    name = str(call["name"]).lower()
+    args = call.get("arguments") or {}
+    if name == "cancel":
+        # annulla solo una richiesta in corso; da RESULT/IDLE pulisce lo schermo senza nota (non c'e' nulla da annullare)
+        return _hud_fsm_reset(note="REQUEST CANCELLED" if fsm.get("state") == "COLLECTING" else ""), True
+    if name not in ("book", "check", "check_availability"):
+        _hud_db_save()
+        return fsm, False
+    intent = "book" if name == "book" else "check"
+    # merge: si riparte da zero se cambia l'intento o non si stava raccogliendo; un campo si sovrascrive solo con un valore non vuoto
+    slots = dict(fsm.get("slots") or {}) if (fsm.get("state") == "COLLECTING" and fsm.get("intent") == intent) else {"date": "", "time": "", "time_raw": ""}
+    for k in ("date", "time"):
+        v = str(args.get(k) or "").strip()
+        if v and v.lower() not in ("none", "null", "unknown", "n/a"):
+            slots[k] = v
+            if k == "time":
+                slots["time_raw"] = v
+    missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
+    now_s = datetime.now().isoformat(timespec="seconds")
+    if missing:
+        fsm.update({"state": "COLLECTING", "intent": intent, "slots": slots, "missing": missing, "status": None, "detail": "", "note": "", "updated": now_s})
+        _hud_db_save()
+        return fsm, True
+    date = _hud_norm_date(slots["date"]); tm = _hud_norm_time(slots.get("time"))
+    if intent == "check":
+        res = _hud_exec_check(date, tm, outcome or "auto", source, delay_s)
+    else:
+        res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)
+    shown = dict(slots, date=date, time=tm)
+    fsm.update({"state": "RESULT", "intent": intent, "slots": shown, "missing": [], "status": res["status"], "detail": res.get("detail") or "",
+                "note": "", "updated": now_s})
+    _hud_db_save()   # da RESULT una nuova book()/check() riparte comunque da zero (merge solo in COLLECTING)
+
+    return fsm, True
+
+
+@app.post("/api/hud_fsm/event")
+async def hud_fsm_event(request: Request):
+    """Un turno dell'utente: {tool_calls:[{name, arguments}], user_text, outcome, source, delay_s} -> {fsm, changed}."""
+    body = await request.json()
+    fsm, changed = _hud_fsm_apply(body.get("tool_calls") or [], body.get("user_text") or "", body.get("outcome") or "auto",
+                                  body.get("source") or "?", body.get("delay_s"))
+    return JSONResponse(content={"fsm": fsm, "changed": changed})
+
+
+@app.get("/api/hud_fsm")
+async def hud_fsm_get():
+    return JSONResponse(content=_HUD_DB.get("fsm") or _hud_fsm_reset())
+
+
+@app.post("/api/hud_fsm/reset")
+async def hud_fsm_reset_route():
+    return JSONResponse(content=_hud_fsm_reset())
 
 
 @app.post("/api/hud_db/hud_state")
@@ -949,7 +1056,7 @@ async def hud_db_hud_state(request: Request):
 
 @app.post("/api/hud_db/reset")
 async def hud_db_reset():
-    _HUD_DB["slots"].clear(); _HUD_DB["log"].clear(); _hud_db_save()
+    _HUD_DB["slots"].clear(); _HUD_DB["log"].clear(); _hud_fsm_reset()
     return JSONResponse(content={"ok": True})
 
 

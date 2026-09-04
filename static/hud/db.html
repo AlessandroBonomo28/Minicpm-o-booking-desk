@@ -16,7 +16,9 @@
   th { color:#6b7280; font-weight:600; font-size:12px; }
   .pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600; color:#fff; }
   .available { background:#2e7d32; } .booked { background:#c62828; } .error { background:#b71c1c; }
-  .IDLE { background:#546e7a; } .CHECKING { background:#f9a825; color:#1a1a1a; } .OK { background:#2e7d32; } .NO { background:#c62828; } .ERR { background:#b71c1c; }
+  .IDLE { background:#546e7a; } .COLLECTING { background:#1565c0; } .CHECKING { background:#f9a825; color:#1a1a1a; } .OK { background:#2e7d32; } .PARTIAL { background:#ef6c00; } .NO { background:#c62828; } .ERR { background:#b71c1c; }
+  .confirmed { background:#2e7d32; } .taken { background:#c62828; } .partial { background:#ef6c00; }
+  .kv { font-size:13px; display:grid; grid-template-columns: 130px 1fr; gap:3px 8px; } .kv b { color:#6b7280; font-weight:600; }
   .hudbox { font-size:15px; margin:6px 0 10px; }
   .small { font-size:12px; color:#6b7280; }
   .log { max-height: 60vh; overflow:auto; }
@@ -34,6 +36,11 @@
     <div class="card">
       <h2>Schermo dell'operatore (stato corrente dell'HUD)</h2>
       <div class="hudbox"><span class="pill IDLE" id="hudState">IDLE</span> <span id="hudSlot"></span> <span class="small" id="hudUpd"></span></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2>Macchina a stati della prenotazione (FSM nel gateway)</h2>
+      <div class="kv" id="fsm"><b>stato</b><span>IDLE</span></div>
+      <div class="small" style="margin-top:6px">IDLE → COLLECTING (manca qualcosa) → RESULT; cancel → IDLE. Il campo "ultima battuta" è la trascrizione ASR grezza: qui si controlla la precisione delle date.</div>
     </div>
     <div class="card" style="margin-top:14px">
       <h2>Inserisci una prenotazione</h2>
@@ -60,8 +67,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const labelStatus = { available: 'LIBERO', booked: 'OCCUPATO', error: 'ERRORE' };
-const labelHud = { IDLE: 'IDLE', CHECKING: 'VERIFICA IN CORSO', OK: 'LIBERO', NO: 'OCCUPATO', ERR: 'ERRORE' };
+const labelStatus = { available: 'LIBERO', booked: 'OCCUPATO', partial: 'PARZIALE', error: 'ERRORE', confirmed: 'PRENOTATO', taken: 'SLOT OCCUPATO' };
+const labelHud = { IDLE: 'IDLE', COLLECTING: 'RACCOLTA DATI', CHECKING: 'VERIFICA IN CORSO', OK: 'OK', PARTIAL: 'PARZIALE', NO: 'OCCUPATO', ERR: 'ERRORE' };
 let lastLogLen = -1;
 async function refresh() {
   try {
@@ -72,6 +79,12 @@ async function refresh() {
     $('hudState').className = 'pill ' + st; $('hudState').textContent = labelHud[st] || st;
     $('hudSlot').textContent = (h.date || h.time) ? `${(h.date || '').toUpperCase()} ${h.time || ''}` : '';
     $('hudUpd').textContent = h.updated ? `(aggiornato ${h.updated.slice(11, 19)})` : '';
+    const f = d.fsm || {}; const sl = f.slots || {};
+    $('fsm').innerHTML = [['stato', `<span class="pill ${esc(f.state || 'IDLE')}">${esc(f.state || 'IDLE')}</span>`], ['intento', esc(f.intent || '—')],
+      ['data', esc(sl.date || '—')], ['ora', esc(sl.time_raw || sl.time || '—')], ['manca', esc((f.missing || []).join(', ') || '—')],
+      ['esito', f.status ? `<span class="pill ${esc(f.status)}">${labelStatus[f.status] || esc(f.status)}</span> ${esc(f.detail || '')}` : '—'],
+      ['nota', esc(f.note || '—')], ['ultima battuta', esc(f.last_user_text || '—')], ['aggiornato', esc((f.updated || '').slice(11, 19) || '—')]]
+      .map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join('');
     const slots = Object.values(d.slots || {}).sort((a, b) => (b.last_check || '').localeCompare(a.last_check || ''));
     $('slots').innerHTML = slots.length ? slots.map(s => `<tr><td>${esc(s.date).toUpperCase()}</td><td>${esc(s.time)}</td><td><span class="pill ${esc(s.status)}">${labelStatus[s.status] || esc(s.status)}</span></td><td>${esc(s.name || '')}</td><td class="small">${esc((s.last_check || '').slice(11, 19))}</td><td>${s.status === 'booked' ? `<button data-d="${esc(s.date)}" data-t="${esc(s.time)}" class="unbook" style="font-size:12px">Libera</button>` : ''}</td></tr>`).join('')
       : '<tr><td colspan="6" class="small">nessuno slot ancora</td></tr>';
@@ -81,7 +94,7 @@ async function refresh() {
     });
     const log = (d.log || []).slice().reverse();
     const fresh = lastLogLen >= 0 && log.length > lastLogLen; lastLogLen = log.length;
-    $('log').innerHTML = log.length ? log.map((e, i) => `<tr class="${fresh && i === 0 ? 'fresh' : ''}"><td class="small">${esc((e.ts || '').slice(11, 19))}</td><td>${esc(e.date).toUpperCase()} ${esc(e.time)}</td><td><span class="pill ${esc(e.result)}">${labelStatus[e.result] || esc(e.result)}</span></td><td class="small">${esc(e.source)}</td><td class="small">${e.delay_s ?? ''} s</td></tr>`).join('')
+    $('log').innerHTML = log.length ? log.map((e, i) => `<tr class="${fresh && i === 0 ? 'fresh' : ''}"><td class="small">${esc((e.ts || '').slice(11, 19))}</td><td>${esc(e.intent || 'check')} · ${esc(e.date).toUpperCase()} ${esc(e.time)}</td><td><span class="pill ${esc(e.result)}">${labelStatus[e.result] || esc(e.result)}</span></td><td class="small">${esc(e.source)}</td><td class="small">${e.delay_s ?? ''} s</td></tr>`).join('')
       : '<tr><td colspan="5" class="small">nessuna verifica ancora</td></tr>';
     $('upd').textContent = 'ultimo aggiornamento ' + new Date().toLocaleTimeString();
   } catch (e) { $('upd').textContent = 'non raggiungibile: ' + e.message; }

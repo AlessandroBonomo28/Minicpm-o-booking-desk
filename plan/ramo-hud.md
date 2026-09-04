@@ -248,3 +248,32 @@ result, tell the customer. Otherwise just talk."*
 **Ordine di implementazione**: (1) FSM + endpoint nel gateway e prova a tavolino con `curl` (senza GPU);
 (2) estrattore con i tre strumenti e prova con testi scritti via proxy (come le prove del 03/09);
 (3) frame e prompt nella pagina HUD; (4) db.html mostra la FSM; (5) test dal vivo D8 → D10 → D9 → D11.
+
+### 04/09 (sera) — implementazione fatta, passi 1-4; passo 5 (test dal vivo) ad Alessandro
+- **Gateway**: `_hud_fsm_apply` + `POST /api/hud_fsm/event`, `GET /api/hud_fsm`, `POST /api/hud_fsm/reset`; esecuzione
+  fattorizzata in `_hud_exec_check` / `_hud_exec_book` (book scrive lo slot come OCCUPATO, nome `voice`); `fsm` persistita in
+  `data/hud_db.json`; `/api/hud_db/reset` azzera anche la FSM. Provata a tavolino con curl: D8 → COLLECTING (manca date,
+  time); "April 2nd" → manca time; "3 pm" → RESULT taken (2 aprile era prenotato tutto il giorno); slot libero → confirmed;
+  stesso slot di nuovo → taken; cancel → IDLE `REQUEST CANCELLED` (solo se era in COLLECTING: da RESULT/IDLE pulisce senza
+  nota, perché "thanks, bye" non deve far comparire "cancellato" a prenotazione fatta); check → RESULT diretto.
+- **Estrattore** (`tools/tool_agent_server.py`), cambiato rispetto alla specifica dopo le prime sonde: con tre strumenti
+  separati (`book/check/cancel`) il 1,7B **riempiva i campi a forza** ("date": "March 31" preso dagli esempi del prompt,
+  "date": "none", o l'intera frase). Struttura che funziona: **UN solo strumento `request(intent ∈ {book,check,cancel,none},
+  date|null, time|null)`**, sempre chiamato: il modello ha sempre qualcosa da riempire (l'intento) e il null è previsto dal
+  contratto. In più l'estrattore riceve **SOLO le righe dell'utente** (ultime 4, l'ultima marcata NOW) + la riga di stato
+  della FSM: le righe dell'operatore erano una fonte di date ("We have a slot on May 5th at 9" + "Hmm, let me think" →
+  check(May 5th, 9)); tolte per costruzione, come il trigger sul turno utente. Niente date d'esempio nel prompt.
+  Sonde dopo la modifica (tutte via proxy, testi scritti): D8 → `book()` ✓; "Book me April 2nd at 3 pm" → book(April 2nd,
+  15:00) ✓; "April 2nd" in corso → book(date) ✓; "At 3 pm" con data raccolta → book(April 2nd, 15:00) ✓ (copia la data dallo
+  stato: innocuo, il merge è idempotente); D10 "Actually, never mind, cancel that" → cancel ✓; D11 "Is March 31st at 3 pm
+  available?" → check ✓ (dopo aver chiarito nel prompt che una domanda di disponibilità NON è una prenotazione: prima dava
+  book, che avrebbe scritto nel DB); "Do you have anything on June 1st?" → check ✓; "How are you today?" / "Thank you, bye"
+  dopo RESULT / operatore-dice-una-data → NO ACTION ✓. Tempi LLM 0,5-1,0 s (prompt più lungo di prima; primo colpo 1,4-1,8 s).
+  **Limiti noti**: "No, the 3rd" con aprile nello stato → `March 3rd` (mese inventato: il 1,7B non compone giorno + mese dallo
+  stato); "Never mind." secco → none (serve "cancel that"/"forget it"). Si vedono nel registro, non si mitigano.
+- **Pagina HUD** (`static/hud/hud-app.js` riscritta): lo schermo è la resa dello stato FSM (tabella dei frame della
+  specifica), `applyFsm` (con ritardo simulato > 0 passa da CHECKING, default 0 = RESULT diretto), `fsmEvent`, richiesta
+  manuale (`check`/`book` con data/ora scritte, campi vuoti = mancanti), reset FSM, prompt di sistema nuovo (riga MISSING).
+  Codice morto del vecchio flusso (anello microfono 12 s, trigger sul testo dell'omni, regex) rimosso. `db.html` mostra la
+  FSM (stato, intento, campi, manca, esito, nota, ultima battuta ASR grezza = controllo della precisione delle date).
+- Il registro delle verifiche contiene le prove `curl` di oggi (colonna "avviata da": curl).

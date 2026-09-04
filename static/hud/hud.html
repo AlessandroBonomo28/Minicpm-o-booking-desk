@@ -49,20 +49,20 @@
     </div>
 
     <div class="card" style="margin-top:14px">
-      <h2>Simulatore del backend (la "query sul DB")</h2>
-      <div class="row"><label>Data / ora</label>
-        <input type="text" id="qDate" value="MARCH 31" style="width:110px"> <input type="text" id="qTime" value="15:00" placeholder="vuoto = tutto il giorno" style="width:150px"></div>
+      <h2>Richiesta manuale (senza voce) ed esito della FSM</h2>
+      <div class="row"><label>Richiesta</label>
+        <select id="qIntent"><option value="check" selected>check (è libero?)</option><option value="book">book (prenota)</option></select>
+        <input type="text" id="qDate" value="MARCH 31" placeholder="data (vuota = manca)" style="width:130px"> <input type="text" id="qTime" value="15:00" placeholder="ora (vuota = manca / giornata)" style="width:170px"></div>
       <div class="row"><label>Esito</label>
         <select id="qOutcome"><option value="auto" selected>dal gestionale (prenotazioni inserite in db.html)</option><option value="ok">forza AVAILABLE</option><option value="no">forza BOOKED</option><option value="err">simula ERROR / TIMEOUT</option></select>
-        <label style="min-width:auto">ritardo</label><input type="number" id="qDelay" value="4" min="0" max="60" style="width:60px"> s</div>
+        <label style="min-width:auto">ritardo</label><input type="number" id="qDelay" value="0" min="0" max="60" style="width:60px"> s <span class="small">(0 = RESULT diretto; &gt;0 = passa da CHECKING)</span></div>
       <div class="row">
-        <button class="primary" id="btnQuery" disabled>Avvia verifica → HUD "IN CORSO", poi esito</button>
-        <button id="btnReset" disabled>Reset HUD (IDLE)</button>
+        <button class="primary" id="btnQuery">Invia la richiesta alla FSM</button>
+        <button id="btnReset">Reset FSM (IDLE)</button>
       </div>
       <div class="row"><label>Trigger</label>
         <select id="trigMode">
-          <option value="tool" selected>modello separato di tool calling (Qwen3-1.7B)</option>
-          <option value="regex">regex sul testo dell'omni</option>
+          <option value="tool" selected>estrattore (Qwen3-1.7B) sul tuo turno → FSM nel gateway</option>
           <option value="off">solo manuale</option>
         </select>
         <span class="small" id="toolAgentState">tool agent: ?</span></div>
@@ -71,10 +71,8 @@
         <span class="small">silenzio di fine turno</span><input type="number" id="vadSilence" value="600" step="100" min="200" style="width:70px"> ms
         <span class="small">voce minima</span><input type="number" id="vadMin" value="300" step="100" style="width:70px"> ms
         <span class="small">livello <b id="vadMeter">0.000</b> · <b id="vadState">silenzio</b></span></div>
-      <div class="row"><label>Regex (se scelta)</label>
-        <input type="text" id="autoRegex" value="check|let me see|one moment|hold on|looking" style="width:260px"></div>
       <div class="row"><label>Modello separato</label>
-        <span class="small">parte alla FINE DEL TUO TURNO (VAD): trascrive solo la tua battuta (GPU), legge il testo dell'omni come contesto e chiama <code>check_availability(date,time)</code>; data/ora estratte finiscono sull'HUD (eco della richiesta).</span></div>
+        <span class="small">alla FINE DEL TUO TURNO (VAD): ASR della sola battuta (GPU) → l'estrattore vede SOLO le tue parole + lo stato della FSM e risponde <code>book / check / cancel / none</code> con data/ora dette → la FSM (gateway) fa il merge, decide cosa manca (<b>MISSING</b>), esegue sul DB e lo schermo mostra il nuovo stato. Specifica: <code>plan/ramo-hud.md</code>.</span></div>
       <div class="row"><label>Frame iniziale</label>
         <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
       <div class="row"><label>Frame manuale</label><button id="btnFrame" disabled>Invia il frame corrente ora</button></div>
@@ -85,7 +83,7 @@
     <div class="card">
       <h2>Sessione</h2>
       <div class="row"><label>Prompt di sistema</label></div>
-      <textarea id="systemPrompt">You are in duplex mode, where you can listen and speak at the same time. You work at a booking desk. When the user asks about a date and time, say "let me check" and wait. When the screen shows the result, read it out.</textarea>
+      <textarea id="systemPrompt">You are in duplex mode, where you can listen and speak at the same time. You work at a booking desk. The screen shows the booking system. When the screen shows MISSING, ask the customer for that item. When the screen shows a result, tell the customer. Otherwise just talk.</textarea>
       <div class="row">
         <label>Voce di riferimento</label>
         <select id="refChoice"><option value="english_call">inglese (preset English Call)</option><option value="italiano">italiano (preset italiano)</option><option value="none">nessuna (default backend)</option></select>
@@ -108,7 +106,7 @@
     <div class="card" style="margin-top:14px">
       <h2>Registro eventi HUD (per misurare la reazione al frame)</h2>
       <div class="log" id="hudLog" style="height:180px"></div>
-      <div class="small" style="margin-top:6px">Test 1 = dopo un cambio di frame il modello riprende a parlare da solo e cita l'esito. Il registro segna "REAZIONE +x s" al primo testo del modello dopo ogni frame.</div>
+      <div class="small" style="margin-top:6px">"REAZIONE +x s" = primo testo del modello dopo ogni frame. Domande standard D1-D11 in <code>plan/ramo-hud.md</code> (D8 prenotazione senza data → MISSING: DATE; D9 data e ora; D10 annulla; D11 check). Cuffie obbligatorie: il VAD è sul microfono.</div>
     </div>
   </div>
 </div>

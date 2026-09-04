@@ -3,10 +3,12 @@
  *
  * Idea: il modello (MiniCPM-o 4.5, modalità Omni) riceve il microfono ogni secondo e,
  * SOLO quando lo "schermo dell'operatore" cambia stato, un fotogramma dello schermo.
- * Il fotogramma non trasporta dati per il modello: e' il clock che gli dice "ora".
+ * Il fotogramma non trasporta istruzioni per il modello: mostra lo STATO del gestionale.
  *
- * Nessuna modifica al backend: si usa il protocollo normale (input.append con
- * audio + video_frames opzionali). Il gate sul cambio e' un hash dello stato HUD.
+ * 04/09: macchina a stati della prenotazione (plan/ramo-hud.md). La FSM vive nel gateway
+ * (/api/hud_fsm/*); il modello separato (Qwen3-1.7B) estrae soltanto cio' che l'utente ha
+ * detto nella battuta appena chiusa dal VAD; questa pagina disegna lo stato e lo manda come
+ * frame con il chunk audio successivo. Nessuna modifica al backend.
  */
 import { RealtimeSession } from '../duplex/lib/realtime-session.js';
 import { arrayBufferToBase64 } from '../duplex/lib/duplex-utils.js';
@@ -26,36 +28,64 @@ function logTo(el, cls, text) {
 const conv = (cls, t) => logTo($('conv'), cls, t);
 const hudLog = (cls, t) => logTo($('hudLog'), cls, t);
 
-// ------------------------------------------------------------------ HUD (schermo)
+// ------------------------------------------------------------------ HUD (schermo) = stato della FSM
+const IDLE_FSM = () => ({ state: 'IDLE', intent: null, slots: { date: '', time: '' }, missing: [], status: null, detail: '', note: '' });
 const hud = {
-    state: 'IDLE',          // IDLE | CHECKING | OK | NO | ERR
-    date: '', time: '', detail: '',
+    fsm: IDLE_FSM(),
+    screen: 'IDLE',         // IDLE | COLLECTING | CHECKING | RESULT  (CHECKING: solo lato pagina, con ritardo simulato > 0)
     lastHash: null,
     pendingFrame: null,     // base64 JPEG da allegare al prossimo chunk
     framesSent: 0,
     lastFrameAt: null,      // per misurare la reazione
-    fingerprint() { return `${this.state}|${this.date}|${this.time}|${this.detail}`; },
+    fingerprint() {
+        const f = this.fsm;
+        return `${this.screen}|${f.intent}|${f.slots.date}|${f.slots.time}|${(f.missing || []).join(',')}|${f.status}|${f.detail}|${f.note}`;
+    },
 };
 const canvas = $('hud'), ctx = canvas.getContext('2d');
 
+const timeLabel = (t) => (!t || t === 'all-day') ? 'ALL DAY' : String(t).toUpperCase();
+const slotLine = (f) => `${(f.slots.date || '').toUpperCase()} ${timeLabel(f.slots.time)}`.trim();
+
+/** Tabella "formato del frame per stato" di plan/ramo-hud.md. */
+function themeFor() {
+    const f = hud.fsm;
+    switch (hud.screen) {
+        case 'COLLECTING': {
+            const miss = (f.missing || [])[0] || '';
+            return { bg: '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'AVAILABILITY CHECK' : 'NEW BOOKING',
+                     line1: f.slots.date ? f.slots.date.toUpperCase() : 'DATE: ?',
+                     line2: `MISSING: ${miss.toUpperCase()}`,
+                     line3: (f.slots.time && miss === 'date') ? `TIME: ${timeLabel(f.slots.time)}` : '' };
+        }
+        case 'CHECKING':
+            return { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: slotLine(f), line2: 'please wait', line3: '' };
+        case 'RESULT': {
+            const s = f.status, d = (f.detail || '').toUpperCase();
+            if (s === 'error') return { bg: '#b71c1c', fg: '#ffffff', title: 'ERROR / TIMEOUT', line1: slotLine(f), line2: f.intent === 'book' ? 'request failed' : 'check failed', line3: '' };
+            if (f.intent === 'book') {
+                if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'CONFIRMED', line3: '' };
+                return { bg: '#c62828', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'SLOT TAKEN', line3: d ? 'BOOKED ' + d : '' };
+            }
+            if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
+            if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'PARTLY BOOKED', line3: d };
+            return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'BOOKED ' + d, line3: '' };
+        }
+        default:
+            return { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: 'waiting for a request', line2: f.note || '', line3: '' };
+    }
+}
+
 function drawHud() {
-    const W = canvas.width, H = canvas.height;
-    const theme = {
-        IDLE:     { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: 'waiting for a request', line2: '' },
-        CHECKING: { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'please wait' },
-        OK:       { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'AVAILABLE', line3: hud.detail },
-        PARTIAL:  { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'PARTLY BOOKED', line3: hud.detail },
-        NO:       { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'BOOKED ' + (hud.detail || '').toUpperCase(), line3: '' },
-        ERR:      { bg: '#b71c1c', fg: '#ffffff', title: 'ERROR / TIMEOUT', line1: `${hud.date} ${hud.time || 'ALL DAY'}`, line2: 'check failed' },
-    }[hud.state];
+    const W = canvas.width, H = canvas.height, theme = themeFor();
     ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = theme.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = 'bold 34px system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);
     ctx.font = 'bold 44px system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.50);
     ctx.font = (theme.line2.length > 12 ? 'bold 40px' : 'bold 56px') + ' system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.68);
-    if (theme.line3) { ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(String(theme.line3).toUpperCase().slice(0, 40), W / 2, H * 0.82); }
+    if (theme.line3) { ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(String(theme.line3).slice(0, 40), W / 2, H * 0.82); }
     ctx.font = '18px system-ui, sans-serif'; ctx.globalAlpha = 0.7; ctx.fillText('operator screen', W / 2, H * 0.92); ctx.globalAlpha = 1;
-    $('hudState').textContent = hud.state;
+    $('hudState').textContent = hud.screen + (hud.fsm.status ? ' ' + hud.fsm.status.toUpperCase() : '') + ((hud.fsm.missing || []).length ? ' (missing ' + hud.fsm.missing.join(',') + ')' : '');
 }
 
 /** Gate sul cambio: produce un frame SOLO se lo stato e' cambiato dall'ultimo frame inviato. */
@@ -65,39 +95,67 @@ function hudSync(force = false) {
     if (!force && h === hud.lastHash) return;
     hud.lastHash = h;
     hud.pendingFrame = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-    hudLog('hud', `frame pronto (stato ${hud.state}${hud.state !== 'IDLE' ? ' ' + hud.date + ' ' + hud.time : ''}) → allegato al prossimo chunk audio`);
+    hudLog('hud', `frame pronto (${$('hudState').textContent}) → allegato al prossimo chunk audio`);
 }
 
-function setHud(state, date, time) {
-    hud.state = state; if (date !== undefined) hud.date = date; if (time !== undefined) hud.time = time;
+/** Etichetta per db.html (pill): IDLE / COLLECTING / CHECKING / OK / PARTIAL / NO / ERR. */
+function screenLabel() {
+    const f = hud.fsm;
+    if (hud.screen !== 'RESULT') return hud.screen;
+    if (f.status === 'error') return 'ERR';
+    if (f.status === 'available' || f.status === 'confirmed') return 'OK';
+    if (f.status === 'partial') return 'PARTIAL';
+    return 'NO';
+}
+
+function syncScreen() {
     hudSync();
     fetch('/api/hud_db/hud_state', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ state: hud.state, date: hud.date, time: hud.time }) }).catch(() => {});
+        body: JSON.stringify({ state: screenLabel(), date: hud.fsm.slots.date, time: hud.fsm.slots.time }) }).catch(() => {});
 }
 
-// simulatore del backend: IN CORSO → (ritardo) → esito
+// applica uno stato della FSM (dal gateway) allo schermo; con ritardo simulato > 0 il RESULT passa da CHECKING
 let queryTimer = null;
-function startQuery(reason) {
-    if (hud.state === 'CHECKING') return;
-    const date = $('qDate').value.trim().toUpperCase(), time = $('qTime').value.trim();   // time vuoto = ALL DAY
-    const delay = Math.max(0, parseFloat($('qDelay').value) || 0);
-    const outcome = $('qOutcome').value;
-    hud.detail = '';
-    hudLog('sys', `verifica avviata (${reason}): ${date} ${time || 'ALL DAY'}, esito tra ${delay}s`);
-    setHud('CHECKING', date, time);
+function applyFsm(fsm, delay = 0) {
     clearTimeout(queryTimer);
-    // la verifica passa dal "gestionale" del server (prenotazioni inserite in /static/hud/db.html)
-    const t0q = performance.now();
-    const pending = fetch('/api/hud_db/check', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ date, time, outcome, source: reason, delay_s: delay }) })
-        .then(r => r.json()).catch(e => ({ status: 'error', error: e.message }));
-    queryTimer = setTimeout(async () => {
-        const res = await pending;
-        const st = res.status === 'booked' ? 'NO' : res.status === 'available' ? 'OK' : res.status === 'partial' ? 'PARTIAL' : 'ERR';
-        hud.detail = res.detail || '';
-        setHud(st);
-        hudLog('sys', `gestionale ha risposto: ${res.status}${res.name ? ' (' + res.name + ')' : ''} per ${res.date || date} ${res.time || time}` + (res.error ? ' — ' + res.error : ''));
-    }, Math.max(0, delay * 1000 - (performance.now() - t0q)));
+    fsm = Object.assign(IDLE_FSM(), fsm || {}); fsm.slots = Object.assign({ date: '', time: '' }, fsm.slots || {});
+    const changed = JSON.stringify(fsm) !== JSON.stringify(hud.fsm);
+    hud.fsm = fsm;
+    if (fsm.state === 'RESULT' && delay > 0 && changed) {
+        hud.screen = 'CHECKING'; syncScreen();
+        queryTimer = setTimeout(() => { hud.screen = 'RESULT'; syncScreen(); hudLog('sys', `esito mostrato dopo ${delay}s: ${fsm.status}${fsm.detail ? ' (' + fsm.detail + ')' : ''}`); }, delay * 1000);
+    } else {
+        hud.screen = fsm.state; syncScreen();
+    }
+}
+
+async function fsmEvent(toolCalls, userText, source) {
+    const delay = Math.max(0, parseFloat($('qDelay').value) || 0);
+    const r = await fetch('/api/hud_fsm/event', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tool_calls: toolCalls, user_text: userText || '', outcome: $('qOutcome').value, source, delay_s: delay }) });
+    const d = await r.json();
+    if (!r.ok) { hudLog('warn', 'FSM: ' + (d.error || r.status)); return null; }
+    const f = d.fsm;
+    hudLog(d.changed ? 'hud' : 'sys', `FSM → ${f.state}${f.intent ? ' ' + f.intent : ''} ${f.slots.date || ''} ${f.slots.time || ''}` +
+        ((f.missing || []).length ? ' · manca ' + f.missing.join(', ') : '') + (f.status ? ' · ' + f.status : '') + (f.detail ? ' (' + f.detail + ')' : '') + (f.note ? ' · ' + f.note : '') + (d.changed ? '' : ' · invariato'));
+    applyFsm(f, delay);
+    return f;
+}
+
+async function fsmReset() {
+    clearTimeout(queryTimer);
+    try {
+        const r = await fetch('/api/hud_fsm/reset', { method: 'POST' });
+        applyFsm(await r.json(), 0);
+    } catch (_) { applyFsm(IDLE_FSM(), 0); }
+}
+
+// richiesta manuale dal pannello (senza voce): check o book con data/ora scritte
+function manualRequest() {
+    const intent = $('qIntent').value, date = $('qDate').value.trim(), time = $('qTime').value.trim();
+    const args = {}; if (date) args.date = date; if (time) args.time = time;
+    hudLog('sys', `richiesta manuale: ${intent}(${JSON.stringify(args)})`);
+    fsmEvent([{ name: intent, arguments: args }], '', 'manuale').catch(e => hudLog('warn', 'FSM errore: ' + e.message));
 }
 
 // ------------------------------------------------------------------ microfono + VAD
@@ -182,17 +240,17 @@ async function loadRefAudio() {
 function setRunning(on) {
     running = on;
     $('btnStart').disabled = on; $('btnStop').disabled = !on; $('btnForceListen').disabled = !on;
-    $('btnQuery').disabled = !on; $('btnReset').disabled = !on; $('btnFrame').disabled = !on;
+    $('btnFrame').disabled = !on;
     $('lamp').className = 'lamp' + (on ? ' on' : ''); $('stateText').textContent = on ? 'sessione attiva' : 'disconnesso';
 }
 
 async function startSession() {
     $('conv').innerHTML = ''; $('hudLog').innerHTML = '';
     hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false;
-    setHud('IDLE', '', '');
+    await fsmReset();                                // ogni sessione parte da IDLE (le prenotazioni in db.html restano)
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
-    transcript.length = 0; lastDecidedText = '';
+    userLines.length = 0;
 
     session = new RealtimeSession('hud', {
         getMaxKvTokens: () => 8192,
@@ -231,14 +289,14 @@ async function startSession() {
                     msg.frame_base64_list = [hud.pendingFrame];
                     hud.pendingFrame = null; hud.framesSent++; hud.lastFrameAt = now(); awaitingReaction = true;
                     $('framesSent').textContent = hud.framesSent;
-                    $('frameInfo').textContent = `ultimo frame inviato a ${hud.lastFrameAt.toFixed(1)}s (stato ${hud.state})`;
-                    hudLog('hud', `FRAME INVIATO (stato ${hud.state}) con il chunk #${session.chunksSent + 1}`);
+                    $('frameInfo').textContent = `ultimo frame inviato a ${hud.lastFrameAt.toFixed(1)}s (${$('hudState').textContent})`;
+                    hudLog('hud', `FRAME INVIATO (${$('hudState').textContent}) con il chunk #${session.chunksSent + 1}`);
                 }
                 session.sendChunk(msg);
                 $('chunks').textContent = session.chunksSent;
             }, (frame100) => turns.feed(frame100));
             await mic.start();
-            conv('sys', 'microfono attivo — parla con lo sportello (VAD attivo: la decisione parte quando finisci di parlare)');
+            conv('sys', 'microfono attivo — parla con lo sportello (VAD attivo: la decisione parte quando finisci di parlare; CUFFIE)');
         });
         setRunning(true);
     } catch (e) {
@@ -254,117 +312,58 @@ function stopSession() {
     mic = null; session = null; setRunning(false);
 }
 
-// testo del modello: misura la reazione al frame e auto-trigger della verifica
-let lastSeenText = '';
+// testo del modello: misura la reazione al frame (solo osservazione: il trigger e' il turno dell'utente)
 function onModelText(text) {
     if (!text) return;
     if (awaitingReaction && hud.lastFrameAt !== null) {
         awaitingReaction = false;
-        hudLog('hud', `REAZIONE +${(now() - hud.lastFrameAt).toFixed(1)}s dopo il frame (stato ${hud.state}): "${text.slice(0, 60)}"`);
+        hudLog('hud', `REAZIONE +${(now() - hud.lastFrameAt).toFixed(1)}s dopo il frame (${$('hudState').textContent}): "${text.slice(0, 60)}"`);
     }
-    const mode = $('trigMode').value;
-    if (mode === 'regex' && hud.state === 'IDLE' && text !== lastSeenText) {
-        let re = null;
-        try { re = new RegExp($('autoRegex').value, 'i'); } catch (_) {}
-        if (re && re.test(text)) startQuery('regex: il modello ha detto "' + (text.match(re) || [''])[0] + '"');
-    }
-    if (mode === 'tool') noteAssistantText(text);   // solo contesto: il trigger e' il turno dell'utente
-    lastSeenText = text;
 }
 
-/** Fine del tuo turno: ASR della sola battuta (GPU) + decisione del modello separato. */
+// ---- estrattore (modello SEPARATO): riceve SOLO le battute dell'utente + lo stato della FSM
+const userLines = [];           // ultime battute dell'utente (ASR), contesto per l'estrattore
+let toolBusy = false;
+
+/** Fine del tuo turno: ASR della sola battuta (GPU) + estrazione + evento alla FSM. */
 async function onUserTurnEnd(utterance) {
     const secs = (utterance.length / SR_IN).toFixed(1);
     hudLog('sys', `TURNO UTENTE finito (${secs} s di voce)`);
     if ($('trigMode').value !== 'tool') return;
-    if (toolBusy) { hudLog('warn', 'tool agent occupato: battuta saltata'); return; }
-    if (hud.state === 'CHECKING') { hudLog('sys', 'verifica in corso: battuta usata solo come contesto'); return; }
+    if (toolBusy) { hudLog('warn', 'estrattore occupato: battuta saltata'); return; }
     toolBusy = true;
     try {
         const t0 = performance.now();
+        const transcript = userLines.map(t => ({ role: 'user', text: t }));
         const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ transcript, user_audio_b64: arrayBufferToBase64(utterance.buffer), language: 'en' }) });
+            body: JSON.stringify({ transcript, user_audio_b64: arrayBufferToBase64(utterance.buffer), language: 'en', fsm: hud.fsm }) });
         const d = await r.json();
         const dt = ((performance.now() - t0) / 1000).toFixed(2);
-        if (!r.ok) { hudLog('warn', `tool agent: ${d.error || r.status}`); return; }
-        if (d.user_text) { conv('sys', 'TU (ASR): ' + d.user_text); transcript.push({ role: 'user', text: d.user_text }); if (transcript.length > 8) transcript.shift(); }
+        if (!r.ok) { hudLog('warn', `estrattore: ${d.error || r.status}`); return; }
+        if (d.user_text) { conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s + LLM ${d.llm_s ?? '?'} s = ${dt} s`;
-        if (!calls.length) { hudLog('sys', `tool agent (${tim}): nessuna azione — "${(d.raw || '').slice(0, 50)}"`); return; }
-        for (const c of calls) {
-            hudLog('hud', `TOOL AGENT (${tim}): ${c.name}(${JSON.stringify(c.arguments)})`);
-            if (c.name === 'check_availability' && hud.state !== 'CHECKING') {
-                const a = c.arguments || {};
-                if (a.date) $('qDate').value = String(a.date);
-                $('qTime').value = a.time ? String(a.time) : '';
-                startQuery('modello separato (turno utente)');
-            }
-        }
-    } catch (e) { hudLog('warn', 'tool agent errore: ' + e.message); }
+        if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
+        for (const c of calls) hudLog('hud', `ESTRATTORE (${tim}): ${c.name}(${JSON.stringify(c.arguments)})`);
+        await fsmEvent(calls, d.user_text, 'estrattore (turno utente)');
+    } catch (e) { hudLog('warn', 'estrattore errore: ' + e.message); }
     finally { toolBusy = false; }
 }
 
-// ---- modello SEPARATO di tool calling: legge la trascrizione e decide la chiamata
-const transcript = [];          // [{role:'assistant'|'user', text}]
-const MIC_RING_SEC = 12;        // ultimi secondi di microfono da far trascrivere al tool agent
-const micRing = [];
-function micRingB64() {
-    if (!micRing.length) return null;
-    const n = micRing.reduce((a, c) => a + c.length, 0); const out = new Float32Array(n); let o = 0;
-    for (const c of micRing) { out.set(c, o); o += c.length; }
-    return arrayBufferToBase64(out.buffer);
-}
-let toolTimer = null, toolBusy = false, lastDecidedText = '';
-function noteAssistantText(text) {
-    if (!text) return;
-    if (transcript.length && transcript[transcript.length - 1].role === 'assistant') transcript[transcript.length - 1].text = text;
-    else transcript.push({ role: 'assistant', text });
-    if (transcript.length > 8) transcript.shift();
-}
-function scheduleToolDecision(text) {
-    noteAssistantText(text);
-    clearTimeout(toolTimer);
-    // aspetta che il testo del turno si assesti (~1.2 s senza nuovi delta), poi chiede al modello separato
-    toolTimer = setTimeout(() => askToolAgent(text), 1200);
-}
-async function askToolAgent(text) {
-    if (toolBusy || hud.state === 'CHECKING' || text === lastDecidedText || (text || '').length < 8) return;
-    toolBusy = true; lastDecidedText = text;
-    try {
-        const t0 = performance.now();
-        const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ transcript, user_audio_b64: micRingB64(), language: 'en' }) });
-        const d = await r.json();
-        const dt = ((performance.now() - t0) / 1000).toFixed(1);
-        if (!r.ok) { hudLog('warn', `tool agent: ${d.error || r.status}`); return; }
-        if (d.user_text) conv('sys', 'TU (ASR): ' + d.user_text);
-        const calls = d.tool_calls || [];
-        if (!calls.length) { hudLog('sys', `tool agent (${dt}s): nessuna azione — "${(d.raw || '').slice(0, 60)}"`); return; }
-        for (const c of calls) {
-            hudLog('hud', `TOOL AGENT (${dt}s): ${c.name}(${JSON.stringify(c.arguments)})`);
-            if (c.name === 'check_availability' && hud.state !== 'CHECKING') {
-                const a = c.arguments || {};
-                if (a.date) $('qDate').value = String(a.date);
-                $('qTime').value = a.time ? String(a.time) : '';   // niente ora = giornata intera
-                startQuery('modello separato');
-            }
-        }
-    } catch (e) { hudLog('warn', 'tool agent errore: ' + e.message); }
-    finally { toolBusy = false; }
-}
 async function checkToolAgent() {
     try {
         const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transcript: [] }) });
-        $('toolAgentState').textContent = r.ok ? 'tool agent: pronto' : 'tool agent: non raggiungibile';
-    } catch (_) { $('toolAgentState').textContent = 'tool agent: non raggiungibile'; }
+        $('toolAgentState').textContent = r.ok ? 'estrattore: pronto' : 'estrattore: non raggiungibile';
+    } catch (_) { $('toolAgentState').textContent = 'estrattore: non raggiungibile'; }
 }
 
 // ------------------------------------------------------------------ UI
 $('btnStart').onclick = startSession;
 $('btnStop').onclick = stopSession;
 $('btnForceListen').onclick = () => session && session.toggleForceListen();
-$('btnQuery').onclick = () => startQuery('manuale');
-$('btnReset').onclick = () => { clearTimeout(queryTimer); setHud('IDLE', '', ''); };
+$('btnQuery').onclick = manualRequest;
+$('btnReset').onclick = fsmReset;
 $('btnFrame').onclick = () => hudSync(true);
 drawHud();
 checkToolAgent();
+fetch('/api/hud_fsm').then(r => r.json()).then(f => applyFsm(f, 0)).catch(() => {});   // stato corrente della FSM (db.html lo vede uguale)

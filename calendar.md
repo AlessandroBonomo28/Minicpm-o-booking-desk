@@ -323,3 +323,7 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   (il 1,7B estrae soltanto), HUD = stato non istruzione, campi raccolti mostrati, niente stato
   "prendi tempo" (RESULT diretto: misura a lato sui silenzi di 30 s). Da implementare in 5 passi;
   gate = test dal vivo di Alessandro, cuffie obbligatorie.
+- 04/09 (sera) — **FSM della prenotazione implementata** (gateway + estrattore + pagina HUD + db.html), provata a
+  tavolino con curl e con testi scritti. Scoperta strutturale: con tre strumenti separati il 1,7B riempie i campi a
+  forza; con UN solo strumento `request(intent, date|null, time|null)` e SOLO le righe dell'utente in ingresso
+  smette (dettagli e limiti in `plan/ramo-hud.md`). Gate: test dal vivo D8-D11 di Alessandro (cuffie).

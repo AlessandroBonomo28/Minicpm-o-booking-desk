@@ -890,6 +890,16 @@ class DuplexView:
         if ref_audio_path or self.ref_audio_path:
             ref_audio = self._load_ref_audio(ref_audio_path)
         
+        # finestra scorrevole per sessione (dal config del client), prima del prepare
+        cfg = getattr(self, "config", None)
+        duplex_cap = getattr(self._model, "duplex", None)
+        if cfg is not None and duplex_cap is not None and hasattr(duplex_cap, "set_sliding_window"):
+            duplex_cap.set_sliding_window(
+                getattr(cfg, "sliding_window_mode", "off"),
+                getattr(cfg, "sliding_window_high_tokens", 4000),
+                getattr(cfg, "sliding_window_low_tokens", 3500),
+            )
+
         # 调用透传方法
         prepared = self._model.duplex_prepare(
             prefix_system_prompt=prefix_system_prompt,

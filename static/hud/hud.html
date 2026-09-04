@@ -91,6 +91,11 @@
         <label style="min-width:auto">Length penalty</label><input type="number" id="lengthPenalty" value="1.0" step="0.05" style="width:70px">
       </div>
       <div class="row">
+        <label>Finestra KV</label>
+        <select id="slidingWindow"><option value="basic" selected>basic: sopra 4000 token scarta le unità più vecchie fino a 3500 (prompt protetto)</option><option value="off">off: il contesto cresce senza limite (upstream)</option></select>
+        <span class="small" id="kvInfo">KV: — · finestra: —</span>
+      </div>
+      <div class="row">
         <button class="primary" id="btnStart">Avvia sessione (mic + HUD)</button>
         <button class="danger" id="btnStop" disabled>Stop</button>
         <button id="btnForceListen" disabled>Force Listen</button>

@@ -166,10 +166,17 @@ class PyTorchBackend:
         """Return a sampled PyTorch backend metric snapshot."""
         if self.processor is None:
             return BackendMetrics(backend="pytorch").to_dict()
-        return BackendMetrics(
+        metrics = BackendMetrics(
             backend="pytorch",
             kv_cache_length=int(getattr(self.processor, "kv_cache_length", 0) or 0),
         ).to_dict()
+        try:
+            duplex_cap = getattr(getattr(self.processor, "model", None), "duplex", None)
+            if duplex_cap is not None and hasattr(duplex_cap, "window_stats"):
+                metrics["window"] = duplex_cap.window_stats()
+        except Exception:
+            pass
+        return metrics
 
     def chat_prefill(
         self,

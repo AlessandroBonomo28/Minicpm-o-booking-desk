@@ -230,7 +230,7 @@ class MicCapture {
 }
 
 // ------------------------------------------------------------------ sessione
-let session = null, mic = null, running = false, awaitingReaction = false;
+let session = null, mic = null, running = false, awaitingReaction = false, lastWindowEvents = 0;
 
 async function loadRefAudio() {
     const choice = $('refChoice').value;
@@ -290,10 +290,25 @@ async function startSessionInner() {
     session.onSpeakUpdate = (el, text) => { if (el) { el.textContent = ''; el.innerHTML = `<span class="t">${now().toFixed(1)}s</span>`; el.appendChild(document.createTextNode('AI: ' + text)); } onModelText(text || ''); };
     session.onSpeakEnd = () => {};
     session.onListenResult = (r) => { if (r && r.text) conv('sys', 'utente: ' + r.text); };
-    session.onMetrics = (d) => { if (d && d.sessionState) $('stateText').textContent = d.sessionState; };
+    session.onMetrics = (d) => {
+        if (!d) return;
+        if (d.sessionState) $('stateText').textContent = d.sessionState;
+        if (d.kvCacheLength !== undefined) {
+            const w = d.windowStats || {};
+            const win = w.mode ? `${w.mode}${w.enabled ? '' : ' (spenta)'} ${w.high}/${w.low} · scorrimenti ${w.events ?? 0} · scartati ${w.dropped_tokens ?? 0} tok (${w.dropped_units ?? 0} unità)` : '?';
+            $('kvInfo').textContent = `KV: ${d.kvCacheLength} token · finestra: ${win}`;
+            if (w.events !== undefined && w.events > lastWindowEvents) {
+                lastWindowEvents = w.events;
+                conv('sys', `FINESTRA KV: scorrimento #${w.events} — scartate ${w.dropped_units} unità (${w.dropped_tokens} token), KV ora ${d.kvCacheLength}`);
+            }
+        }
+    };
     session.onForceListenChange = (a) => { $('btnForceListen').style.background = a ? '#ffe0b2' : '#fff'; };
 
-    const preparePayload = { config: { length_penalty: parseFloat($('lengthPenalty').value) || 1.0 }, use_tts: true, max_slice_nums: 1 };
+    const preparePayload = { config: { length_penalty: parseFloat($('lengthPenalty').value) || 1.0,
+                                       sliding_window_mode: $('slidingWindow').value, sliding_window_high_tokens: 4000, sliding_window_low_tokens: 3500 },
+                             use_tts: true, max_slice_nums: 1 };
+    lastWindowEvents = 0; $('kvInfo').textContent = 'KV: — · finestra: ' + $('slidingWindow').value;
     const ref = await loadRefAudio();
     if (ref) preparePayload.ref_audio_base64 = ref;
 

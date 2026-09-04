@@ -582,6 +582,7 @@ export class RealtimeSession {
                 chunksSent: this.chunksSent,
                 visionSlices: metrics.vision_slices,
                 visionTokens: metrics.vision_tokens,
+                windowStats: metrics.window,
             });
             if (!result.is_listen && this._lastTTFS) this._lastTTFS = 0;
         });
@@ -602,6 +603,7 @@ export class RealtimeSession {
             chunksSent: this.chunksSent,
             visionSlices: this._lastFrameMetrics.vision_slices,
             visionTokens: this._lastFrameMetrics.vision_tokens,
+            windowStats: this._lastFrameMetrics.window,
         });
     }
 

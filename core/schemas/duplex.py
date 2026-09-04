@@ -256,6 +256,14 @@ class DuplexConfig(BaseModel):
         le=5.0,
         description="长度惩罚系数。>1.0 抑制 turn_eos token 使模型当前 turn 输出更长，=1.0 不惩罚，<1.0 鼓励更早结束"
     )
+
+    # Finestra scorrevole della KV cache in duplex (upstream: solo all'init, default off). Per sessione, dal payload di prepare.
+    sliding_window_mode: str = Field(
+        "off",
+        description="'off' (nessun taglio), 'basic' (sopra high si scartano le unita' piu' vecchie fino a low; system prompt protetto), 'context' (upstream)"
+    )
+    sliding_window_high_tokens: int = Field(4000, ge=500, le=32000, description="soglia alta della finestra basic")
+    sliding_window_low_tokens: int = Field(3500, ge=200, le=32000, description="soglia bassa della finestra basic")
     
     # Listen 相关
     listen_prob_scale: float = Field(

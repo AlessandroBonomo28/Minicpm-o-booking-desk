@@ -856,8 +856,11 @@ def _hud_norm_time(x: str) -> str:
     t = str(x or "").strip().lower()
     if t in _ALL_DAY:
         return "all-day"
-    t = _hud_words_to_digits(re.sub(r"^(at|alle|ore)\s+", "", t))          # 'nine' -> '9', 'at nine thirty' -> '9 30'
-    t = re.sub(r"^(\d{1,2}) (\d{2})(\s*(am|pm))?$", r"\1:\2\3", t)   # '9 30' -> '9:30'
+    t = re.sub(r"^(at|alle|ore)\s+", "", t)
+    if re.search(r"[a-z]", t.replace("am", "").replace("pm", "")):
+        # solo con parole ('nine', 'nine thirty'): la conversione toglie i trattini e rovinerebbe '3-17'
+        t = _hud_words_to_digits(t)
+        t = re.sub(r"^(\d{1,2}) (\d{2})(\s*(am|pm))?$", r"\1:\2\3", t)   # '9 30' -> '9:30'
     parts = re.split(r"\s*(?:-|–|to|a|alle)\s*", t)
     if len(parts) == 2:
         a, b = _hud_parse_clock(parts[0]), _hud_parse_clock(parts[1])

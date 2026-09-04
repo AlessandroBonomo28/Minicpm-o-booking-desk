@@ -41,7 +41,7 @@ DEFAULT_TOOLS = [
                                       "use the intent of the request in progress (book or check); "
                                       "cancel = gives up the request in progress ('never mind', 'forget it', 'cancel that', 'stop'); "
                                       "none = anything else (chat, thanks, greetings)."},
-            "date": {"type": ["string", "null"], "description": "the date the customer said in the NOW line, written as month name + day number ('Month D'); null if they did not say a date"},
+            "date": {"type": ["string", "null"], "description": "the date the customer said in the NOW line: 'Month D' (e.g. month name + day number), or the month alone if only the month was said; null if no date or month was said"},
             "time": {"type": ["string", "null"], "description": "the time the customer said in the NOW line, as 24h HH:MM; null if they did not say a time"}},
             "required": ["intent", "date", "time"]}}},
 ]
@@ -54,15 +54,18 @@ SYSTEM = ("You are the action extractor for a booking desk. You see ONE sentence
           "If a request is IN PROGRESS (see STATE) and the customer answers with a date, a day or a time, keep the intent in progress "
           "(book stays book, check stays check) with just that field. If they correct a field ('no, the 3rd'), same intent with the "
           "corrected value (use the month from STATE if only the day is said).\n"
-          "A bare number as the whole answer: if STATE says the day of the month is missing, it is the day (with the month from STATE: "
-          "'30' -> 'March 30'); if STATE says the time is missing, it is the hour ('15' -> 15:00).\n"
+          "A bare number as the whole answer, in digits OR in words ('30', 'nine', 'the twentieth'): if STATE says the day of the month "
+          "is missing, it is the day (with the month from STATE: '30' -> 'March 30', 'the twentieth' -> 'April 20'); if STATE says the "
+          "time is missing, it is the hour ('15' -> 15:00, 'nine' / 'at nine' -> 09:00, 'nine thirty' -> 09:30).\n"
           "cancel only while a request is in progress; after a finished request, 'thanks'/'bye' is intent=none.\n"
           "TIME RULES (24h HH:MM, convert spoken English): 'half past ten' -> 10:30; 'quarter past nine' -> 09:15; 'quarter to six' -> 05:45; "
           "'ten thirty' -> 10:30; '3 pm' / 'three in the afternoon' -> 15:00; '8 in the evening' -> 20:00; 'noon' -> 12:00; '9 am' -> 09:00; "
           "'at 15' -> 15:00; '5:20 pm' -> 17:20.\n"
-          "DATE RULES (always 'Month D', month name + day in digits): 'the second of April' -> April 2; 'March thirty-first' -> March 31; "
-          "'the twenty-first of May' -> May 21; 'April 2nd' -> April 2. If only the day is said ('the 3rd', 'the third') and STATE has a month, "
-          "use that month ('April 3'). 'tomorrow' / 'next Monday' stay as said (the system will ask for a calendar date).")
+          "DATE RULES ('Month D', month name + day in digits): 'the second of April' -> April 2; 'March thirty-first' -> March 31; "
+          "'the twenty-first of May' -> May 21; 'April 2nd' -> April 2. A MONTH ALONE IS A VALID DATE VALUE: 'book for May', "
+          "'something in June', 'on March' -> date='May' / 'June' / 'March' (the system will then ask for the day). "
+          "If only the day is said ('the 3rd', 'the third') and STATE has a month, use that month ('April 3'). "
+          "'tomorrow' / 'next Monday' stay as said (the system will ask for a calendar date).")
 
 tok = None
 model = None

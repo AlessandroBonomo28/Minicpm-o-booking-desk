@@ -382,3 +382,17 @@ result, tell the customer. Otherwise just talk."*
   normale oltre i 3 min → causa trovata, poi si sceglie il valore o una penalità limitata al turno; (b) riparte a
   ripetere/loop → la penalità serve ma va ripensata la finestra dei 512; (c) sbrodola uguale → è la lunghezza di
   sessione → modalità "context", oltre = training.
+
+### 04/09 (18:30) — sesto test (sess_fda7e4412839, trp 1,0): sbrodolamento sparito; due difetti dell'estrattore corretti
+- **trp 1,15 → 1,0**: a 2-3,5 min nessuna divagazione, nessun loop, risposte corte e nel merito anche dopo il primo
+  taglio della finestra (220 s). Predizione (a) confermata: la penalità di ripetizione accumulata era la causa dello
+  sbrodolamento sul base in inglese. Resta una deriva più lieve: risposte telegrafiche senza punteggiatura e dati
+  anticipati dall'omni ("March the 2nd, right?", "May twenty second", "nine thirty") — da osservare su 6-7 min.
+- **Estrattore**: (1) mese dentro una frase ("book for May", "something in May") → `book({})` 5/5: le regole "Month D"
+  facevano concludere che un mese solo non è una data → ora "a month alone is a valid date value" → 4/5 (manca ancora
+  "book in June", varianza); (2) ora a parole ("Nine.", "At nine.") → nessuna ora → regola dei numeri secchi estesa
+  alle parole → 'nine'/'9'/'9:30'/'10:30'. Gateway: `_hud_norm_time` accetta numeri a parole e "H MM" ('nine' → 09:00,
+  'nine thirty' → 09:30, 'at fifteen' → 15:00). Principio (Alessandro): l'HUD chiede mese, giorno, ora uno alla volta,
+  e ciò che segna deve essere coerente con la chiamata.
+- Non risolvibile per costruzione: "book for that day" (riferimento all'ultima verifica): l'estrattore vede solo la
+  frase corrente e in RESULT non riceve i campi. Candidato: campo esplicito "same as last result" risolto dalla FSM.

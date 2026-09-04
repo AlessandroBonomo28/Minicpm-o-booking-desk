@@ -338,3 +338,6 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   penalità di ripetizione era la causa dello sbrodolamento. Timeout gateway video 300→900 s. Richiesta su
   **tre campi indipendenti** (mese/giorno/ora, ordine libero) in estrattore e FSM; regressione dell'estrattore
   `tools/tool_agent_eval.py` 55/55. Prossimo: puntatore senza valore per "yes"/"that day".
+- 05/09 — **Stati CONFIRM/DONE**: l'estrattore risolve "yes"/"that day" leggendo l'offerta dallo STATO (15/20 sul
+  set di dialogo, contro 13/20 con le righe di dialogo che riportano le copie). Il silenzio a fine sessione non è
+  KV/timeout: l'omni parla solo dopo un frame, e sempre meno (test basic vs off da fare). Regressioni 55/55 e 15/20.

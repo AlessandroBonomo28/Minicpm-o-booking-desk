@@ -425,3 +425,68 @@ result, tell the customer. Otherwise just talk."*
   modello lo mette nel campo sbagliato o non lo estrae, il gateway lo instrada sul primo campo numerico mancante
   (giorno, poi ora), solo in COLLECTING (dopo un esito un numero non è una risposta). Battute ravvicinate: coda (max 2)
   invece dello scarto "estrattore occupato".
+
+## 05/09 — Stati CONFIRM / DONE: il contesto lo decide lo stato (misurato)
+
+### Il problema (nono test, sess_7cd9f50874a8, 6,5 min)
+- L'omni offre ("April 4th is available all day. Would you like to book?"), l'utente dice "Yes" → l'estrattore vede solo
+  "Yes" + "no request in progress" → `book({})` → la FSM chiede il mese da capo. Idem "Book for that day".
+- Alessandro: il puntatore senza valore (`relative_to_last`) è un'ingegnerizzazione da scartare; l'estrattore deve avere
+  STATO + domanda (+ eventualmente contesto), e va misurato se il 1,7B ce la fa. Poi: "nello STATO + domanda non
+  dovrebbe già bastare? domanda: can you book that day? stato: checked availability for March 30 at 18:30".
+
+### Misura (tools/tool_agent_eval_dialog.py, 20 casi di dialogo dalle sessioni: yes/book it/that day/next day/
+### no the 6th/rifiuti + i casi di copia già pagati)
+| cosa vede l'estrattore | passati | note |
+|---|---|---|
+| solo la frase (contratto precedente) | 8/20 | nessun riferimento risolto |
+| frase + ultime 3 righe di dialogo | 13/20 | risolve yes/that day, ma **tornano le copie**: "thank you, is it free?" → check(May 25 15:00); "let me think" → check(May 5, 9); "Yes" dopo una conferma → riprenota March 20 18:00 |
+| dialogo solo con offerta in sospeso | 14/20 | niente copie |
+| **stato che porta l'offerta, zero dialogo** | **15/20** | niente copie; risolve yes / sure book it / that day / "yes, at 3 pm" / "no, the 6th" / rifiuti |
+Conclusione: il 1,7B risolve i riferimenti se vede l'offerta; il dialogo intero lo porta a copiare. Lo stato giusto è
+quello che dice quando un valore è azionabile.
+
+### Riorganizzazione degli stati (nome CONFIRM scelto da Alessandro)
+- `IDLE` → `COLLECTING` (intento + campi + mancanti, intento bloccato) → esecuzione →
+- **`CONFIRM`**: verifica con posto LIBERO (o parziale): **offerta in sospeso**. Lo stato porta mese/giorno/(ora) dell'offerta,
+  e l'estrattore la legge nella riga di stato ("OFFER PENDING: April 4 is FREE; yes/that day → book with that month and
+  day; a question about another date → check with only what they say; decline/thanks → none"). FSM: una `book`/`check`
+  SENZA mese eredita mese/giorno (e ora se l'offerta ne aveva una) dell'offerta e sovrascrive ciò che viene detto ("the
+  6th" → April 6; "at 3 pm" → April 4 15:00; "yes" → book April 4 → manca l'ora); una chiamata CON mese riparte da zero;
+  una battuta senza richiesta ("no, thank you", chiacchiere) chiude l'offerta → DONE; cancel → IDLE.
+- **`DONE`**: prenotazione confermata / slot occupato / verifica su slot occupato / errore: chiuso. Nessun valore
+  all'estrattore (è da qui che veniva "thank you" → book(April 2, 15:00)); ogni nuova chiamata riparte da zero.
+- Schermo: CONFIRM e DONE si disegnano come prima (RESULT/AVAILABLE, BOOKING DONE, SLOT TAKEN…); l'impronta del frame è
+  ora il disegno stesso, così CONFIRM → DONE (stessi pixel) non manda un frame. db.html mostra i due stati.
+- Verifica curl: check(April 4) → CONFIRM; book({}) → COLLECTING April 4 manca ora; book(time=15) → DONE confirmed;
+  "thank you" in DONE → invariato; book({}) in DONE → riparte; CONFIRM + check(day=8) → CONFIRM April 8;
+  CONFIRM + check(month=May) → riparte (manca giorno); CONFIRM + none → DONE; poi book({}) → riparte.
+- Regressioni: base 55/55; dialogo 15/20 (i 5 mancati sotto).
+
+### I 5 casi che restano, spiegati
+1. "how about the next day?" dopo una prenotazione fatta (DONE): DONE non porta valori per scelta (è la cura del
+   "thank you" che riprenotava) → nessun riferimento → check() vuoto → la FSM chiede il mese. Prezzo accettato.
+2. "And the day after?" in CONFIRM: aritmetica +1 sulla data dell'offerta: il 1,7B a volte la fa (April 5) ma con
+   l'intento sbagliato (book), a volte no. Non affidabile: non ci si costruisce sopra.
+3. "Hmm, let me think." in IDLE (l'operatore aveva proposto uno slot) → `check({})` senza campi → COLLECTING check →
+   schermo "AVAILABILITY CHECK / MISSING: MONTH" → l'omni chiede il mese mentre il cliente sta solo pensando.
+   Nessuna scrittura, nessun dato sbagliato: una domanda fuori luogo.
+4. "Hmm, let me check my calendar." in COLLECTING → `check({})`: intento bloccato, nessun campo → **nessun effetto**.
+   Falso positivo invisibile.
+5. "Yes." dopo una prenotazione fatta (DONE, l'omni aveva chiesto "anything else?") → `book({})` → COLLECTING → l'omni
+   chiede il mese. Domanda fuori luogo, nessuna scrittura.
+I falsi positivi 3 e 5 costano una domanda in più e un eventuale "no" per uscire (cancel → IDLE). Il 1,7B legge "check"
+e "yes" come intenti anche senza richiesta: se pesa nei test dal vivo, si misura una regola in più nel prompt sul set.
+
+### Il silenzio "dopo 300 s" (stessa sessione): non è la KV né il timeout
+- Backend: encoder audio azzerato ogni 29 unità per tutta la sessione (regolare, upstream); tagli della finestra ogni
+  ~30 s da 193 s; unità parlate per fascia di 30 s: 13, 10, 12, 10, 12, 10, 16, 13, 10, 9, 7, 5, poi 0.
+- **Dal minuto 1 l'omni ha parlato solo dopo un frame**: risposte alla sola voce a 5 s e 64 s; da lì ogni risposta arriva
+  0,5-2 s dopo un cambio di schermo; ogni battuta senza cambio di schermo (46, 285, 322, 330, 347-384 s) resta senza
+  risposta; a 336 cambia lo schermo e a 340 risponde. Ti sentiva (unità con audio, scelta "listen").
+- Ipotesi: il prompt dice "quando lo schermo mostra X fai Y, altrimenti parla"; la storia è piena di coppie frame →
+  risposta; le risposte alla sola voce erano all'inizio e la finestra le butta per prime; il modello imita il proprio
+  comportamento recente e si zittisce sempre di più.
+- Test a variabile singola (da fare): 6 min, tre "What's your name?" a 60, 200, 330 s, finestra basic vs off. Se con off
+  risponde a 330 e con basic no → sono i tagli; se non risponde in nessuno → è il prompt → riga "answer the customer
+  whenever they talk to you; the screen is only the booking system".

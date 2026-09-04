@@ -83,3 +83,18 @@ non si rompe; un picco di rete (3-4 s) riporta l'effetto "let me check… ah, è
   dalla macchina.
 - Fuori scopo dell'estrattore (restano): l'omni che parla solo dopo un frame e si zittisce, il "one moment please"
   davanti a MISSING, gli errori ASR.
+
+## 6. Due prompt: LOCAL_PROMPT e PROMPT_API (05/09)
+- **LOCAL_PROMPT** (Qwen3-1.7B): 4 righe, valori verbatim, SOLO la battuta corrente (ogni riga in più è una fonte di copie).
+- **PROMPT_API** (cloud): dice cos'è il sistema (operatore vocale, ASR con errori tipici), chiede di convertire (mese in
+  nome, giorno in numero, ora HH:MM), di risolvere i riferimenti da STATO e dalle **ultime righe del dialogo, operatore
+  compreso** (la pagina ne manda fino a 8, il servizio ne usa 6: `TA_CONTEXT`), di calcolare ±1 sul giorno offerto, e di
+  non inventare dopo una richiesta chiusa. Selezione: `TA_PROMPT=api` nel file di ambiente, automatica con `--backend cline`.
+| gemini-3.5-flash-lite | base 55 | dialogo 20 | latenza |
+|---|---|---|---|
+| prompt minimo (verbatim) | 53 | 16-17 | 1,0 s |
+| prompt smart, senza dialogo | 51 | 18 | 1,0 s |
+| **PROMPT_API + dialogo** | 52 | **19** | 1,0 s |
+Residui: "is it free?" subito dopo una prenotazione → nessuna chiamata (ambiguo, accettabile); "No, I want a book for May"
+→ nessuna chiamata nonostante `tool_choice` forzato (flash-lite a volte non chiama: da tenere d'occhio, se pesa si prova
+qwen3.8-flash o haiku con lo stesso prompt); "tomorrow" → giorno 'tomorrow' respinto → chiede la data (accettabile).

@@ -48,26 +48,37 @@ DEFAULT_TOOLS = [
             "required": ["intent", "month", "day", "time"]}}},
 ]
 
-SYSTEM = ("You are the booking desk's request extractor. Read STATE and the customer's last sentence, then call `request` once.\n"
-          "Copy month, day and time words exactly as the customer said them in this sentence; null when not said. Never guess.\n"
-          "If STATE says a request is in progress, a bare number or a bare date/time word is the answer to what is still missing "
-          "(day if the day is missing, otherwise time), with the same intent as the request in progress.\n"
-          "If nothing is requested, intent is none."
-          + ("\nA number or an ordinal ('25', 'the 3rd', 'third', 'twentieth') is a day or a time, never a month; month is only a month name."
-             if os.environ.get("TA_ORDINAL_RULE") == "1" else ""))
+# ---- Due prompt (05/09, Alessandro): LOCAL_PROMPT per il 1,7B locale (minimo, valori verbatim, niente contesto: ogni
+#      ingresso in piu' e' una fonte da cui copia), PROMPT_API per i modelli cloud (piu' potenti: risolvono riferimenti,
+#      calcolano, e ricevono le ultime righe del dialogo, operatore compreso).
+LOCAL_PROMPT = ("You are the booking desk's request extractor. Read STATE and the customer's last sentence, then call `request` once.\n"
+                "Copy month, day and time words exactly as the customer said them in this sentence; null when not said. Never guess.\n"
+                "If STATE says a request is in progress, a bare number or a bare date/time word is the answer to what is still missing "
+                "(day if the day is missing, otherwise time), with the same intent as the request in progress.\n"
+                "If nothing is requested, intent is none.")
 
-# Prompt "smart" (TA_PROMPT=smart), pensato per i modelli cloud: qui si CHIEDE di risolvere i riferimenti e di calcolare,
-# cose che al 1,7B non chiediamo perche' non le fa (con il prompt minimo i cloud copiano 'the day after' alla lettera).
-SYSTEM_SMART = ("You are the booking desk's request extractor. Read STATE and the customer's last sentence, then call `request` once.\n"
-                "Fill month (month name), day (number 1-31) and time (24h HH:MM) with what the sentence says. Resolve references using STATE: "
-                "if an offer is pending, 'yes'/'ok'/'book it'/'that day' means book the offered date; 'the day after'/'the next day' means the "
-                "offered day + 1 and 'the day before' the offered day - 1 (same month); a different day ('no, the 6th') or a question about "
-                "another date is a check, not a booking. Convert spoken times ('half past ten' -> 10:30, '3 pm' -> 15:00).\n"
-                "If STATE has no pending offer, never take values from it: a sentence without a date has month=null and day=null.\n"
-                "If a request is in progress, a bare number answers what is still missing (day, otherwise time), same intent as the request.\n"
-                "If nothing is requested (greetings, thanks, hesitation, thinking aloud), intent is none and all fields null.")
-if os.environ.get("TA_PROMPT") == "smart":
-    SYSTEM = SYSTEM_SMART
+PROMPT_API = ("You are the request extractor of a booking desk. The desk is a voice operator; the customer speaks; an ASR transcribes "
+              "the customer (expect small transcription errors: 'book 49' = 'book at 9', 'mount march' = 'month March').\n"
+              "You receive: STATE (what the booking system is doing right now), the last lines of the conversation (OPERATOR = the desk, "
+              "USER = the customer), and the customer's NOW line. Call `request` exactly once, about the NOW line.\n"
+              "Fields: month = month name; day = number 1-31; time = 24h HH:MM (convert spoken times: 'half past ten' -> 10:30, "
+              "'3 pm' -> 15:00, 'nine thirty' -> 09:30). Fill only what the NOW line says or clearly refers to; null otherwise.\n"
+              "Intent: check = a question about availability (no reservation asked); book = an explicit request to reserve, or "
+              "the customer accepting an offer / answering a question the operator just asked while a request is in progress; "
+              "cancel = the customer gives up the request in progress; none = greetings, thanks, hesitation, thinking aloud, "
+              "off-topic talk, or an answer to something that is not a booking request.\n"
+              "References: use STATE and the previous lines only to resolve what the NOW line refers to. With an offer pending, "
+              "'yes'/'ok'/'sure'/'book it'/'that day' -> book the offered date; 'the day after'/'the next day' -> offered day + 1, "
+              "'the day before' -> offered day - 1 (same month); a different day ('no, the 6th') or a question about another date "
+              "-> check with the new values. If the operator just asked for a month/day/time, a bare answer ('20', 'nine', 'April') "
+              "fills that field with the intent of the request in progress.\n"
+              "Never invent: after a CLOSED request (nothing pending) a sentence without a date has month=null and day=null, even if "
+              "earlier lines mention dates. 'thank you', 'bye', 'let me think' -> intent=none, all fields null.")
+
+SYSTEM = LOCAL_PROMPT
+if os.environ.get("TA_PROMPT") == "api":
+    SYSTEM = PROMPT_API
+
 
 tok = None
 model = None
@@ -114,7 +125,7 @@ CONTEXT_RULES = ("\nThe lines before NOW are the conversation so far (OPERATOR =
 # ---- backend cloud (05/09): endpoint OpenAI-compatible del provider Cline (https://api.cline.bot/api/v1), stesso schema.
 #      Chiave/modello da ~/.config/tool_agent.env (TA_API_KEY, TA_BASE_URL, TA_MODEL); il locale resta come fallback.
 BACKEND = "local"
-CLOUD = {"base_url": "https://api.cline.bot/api/v1", "model": "google/gemini-3.5-flash-lite", "key": "", "timeout": 4.0}
+CLOUD = {"base_url": "https://api.cline.bot/api/v1", "model": "google/gemini-3.5-flash-lite", "key": "", "timeout": 4.0, "context": 6}
 
 
 def load_env_file(path):
@@ -154,11 +165,17 @@ def decide(transcript, tools, fsm=None, context=0):
         return {"tool_calls": [], "raw": "NO ACTION (nessuna riga utente)"}
     last_user_idx = max(i for i, (r, _) in enumerate(lines) if r == "user")
     convo = f"NOW USER: {lines[last_user_idx][1]}"
-    system = SYSTEM
-    if context and context != "state" and last_user_idx > 0:
+    # cloud: PROMPT_API + ultime righe del dialogo; locale: LOCAL_PROMPT e SOLO la battuta corrente
+    system = PROMPT_API if BACKEND == "cline" else LOCAL_PROMPT
+    if context == "state":
+        context = 0
+    if BACKEND == "cline" and not context:
+        context = CLOUD.get("context", 6)
+    if context and last_user_idx > 0:
         prev = lines[max(0, last_user_idx - int(context)):last_user_idx]
         convo = "\n".join(f"{'OPERATOR' if r == 'assistant' else 'USER'}: {x}" for r, x in prev) + "\n" + convo
-        system = SYSTEM + CONTEXT_RULES
+        if BACKEND != "cline":
+            system = LOCAL_PROMPT + CONTEXT_RULES
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall request() about the NOW line."}]
     backend_used = BACKEND
@@ -273,6 +290,7 @@ def main() -> int:
     if BACKEND == "cline":
         CLOUD["key"] = os.environ.get("TA_API_KEY", ""); CLOUD["base_url"] = os.environ.get("TA_BASE_URL", CLOUD["base_url"])
         CLOUD["model"] = args.cloud_model or os.environ.get("TA_MODEL", CLOUD["model"])
+        CLOUD["context"] = int(os.environ.get("TA_CONTEXT", CLOUD["context"]))
         if not CLOUD["key"]:
             raise SystemExit("TA_API_KEY mancante (~/.config/tool_agent.env)")
         print(f"backend cloud: {CLOUD['base_url']} modello {CLOUD['model']} (timeout {CLOUD['timeout']} s)", flush=True)

@@ -286,7 +286,7 @@ async function startSessionInner() {
     await fsmReset();                                // ogni sessione parte da IDLE (le prenotazioni in db.html restano)
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
-    userLines.length = 0;
+    userLines.length = 0; dialog.length = 0; currentAiText = '';
 
     session = new RealtimeSession('hud', {
         getMaxKvTokens: () => 8192,
@@ -313,7 +313,10 @@ async function startSessionInner() {
         if (d.sessionState) $('stateText').textContent = d.sessionState;
         if (d.kvCacheLength !== undefined) lastMetrics = d;
         if (d.modelState && d.modelState !== lastModelState) {
-            if (d.modelState === 'end_of_turn') conv('sys', stateLine('fine turno AI'));
+            if (d.modelState === 'end_of_turn') {
+                conv('sys', stateLine('fine turno AI'));
+                if (currentAiText) { dialog.push({ role: 'assistant', text: currentAiText }); if (dialog.length > 12) dialog.shift(); currentAiText = ''; }
+            }
             lastModelState = d.modelState;
         }
         if (d.kvCacheLength !== undefined) {
@@ -371,8 +374,10 @@ function stopSession() {
 }
 
 // testo del modello: misura la reazione al frame (solo osservazione: il trigger e' il turno dell'utente)
+let currentAiText = '';
 function onModelText(text) {
     if (!text) return;
+    currentAiText = text;
     if (awaitingReaction && hud.lastFrameAt !== null) {
         awaitingReaction = false;
         hudLog('hud', `REAZIONE +${(now() - hud.lastFrameAt).toFixed(1)}s dopo il frame (${$('hudState').textContent}): "${text.slice(0, 60)}"`);
@@ -380,7 +385,8 @@ function onModelText(text) {
 }
 
 // ---- estrattore (modello SEPARATO): riceve SOLO le battute dell'utente + lo stato della FSM
-const userLines = [];           // ultime battute dell'utente (ASR), contesto per l'estrattore
+const userLines = [];           // ultime battute dell'utente (ASR)
+const dialog = [];              // ultime righe del dialogo (operatore + utente): le usa solo il backend cloud (PROMPT_API)
 let toolBusy = false;
 const pendingTurns = [];        // battute arrivate mentre l'estrattore era occupato: si accodano, non si scartano
 
@@ -393,13 +399,13 @@ async function onUserTurnEnd(utterance) {
     toolBusy = true;
     try {
         const t0 = performance.now();
-        const transcript = userLines.map(t => ({ role: 'user', text: t }));
+        const transcript = dialog.slice(-8);
         const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ transcript, user_audio_b64: arrayBufferToBase64(utterance.buffer), language: 'en', fsm: hud.fsm }) });
         const d = await r.json();
         const dt = ((performance.now() - t0) / 1000).toFixed(2);
         if (!r.ok) { hudLog('warn', `estrattore: ${d.error || r.status}`); return; }
-        if (d.user_text) { conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); }
+        if (d.user_text) { conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 12) dialog.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }

@@ -318,3 +318,8 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 04/09 — **Ramo HUD, laterale veloce**: VAD nel browser + trigger sul turno utente + ASR GPU
   (decisione di Alessandro; il resto in `ideescartate.md`). NPU Intel AI Boost verificata: c'è,
   ma invisibile da WSL → piano B via servizio Windows/OpenVINO se la VRAM stringe.
+- 04/09 (sera) — **Ramo HUD: FSM della prenotazione specificata** in `plan/ramo-hud.md` (stati,
+  frame per stato, contratto dell'estrattore, D8-D11, predizioni P1-P4). Decisioni: FSM nel codice
+  (il 1,7B estrae soltanto), HUD = stato non istruzione, campi raccolti mostrati, niente stato
+  "prendi tempo" (RESULT diretto: misura a lato sui silenzi di 30 s). Da implementare in 5 passi;
+  gate = test dal vivo di Alessandro, cuffie obbligatorie.

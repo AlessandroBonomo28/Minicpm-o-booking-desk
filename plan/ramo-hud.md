@@ -140,3 +140,111 @@ facoltativo nello schema (domanda senza ora → verifica della giornata).
   `ASR x s + LLM y s = z s`.
 - Scartati (vedi `ideescartate.md`): prefiltro, due passi, cache vLLM, iniezione lato server. Piano B se la
   VRAM stringe: ASR sulla NPU Intel AI Boost (Core Ultra 9 285K) da un servizio Windows con OpenVINO.
+
+## 04/09 — Macchina a stati della prenotazione (FSM): specifica PRIMA dell'implementazione
+
+Origine: proposta di Alessandro ("vorrei prenotare una visita" → il tool agent trova che manca la data → l'HUD lo
+mostra → l'omni chiede la data → l'utente la dà → chiamata vera → attesa → risultato annunciato; annullabile a voce
+in ogni momento), confrontata con il riscontro di Gemini e con quanto misurato qui. Decisioni prese:
+
+1. **La FSM la fa il codice (gateway), non il modello da 1,7B.** Qwen3-1.7B resta un *estrattore per turno*:
+   dice cosa ha chiesto l'utente in QUESTA battuta (intento + campi effettivamente detti). Il merge con quanto
+   già raccolto, il calcolo di cosa manca, l'esecuzione sul DB e la transizione sono deterministici e testabili
+   con `curl`, senza GPU. Motivo misurato: quando lo schema obbligava un campo, il 1,7B lo inventava (00:00);
+   quando il campo è diventato facoltativo ha smesso. Ogni "obbligo" sta quindi nella FSM, non nello schema.
+2. **L'HUD resta STATO, mai istruzione.** Il frame mostra cosa è raccolto e cosa manca (`MISSING: DATE`), non
+   frasi per l'omni ("chiedi in modo naturale…"): il modello è addestrato a osservare i frame, non a eseguirli, e
+   quando lo schermo cambia tende a leggerlo ad alta voce (Test 1) → testo lungo = lettura lunga e goffa.
+   L'unica istruzione vive nel system prompt, statica.
+3. **Campi già raccolti: SÌ sullo schermo** (risposta alla domanda di Alessandro). Sono parte dello stato; l'ASR
+   (whisper small) può sbagliare un numero e così l'utente/Alessandro lo vede e lo corregge a voce; db.html
+   mostra la stessa cosa.
+4. **Niente stato "prendi tempo"** (proposta Gemini): è il nostro CHECKING, dove abbiamo visto i silenzi di 30 s.
+   Con il DB locale l'esecuzione dura millisecondi → dal turno dell'utente si va DIRETTI a RESULT (~0,6 s +
+   allineamento al chunk). CHECKING compare solo se il backend è davvero lento (ritardo simulato > 0).
+   Niente stato "TOOL_TRIGGERED": durerebbe 0,6 s, meno di un frame, l'omni non lo vedrebbe mai.
+5. Race "risponde prima del frame": misurata piccola (decisione 0,6 s; l'omni apre bocca dopo 1-2 s) → il frame
+   arriva prima o insieme alla sua prima parola. Non si aggiunge nulla per gestirla; si osserva nei test.
+6. **Cuffie obbligatorie**: il VAD è sul microfono; con gli altoparlanti la voce dell'omni diventa un "turno
+   utente" e l'estrattore legge le parole dell'operatore come se fossero del cliente.
+
+### Stati (FSM nel gateway, persistita in `data/hud_db.json` → `fsm`, visibile in db.html)
+
+| Stato | Contenuto | Entra da | Esce verso |
+|---|---|---|---|
+| `IDLE` | nessuna richiesta; `note` facoltativa (`REQUEST CANCELLED`) | avvio, reset, `cancel` | `COLLECTING` (book), `RESULT` (check completo) |
+| `COLLECTING` | `intent=book`, `slots{date?,time?}`, `missing=[…]` | `book(...)` incompleto | `COLLECTING` (altro campo), `RESULT` (completo → esecuzione), `IDLE` (cancel) |
+| `CHECKING` | richiesta in esecuzione (solo con ritardo simulato > 0) | esecuzione | `RESULT` |
+| `RESULT` | `intent`, `slots`, `status` ∈ OK / PARTIAL / NO / ERR, `detail` | esecuzione finita | `COLLECTING`/`RESULT` (nuova richiesta), `IDLE` (cancel o reset) |
+
+Regole:
+- **Campi richiesti per intento**: `check` → date (time facoltativo = giornata intera, come oggi);
+  `book` → date **e** time (una visita ha un'ora). Si chiede UN campo alla volta, in quest'ordine: date, time.
+- **Merge**: un campo si sovrascrive solo con un valore non vuoto detto dall'utente; ripetere la data la
+  conferma, dirne un'altra la corregge (`"no, the 3rd"` → date = april 3).
+- **Esecuzione `book`**: se lo slot è libero → scrive la prenotazione nel DB (nome: `voice`), RESULT OK
+  (`CONFIRMED`); se occupato → RESULT NO (`SLOT TAKEN`, dettaglio come oggi), slots svuotati (una nuova
+  `book(...)` riparte); errore/timeout → RESULT ERR.
+- **`cancel`** da qualunque stato → `IDLE` con `note=REQUEST CANCELLED` (così l'omni ha qualcosa da
+  riconoscere; la nota sparisce alla prossima transizione). Nessuna prenotazione scritta.
+- `RESULT` **persiste** finché non arriva una nuova richiesta, un cancel o un reset: nessun timeout (sarebbe una
+  pezza; se serve un ritorno automatico a IDLE, si discute).
+- Normalizzazione di date/ore come oggi (`_hud_norm_date`, `_hud_norm_time`); il testo grezzo dell'utente resta
+  nel registro (`user_text`), è lì che Alessandro controlla la precisione dell'ASR.
+
+### Contratto dell'estrattore (tool agent, un turno = una decisione)
+
+Ingresso: stato FSM corrente (intento e campi già raccolti, in chiaro nel prompt), ultime 6 battute dell'UTENTE
+(ASR, accumulate nella pagina), ultima battuta dell'operatore (contesto, mai fonte di date). Uscita: al più UNA
+chiamata tra `book(date?, time?)`, `check(date?, time?)`, `cancel()`, altrimenti `NO ACTION`.
+Regole nel prompt: campi solo se detti dall'utente in questa battuta ("never invent"); se una prenotazione è in
+corso e l'utente risponde con un solo dato ("April 2nd"), chiamare `book` con quel solo campo; "never mind /
+cancel / forget it" → `cancel`; domanda di disponibilità → `check`; chiacchiere → `NO ACTION`.
+
+Flusso per turno: VAD chiude la battuta → `POST /api/tool_agent/decide` (ASR + estrazione, ~0,6 s) →
+`POST /api/hud_fsm/event {tool_calls, user_text}` (gateway: merge, esecuzione DB, nuovo stato) → la pagina
+disegna il frame (solo se lo stato è cambiato) → allegato al prossimo chunk da 1 s.
+
+### Formato del frame per stato (448×448, font come oggi: titolo 34, riga1 44, riga2 56/40, riga3 22)
+
+| Stato | Sfondo | Titolo | Riga 1 | Riga 2 | Riga 3 |
+|---|---|---|---|---|---|
+| IDLE | grigio | `BOOKING DESK` | `waiting for a request` | `` (o `REQUEST CANCELLED` se nota) | |
+| COLLECTING, manca la data | blu | `NEW BOOKING` | `DATE: ?` | `MISSING: DATE` | `TIME: 15:00` se già detto |
+| COLLECTING, manca l'ora | blu | `NEW BOOKING` | `APRIL 2` | `MISSING: TIME` | |
+| CHECKING | giallo | `CHECKING...` | `APRIL 2 15:00` | `please wait` | |
+| RESULT check | verde/arancio/rosso | `RESULT` | `APRIL 2 15:00` | `AVAILABLE` / `PARTLY BOOKED` / `BOOKED <time_raw>` | dettaglio |
+| RESULT book OK | verde | `BOOKING` | `APRIL 2 15:00` | `CONFIRMED` | |
+| RESULT book NO | rosso | `BOOKING` | `APRIL 2 15:00` | `SLOT TAKEN` | dettaglio |
+| ERR | rosso scuro | `ERROR / TIMEOUT` | `APRIL 2 15:00` | `request failed` | |
+
+System prompt dell'omni (unica variabile che tocca il modello, statica):
+*"You are in duplex mode, where you can listen and speak at the same time. You work at a booking desk. The screen
+shows the booking system. When the screen shows MISSING, ask the customer for that item. When the screen shows a
+result, tell the customer. Otherwise just talk."*
+
+### Domande standard aggiunte (inglese, cuffie, una sessione per riga salvo dove indicato)
+
+| # | Cosa dire | DB prima | Comportamento atteso |
+|---|---|---|---|
+| D8 | "I'd like to book a visit." | — | estrattore: `book()` senza campi; HUD `NEW BOOKING / DATE: ? / MISSING: DATE`; l'omni **chiede la data**; nessuna data inventata sull'HUD |
+| D9 | (dopo D8) "April 2nd at 3 pm." | april 2 libero | `book(April 2nd, 15:00)` → completo → scritto nel DB → `CONFIRMED`; l'omni lo annuncia da solo; db.html mostra lo slot OCCUPATO |
+| D9b | (dopo D8) "April 2nd." poi, alla domanda dell'omni, "at 3 pm" | april 2 libero | due passi: `MISSING: TIME` → l'omni chiede l'ora → `CONFIRMED` |
+| D9c | (dopo D8) "April 2nd at 3 pm." | april 2 15:00 già prenotato da db.html | `SLOT TAKEN`; l'omni lo dice e non conferma nulla; DB invariato |
+| D10 | (dopo D8, mentre l'omni chiede la data) "Actually, never mind, cancel that." | — | `cancel()` → IDLE `REQUEST CANCELLED`; l'omni si interrompe, prende atto e **non insiste** sulla data; DB invariato |
+| D11 | "Is March 31st at 3 pm available?" (= D1) | — | regressione: `check` invariato, RESULT diretto senza CHECKING |
+
+**Predizioni scritte prima dei test** (variabile: frame `MISSING` + riga di prompt; il resto è codice):
+- P1 (estrattore): su D8 chiama `book()` senza campi. Rischio: mette `tomorrow` da solo → se succede, è un
+  problema dell'estrattore (si vede nel registro), non dell'omni.
+- P2 (omni, la vera incognita): al frame `MISSING: DATE` legge lo schermo e chiede la data, probabilmente citando
+  lo schermo in modo letterale ("the screen says the date is missing, when would you like to come?").
+  Accettabile. Se invece ignora il frame e chiacchiera, la FSM non ha senso e si torna a capire perché.
+- P3 (cancel): in Omni mode si interrompe fisicamente; visto `REQUEST CANCELLED` prende atto. Rischio: ripete una
+  volta la domanda già generata, poi smette. Se insiste dopo il frame → fallito.
+- P4 (misura a lato, non variabile): con RESULT diretto (niente CHECKING) i silenzi di 30 s dopo "let me check"
+  dovrebbero sparire su D11, perché non c'è più uno stato che gli dice di aspettare.
+
+**Ordine di implementazione**: (1) FSM + endpoint nel gateway e prova a tavolino con `curl` (senza GPU);
+(2) estrattore con i tre strumenti e prova con testi scritti via proxy (come le prove del 03/09);
+(3) frame e prompt nella pagina HUD; (4) db.html mostra la FSM; (5) test dal vivo D8 → D10 → D9 → D11.

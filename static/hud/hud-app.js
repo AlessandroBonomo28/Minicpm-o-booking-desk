@@ -401,7 +401,7 @@ async function onUserTurnEnd(utterance) {
         if (!r.ok) { hudLog('warn', `estrattore: ${d.error || r.status}`); return; }
         if (d.user_text) { conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); }
         const calls = d.tool_calls || [];
-        const tim = `ASR ${d.asr_s ?? '?'} s + LLM ${d.llm_s ?? '?'} s = ${dt} s`;
+        const tim = `ASR ${d.asr_s ?? '?'} s + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
         for (const c of calls) hudLog('hud', `ESTRATTORE (${tim}): ${c.name}(${JSON.stringify(c.arguments)})`);
         await fsmEvent(calls, d.user_text, 'estrattore (turno utente)');

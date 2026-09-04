@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import urllib.error
 import re
 import sys
 import threading
@@ -54,6 +55,19 @@ SYSTEM = ("You are the booking desk's request extractor. Read STATE and the cust
           "If nothing is requested, intent is none."
           + ("\nA number or an ordinal ('25', 'the 3rd', 'third', 'twentieth') is a day or a time, never a month; month is only a month name."
              if os.environ.get("TA_ORDINAL_RULE") == "1" else ""))
+
+# Prompt "smart" (TA_PROMPT=smart), pensato per i modelli cloud: qui si CHIEDE di risolvere i riferimenti e di calcolare,
+# cose che al 1,7B non chiediamo perche' non le fa (con il prompt minimo i cloud copiano 'the day after' alla lettera).
+SYSTEM_SMART = ("You are the booking desk's request extractor. Read STATE and the customer's last sentence, then call `request` once.\n"
+                "Fill month (month name), day (number 1-31) and time (24h HH:MM) with what the sentence says. Resolve references using STATE: "
+                "if an offer is pending, 'yes'/'ok'/'book it'/'that day' means book the offered date; 'the day after'/'the next day' means the "
+                "offered day + 1 and 'the day before' the offered day - 1 (same month); a different day ('no, the 6th') or a question about "
+                "another date is a check, not a booking. Convert spoken times ('half past ten' -> 10:30, '3 pm' -> 15:00).\n"
+                "If STATE has no pending offer, never take values from it: a sentence without a date has month=null and day=null.\n"
+                "If a request is in progress, a bare number answers what is still missing (day, otherwise time), same intent as the request.\n"
+                "If nothing is requested (greetings, thanks, hesitation, thinking aloud), intent is none and all fields null.")
+if os.environ.get("TA_PROMPT") == "smart":
+    SYSTEM = SYSTEM_SMART
 
 tok = None
 model = None
@@ -97,6 +111,38 @@ CONTEXT_RULES = ("\nThe lines before NOW are the conversation so far (OPERATOR =
                  "refer to them, ignore the earlier lines completely: 'thank you', 'let me think', chit-chat -> intent none, all null.")
 
 
+# ---- backend cloud (05/09): endpoint OpenAI-compatible del provider Cline (https://api.cline.bot/api/v1), stesso schema.
+#      Chiave/modello da ~/.config/tool_agent.env (TA_API_KEY, TA_BASE_URL, TA_MODEL); il locale resta come fallback.
+BACKEND = "local"
+CLOUD = {"base_url": "https://api.cline.bot/api/v1", "model": "google/gemini-3.5-flash-lite", "key": "", "timeout": 4.0}
+
+
+def load_env_file(path):
+    try:
+        for line in open(os.path.expanduser(path)):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1); os.environ.setdefault(k.strip(), v.strip())
+    except FileNotFoundError:
+        pass
+
+
+def decide_cloud(messages, tools):
+    """Una chiamata chat/completions con tool_choice forzato su `request`. Ritorna (raw_arguments_json, model, ms) o solleva."""
+    body = json.dumps({"model": CLOUD["model"], "messages": messages, "tools": tools, "temperature": 0, "max_tokens": 200,
+                       "tool_choice": {"type": "function", "function": {"name": "request"}}}).encode()
+    req = urllib.request.Request(CLOUD["base_url"].rstrip("/") + "/chat/completions", data=body,
+                                 headers={"Authorization": f"Bearer {CLOUD['key']}", "content-type": "application/json"})
+    t0 = time.time()
+    d = json.loads(urllib.request.urlopen(req, timeout=CLOUD["timeout"]).read())
+    d = d.get("data", d)
+    ch = d["choices"][0]["message"]
+    tc = ch.get("tool_calls") or []
+    if not tc:
+        return "", d.get("model"), (time.time() - t0) * 1000
+    return tc[0]["function"]["arguments"], d.get("model"), (time.time() - t0) * 1000
+
+
 def decide(transcript, tools, fsm=None, context=0):
     """context=0: SOLO la battuta corrente (contratto attuale: le righe precedenti erano una fonte da cui copiare campi).
     context=N: esperimento (05/09, richiesta di Alessandro): anche le ultime N righe del dialogo, operatore compreso,
@@ -115,11 +161,22 @@ def decide(transcript, tools, fsm=None, context=0):
         system = SYSTEM + CONTEXT_RULES
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall request() about the NOW line."}]
-    prompt = tok.apply_chat_template(messages, tools=tools, add_generation_prompt=True, tokenize=False, enable_thinking=False)
-    with lock:
-        ids = tok(prompt, return_tensors="pt").to(model.device)
-        out = model.generate(**ids, max_new_tokens=120, do_sample=False)
-        raw = tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=False)
+    backend_used = BACKEND
+    raw = ""
+    if BACKEND == "cline":
+        try:
+            args_json, used_model, ms = decide_cloud(messages, tools)
+            raw = f'<tool_call>{{"name": "request", "arguments": {args_json or "{}"}}}</tool_call>'
+            backend_used = f"cline:{used_model} {ms:.0f}ms"
+        except Exception as e:
+            sys.stderr.write(f"[tool-agent] cloud non disponibile ({type(e).__name__}: {str(e)[:80]}): fallback locale\n")
+            backend_used = "local (fallback)"
+    if not raw and tok is not None:
+        prompt = tok.apply_chat_template(messages, tools=tools, add_generation_prompt=True, tokenize=False, enable_thinking=False)
+        with lock:
+            ids = tok(prompt, return_tensors="pt").to(model.device)
+            out = model.generate(**ids, max_new_tokens=120, do_sample=False)
+            raw = tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=False)
     calls = []
     for m in TOOL_CALL_RE.finditer(raw):
         try:
@@ -143,7 +200,7 @@ def decide(transcript, tools, fsm=None, context=0):
                 args[k] = v.strip()
         calls.append({"name": intent, "arguments": args})
         break   # una sola decisione per turno
-    return {"tool_calls": calls, "raw": raw.replace("<|im_end|>", "").strip()[:400]}
+    return {"tool_calls": calls, "raw": raw.replace("<|im_end|>", "").strip()[:400], "backend": backend_used}
 
 
 class H(BaseHTTPRequestHandler):
@@ -206,13 +263,25 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", type=int, default=22700)
     ap.add_argument("--model-dir", default=MODEL_DIR)
+    ap.add_argument("--backend", choices=["local", "cline"], default="local", help="cline = API cloud (chiave in ~/.config/tool_agent.env), locale come fallback")
+    ap.add_argument("--cloud-model", default=None, help="id modello sul provider (default: TA_MODEL o google/gemini-3.5-flash-lite)")
+    ap.add_argument("--no-local", action="store_true", help="con --backend cline: non caricare il modello locale (niente fallback, libera la VRAM)")
     args = ap.parse_args()
-    global tok, model
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    print(f"carico {args.model_dir} ...", flush=True)
-    tok = AutoTokenizer.from_pretrained(args.model_dir)
-    model = AutoModelForCausalLM.from_pretrained(args.model_dir, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True).to("cuda").eval()
+    global tok, model, BACKEND
+    load_env_file("~/.config/tool_agent.env")
+    BACKEND = args.backend
+    if BACKEND == "cline":
+        CLOUD["key"] = os.environ.get("TA_API_KEY", ""); CLOUD["base_url"] = os.environ.get("TA_BASE_URL", CLOUD["base_url"])
+        CLOUD["model"] = args.cloud_model or os.environ.get("TA_MODEL", CLOUD["model"])
+        if not CLOUD["key"]:
+            raise SystemExit("TA_API_KEY mancante (~/.config/tool_agent.env)")
+        print(f"backend cloud: {CLOUD['base_url']} modello {CLOUD['model']} (timeout {CLOUD['timeout']} s)", flush=True)
+    if BACKEND == "local" or not args.no_local:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        print(f"carico {args.model_dir} ...", flush=True)
+        tok = AutoTokenizer.from_pretrained(args.model_dir)
+        model = AutoModelForCausalLM.from_pretrained(args.model_dir, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True).to("cuda").eval()
     print(f"pronto su :{args.port}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", args.port), H).serve_forever()
     return 0

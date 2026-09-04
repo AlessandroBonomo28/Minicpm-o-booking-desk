@@ -91,16 +91,6 @@ def fsm_line(fsm):
                 f"If the customer accepts ('yes', 'ok', 'sure', 'book it', 'that day', 'the same day') -> intent=book with that month and day "
                 f"(and time if it was part of the offer or is said now). A QUESTION about another date/time ('and the day after?', "
                 f"'what about the 6th?') -> intent=check with only what they say. If they decline, thank or chat -> intent=none, all null.")
-    if fsm.get("state") == "DONE" and (fsm.get("slots") or {}).get("month"):
-        sl = fsm.get("slots") or {}
-        when = f"{str(sl.get('month', '')).capitalize()} {sl.get('day', '')}"
-        if sl.get("time") and sl.get("time") != "all-day":
-            when += f" at {sl['time']}"
-        what = {"confirmed": "was BOOKED", "taken": "was NOT booked (slot taken)", "booked": "is NOT free (already booked)"}.get(fsm.get("status"), "was handled")
-        return (f"STATE: LAST REQUEST CLOSED. {when} {what}. Nothing is pending. If the customer refers to it with a change "
-                f"('the next day' = day+1, 'the day after' = day+1, 'the day before' = day-1, 'the same day at 5' = same month/day, new time) "
-                f"-> intent=check (or book if they ask to reserve) with the NEW month/day/time. 'thank you', 'bye', chat -> intent=none, all null. "
-                f"Never repeat the closed request as a new one.")
     if fsm.get("state") != "COLLECTING":
         return "STATE: no request in progress."
     sl = fsm.get("slots") or {}

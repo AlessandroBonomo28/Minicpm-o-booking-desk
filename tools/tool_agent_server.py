@@ -48,8 +48,9 @@ DEFAULT_TOOLS = [
             "required": ["intent", "month", "day", "time"]}}},
 ]
 
-# ---- 05/09 sera (Alessandro): il modello sceglie l'OPERAZIONE, il codice calcola. Strumenti piccoli, filtrati per stato:
-#      in IDLE 'yes' non puo' diventare una prenotazione; 'the next day' e' shift_day(+1) sul riferimento che tiene la FSM.
+# ---- 05/09 notte (Alessandro): per semplicita' SOLO tre strumenti fissi, book / check_availability / cancel, come all'inizio.
+#      Il significato dipende dallo stato, e lo decide la FSM: in conferma "yes" = book senza campi = conferma; un campo
+#      detto in conferma = correzione; senza mese nuovo si eredita l'offerta. Nessuna chiamata = nessuna azione.
 _FIELDS = {"month": {"type": ["string", "null"], "description": "month NAME as the customer said it ('April'); null if not said"},
            "day": {"type": ["string", "null"], "description": "day of the month as said ('2nd', 'the second', '30'); null if not said"},
            "time": {"type": ["string", "null"], "description": "time as said ('3 pm', 'half past ten', '15'); null if not said"}}
@@ -57,39 +58,21 @@ def _fn(name, desc, props=None, required=None):
     return {"type": "function", "function": {"name": name, "description": desc,
             "parameters": {"type": "object", "properties": props or {}, "required": required or []}}}
 TOOL_DEFS = {
-    "none": _fn("none", "Nothing to do: greeting, thanks, hesitation, thinking aloud, off-topic, or an answer that is not about a booking."),
-    "new_request": _fn("new_request", "The customer starts a NEW request: asks whether a date/time is free (kind=check) or asks to reserve (kind=book). Pass only the month/day/time words said.",
-                       {"kind": {"type": "string", "enum": ["check", "book"]}, **_FIELDS}, ["kind"]),
-    "provide": _fn("provide", "The customer gives or corrects a month, a day or a time for the request in progress ('the 20th', 'at 5 pm instead', 'no, the 3rd', 'April'). Pass only what was said.", dict(_FIELDS)),
-    "accept": _fn("accept", "The customer accepts the pending offer / confirms: 'yes', 'ok', 'sure', 'book it', 'that day', 'go ahead'. If they add a time ('yes, at 3 pm'), pass it.",
-                  {"time": _FIELDS["time"]}),
-    "decline": _fn("decline", "The customer declines the pending offer: 'no thanks', 'not that one', 'I'll think about it'."),
-    "cancel": _fn("cancel", "The customer gives up the request in progress: 'never mind', 'forget it', 'cancel', 'stop'."),
-    "shift_day": _fn("shift_day", "The customer refers to the reference date shifted by N days: 'the next day' / 'the day after' = 1, 'the day before' = -1, 'two days later' = 2, 'a week later' = 7.",
-                     {"delta": {"type": "integer", "description": "days to add (negative = before)"}}, ["delta"]),
-    "next_free": _fn("next_free", "The customer asks the system for the next available slot: 'the next free slot', 'first available', 'anything later that day?' (after=same_day) or 'the next free day' (after=next_days).",
-                     {"after": {"type": "string", "enum": ["same_day", "next_days"]}}, ["after"]),
-}
-TOOLS_BY_STATE = {
-    "IDLE":       ["new_request", "none"],
-    "COLLECTING": ["provide", "cancel", "new_request", "none"],
-    "CONFIRM":    ["accept", "decline", "provide", "shift_day", "next_free", "new_request", "none"],
-    "DONE":       ["new_request", "shift_day", "next_free", "none"],
+    "book": _fn("book", "The customer wants to reserve: asks to book / make an appointment, gives or corrects a month, day or time for the booking in progress, or says yes to the offer or to the pending confirmation ('yes', 'ok', 'book it', 'that day', 'go ahead' -> call with no fields). Pass only the month/day/time words said.", dict(_FIELDS)),
+    "check_availability": _fn("check_availability", "The customer asks whether a date or time is free/available (a question, no reservation), or gives a month/day/time for the availability check in progress. Pass only the words said.", dict(_FIELDS)),
+    "cancel": _fn("cancel", "The customer gives up / declines: 'never mind', 'forget it', 'cancel', 'no thanks', 'not that one'."),
 }
 def tools_for_state(fsm):
-    st = (fsm or {}).get("state") or "IDLE"
-    names = TOOLS_BY_STATE.get(st, TOOLS_BY_STATE["IDLE"])
-    if BACKEND != "cline":
-        names = [n for n in names if n != "none"]   # il 1,7B sceglie 'none' anche davanti a "I want to book": senza lo strumento, testo = nessuna azione
-    return [TOOL_DEFS[n] for n in names]
+    return [TOOL_DEFS["book"], TOOL_DEFS["check_availability"], TOOL_DEFS["cancel"]]
 
-LOCAL_PROMPT = ("You are the request extractor of a booking desk. Read STATE and the customer's last sentence, then call exactly ONE "
-                "of the available functions. Copy month, day and time words exactly as said; never guess values. "
-                "If the sentence is not a request (greeting, thanks, hesitation), call no function and answer NO ACTION.")
+LOCAL_PROMPT = ("You are the request extractor of a booking desk. Read STATE and the customer's last sentence, then call at most ONE "
+                "function. Copy month, day and time words exactly as said; never guess values. "
+                "If the sentence is not a request (greeting, thanks, hesitation, thinking aloud), call no function and answer NO ACTION.")
 PROMPT_API = ("You are the request extractor of a voice booking desk (OPERATOR = the desk, USER = the customer, transcribed by an ASR "
-              "with small errors). Read STATE, the last lines of the conversation and the customer's NOW line, then call exactly ONE "
-              "of the available functions, about the NOW line. Copy month, day and time words as said (you may convert spoken times "
-              "to HH:MM). Do not compute dates yourself: use shift_day / next_free. If the sentence is not a request, call none.")
+              "with small errors). Read STATE, the last lines of the conversation and the customer's NOW line, then call at most ONE "
+              "function, about the NOW line. Copy month, day and time words as said (you may convert spoken times to HH:MM); never "
+              "compute or guess dates. A bare number answers what the desk just asked. If the NOW line is not a request (greeting, "
+              "thanks, hesitation, thinking aloud, off-topic), call no function and answer NO ACTION.")
 SYSTEM = LOCAL_PROMPT
 DEFAULT_TOOLS = None   # per stato: vedi tools_for_state
 
@@ -104,9 +87,9 @@ def fsm_line(fsm):
     """Riga di stato per l'estrattore: mai valori (li tiene la FSM); dice in che situazione siamo."""
     st = (fsm or {}).get("state") if isinstance(fsm, dict) else None
     if st == "CONFIRM" and fsm.get("intent") == "book":
-        return "STATE: a booking is complete and waiting for the customer's confirmation (not written yet): accept to book it, provide to change a field, decline/cancel to drop it."
+        return "STATE: a booking is complete and waiting for the customer's confirmation (not written yet): 'yes' = book with no fields; a new month/day/time = book with that field; 'no'/'never mind' = cancel."
     if st == "CONFIRM":
-        return "STATE: an offer is pending (the desk found a free slot and is waiting for the customer's answer)."
+        return "STATE: an offer is pending (the desk found a free slot and is waiting for the customer's answer): 'yes'/'that day' = book with no fields; another day or time = check_availability with that field; 'no thanks' = cancel."
     if st == "COLLECTING":
         sl = fsm.get("slots") or {}
         got = [k for k in ("month", "day", "time") if sl.get(k)]
@@ -114,7 +97,7 @@ def fsm_line(fsm):
         return (f"STATE: a {fsm.get('intent')} request is in progress; collected: {', '.join(got) or 'nothing'}; "
                 f"missing: {', '.join(miss) or 'nothing'} (a bare number answers the first missing field).")
     if st == "DONE":
-        return "STATE: the last request is closed (it can be a reference for 'the next day' / 'next free slot')."
+        return "STATE: the last request is closed; nothing pending."
     return "STATE: no request in progress."
 
 
@@ -147,7 +130,7 @@ def load_env_file(path):
 def decide_cloud(messages, tools):
     """Una chiamata chat/completions con tool_choice forzato su `request`. Ritorna (raw_arguments_json, model, ms) o solleva."""
     body = json.dumps({"model": CLOUD["model"], "messages": messages, "tools": tools, "temperature": 0, "max_tokens": 200,
-                       "tool_choice": "required"}).encode()
+                       "tool_choice": "auto"}).encode()
     req = urllib.request.Request(CLOUD["base_url"].rstrip("/") + "/chat/completions", data=body,
                                  headers={"Authorization": f"Bearer {CLOUD['key']}", "content-type": "application/json"})
     t0 = time.time()
@@ -210,13 +193,11 @@ def decide(transcript, _tools_unused, fsm=None, context=0):
         if not isinstance(c, dict):
             continue
         name = str(c.get("name") or "none").lower(); a = c.get("arguments") or {}
-        if name == "request":   # vecchio contratto (compat): intent -> operazione
-            name = {"book": "new_request", "check": "new_request", "cancel": "cancel"}.get(str(a.get("intent", "")).lower(), "none")
-            if name == "new_request": a = dict(a, kind=a.get("intent"))
-        if name not in allowed or name == "none":
+        if name == "check": name = "check_availability"
+        if name not in allowed:
             break
         args = {}
-        for k in ("kind", "delta", "after", "month", "day", "time", "date"):
+        for k in ("month", "day", "time", "date"):
             v = a.get(k)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 args[k] = str(int(v))

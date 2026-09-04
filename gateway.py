@@ -1093,8 +1093,9 @@ def _hud_next_free(month: str, day: str, tm: str, after: str):
 
 def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=None):
     """Applica UNA operazione dell'estrattore allo stato (05/09: il modello sceglie l'operazione, il codice calcola).
-    Operazioni: new_request(kind, month, day, time) | provide(month, day, time) | accept() | decline() | cancel() |
-    shift_day(delta) | next_free(after) | none. Compat: book/check/check_availability = new_request."""
+    Strumenti: book(month, day, time) | check_availability(month, day, time) | cancel; nessuna chiamata = nulla.
+    Il significato lo da' lo stato: in CONFIRM book senza campi = conferma/accetta; campi senza mese = correzione;
+    in COLLECTING l'intento in corso non cambia."""
     fsm = _HUD_DB.get("fsm") or _hud_fsm_reset()
     fsm["last_user_text"] = user_text or ""
     now_s = datetime.now().isoformat(timespec="seconds")
@@ -1114,58 +1115,35 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     ref = fsm.get("slots") or {}
 
     if name == "cancel":
-        return _hud_fsm_reset(note="REQUEST CANCELLED" if state == "COLLECTING" else ""), True
-    if name == "decline":
-        if state == "CONFIRM" and fsm.get("intent") == "book":
-            return _hud_fsm_reset(note="BOOKING NOT CONFIRMED"), True   # prenotazione rifiutata alla conferma: nulla scritto
-        if state == "CONFIRM": return bump(state="DONE")
+        note = "REQUEST CANCELLED" if state == "COLLECTING" else ("BOOKING NOT CONFIRMED" if (state == "CONFIRM" and fsm.get("intent") == "book") else "")
+        return _hud_fsm_reset(note=note), True
+    if name == "check":
+        name = "check_availability"
+    if name not in ("book", "check_availability"):
         _hud_db_save(); return fsm, False
-    if name == "accept":
-        if state != "CONFIRM":
-            _hud_db_save(); return fsm, False
-        # prenota lo slot offerto / conferma la prenotazione in sospeso: se manca l'ora la si chiede
-        intent = "book"; args = {"time": args.get("time")}; slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
-        if ref.get("time") and ref.get("time") != "all-day":
-            slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
-        confirmed = True
-    elif name == "shift_day":
-        if not ref.get("month") or state not in ("CONFIRM", "DONE", "COLLECTING"):
-            _hud_db_save(); return fsm, False
-        try: delta = int(float(clean(args.get("delta")) or 1))
-        except ValueError: delta = 1
-        m, d = _hud_shift(ref["month"], ref.get("day") or "1", delta)
-        intent = "check"; slots = dict(_HUD_EMPTY_SLOTS, month=m, day=d)
-        if ref.get("time") and ref.get("time") != "all-day":
-            slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
-        args = {}
-    elif name == "next_free":
-        if not ref.get("month"):
-            _hud_db_save(); return fsm, False
-        after = clean(args.get("after")) or "next_days"
-        m, d, t = _hud_next_free(ref["month"], ref.get("day") or "1", ref.get("time") or "", after)
-        if m is None:
-            return bump(state="DONE", intent="check", status="error", detail="no free slot found", missing=[], rejected={})
-        intent = "check"; slots = dict(_HUD_EMPTY_SLOTS, month=m, day=d, time=t, time_raw=t); args = {}
-    elif name in ("new_request", "book", "check", "check_availability"):
-        kind = clean(args.get("kind")).lower() if name == "new_request" else ("book" if name == "book" else "check")
-        if kind not in ("book", "check"): kind = "check"
-        intent = kind
-        if state == "COLLECTING" and fsm.get("intent") in ("book", "check") and not clean(args.get("month")) and not clean(args.get("date")):
-            intent = fsm["intent"]; slots = dict(_HUD_EMPTY_SLOTS, **ref)   # senza un mese nuovo e' un 'provide'
-        else:
-            slots = dict(_HUD_EMPTY_SLOTS)
-    elif name == "provide":
-        if state == "COLLECTING":
-            intent = fsm["intent"]; slots = dict(_HUD_EMPTY_SLOTS, **ref)
-        elif state == "CONFIRM":
-            # correzione/aggiunta sull'offerta o sulla prenotazione in sospeso: eredita, stesso intento, torna in conferma
-            intent = fsm.get("intent") or "check"; slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
+    kind = "book" if name == "book" else "check"
+    said = {k: clean(args.get(k)) for k in ("date", "month", "day", "time")}
+    any_said = any(said.values())
+    if state == "CONFIRM":
+        if kind == "book" and not any_said:
+            # "yes": conferma la prenotazione in sospeso o accetta l'offerta (se manca l'ora la si chiede)
+            intent = "book"; confirmed = True
+            slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
+            if ref.get("time") and ref.get("time") != "all-day":
+                slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
+        elif not said["month"] and not said["date"]:
+            # correzione/aggiunta sull'offerta o sulla prenotazione in sospeso: eredita e applica; torna in conferma
+            intent = kind; slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
             if ref.get("time") and ref.get("time") != "all-day":
                 slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
         else:
+            intent = kind; slots = dict(_HUD_EMPTY_SLOTS)   # mese nuovo: richiesta nuova
+        if not any_said and kind == "check":
             _hud_db_save(); return fsm, False
+    elif state == "COLLECTING" and fsm.get("intent") in ("book", "check") and not said["month"] and not said["date"]:
+        intent = fsm["intent"]; slots = dict(_HUD_EMPTY_SLOTS, **ref)   # l'intento in corso non cambia
     else:
-        _hud_db_save(); return fsm, False
+        intent = kind; slots = dict(_HUD_EMPTY_SLOTS)
 
     rejected = {}
     # un solo numero nella battuta non puo' essere insieme giorno E ora ("the 2nd" -> day='the 2nd', time='2')
@@ -1205,7 +1183,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         t = clean(args["time"])
         if _hud_time_valid(_hud_norm_time(t), intent): slots["time"] = t; slots["time_raw"] = t
         else: rejected["time"] = t
-    if state == "COLLECTING" and name in ("provide", "new_request", "book", "check") and not any(clean(args.get(k)) for k in ("date", "month", "day", "time")) and user_text:
+    if state == "COLLECTING" and not any_said and user_text:
         _route_bare_number(user_text)   # il modello non ha estratto nulla ma la battuta era un numero secco
     slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]

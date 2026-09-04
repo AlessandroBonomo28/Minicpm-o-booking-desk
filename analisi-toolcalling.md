@@ -123,3 +123,14 @@ data). Locale: senza lo strumento `none` in lista (lo sceglieva anche su "I want
 costano di più del vecchio contratto (52), ma il dialogo regge (17). Tutte le operazioni verificate via curl (shift a
 cavallo del mese: April 30 +1 → May 1; next_free same_day → 09:00; accept da DONE → nulla).
 Configurazione: `--backend cline` (flash-lite, PROMPT_API, dialogo), locale come fallback.
+
+## 8. Semplificazione finale (05/09 notte): tre strumenti fissi, significato dato dallo stato
+Alessandro: via le otto operazioni, "book e check availability come prima", tenendo lo stato di conferma. Strumenti:
+`book(month?, day?, time?)`, `check_availability(month?, day?, time?)`, `cancel()`; nessuna chiamata = nulla.
+Il significato lo decide la FSM: in CONFIRM `book` senza campi = "yes" (accetta l'offerta o conferma la prenotazione, unico
+modo di scrivere); campi senza mese nuovo = correzione (si eredita l'offerta, si torna in conferma); mese nuovo = richiesta
+nuova; in COLLECTING l'intento in corso non cambia; `cancel` in conferma = "no" (nota BOOKING NOT CONFIRMED).
+Ogni prenotazione completa passa da CONFIRM ("WAIT FOR USER CONFIRMATION / BOOKING FOR … / SAY YES TO BOOK").
+Aritmetica ("the next day"): non c'è più `shift_day`; il cloud la fa da solo leggendo il dialogo (March 31, April 5), il
+locale no (nessuna azione). Misure flash-lite: base 51/55 (mancati: "I need an appointment on May 5th" → check; "book
+for May" → check; "tomorrow at 9"; "I don't need you anymore" → cancel in DONE, innocuo), dialogo 24/24.

@@ -111,43 +111,33 @@ _DIM = {"january": 31, "february": 28, "march": 31, "april": 30, "may": 31, "jun
 
 
 def canon(st, got):
-    """Operazione dell'estrattore -> (intento, campi) come la applicherebbe la FSM, per confrontarla con le attese."""
+    """Chiamata dell'estrattore -> (intento, campi) come la applicherebbe la FSM, per confrontarla con le attese."""
     if got is None:
         return None
     name, a = got[0], dict(got[1]); state = st.get("state"); ref = st.get("slots") or {}
-    if name == "none":
-        return None
-    if name == "decline":
-        return ("cancel", {}) if (state == "CONFIRM" and st.get("intent") == "book") else None
+    if name == "check": name = "check_availability"
     if name == "cancel":
-        return ("cancel", {})
-    if name in ("book", "check"):
-        return (name, a)
-    if name == "new_request":
-        kind = a.pop("kind", "check") or "check"
-        return (kind, a)
-    if name == "provide":
-        intent = st.get("intent") if state in ("COLLECTING", "CONFIRM") else "check"
-        return (intent or "check", a)
-    if name == "accept":
-        if state != "CONFIRM": return None
-        f = {"month": ref.get("month"), "day": ref.get("day")}
-        if a.get("time"): f["time"] = a["time"]
-        elif ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
-        return ("book", f)
-    if name == "shift_day":
-        if not ref.get("month"): return None
-        try: delta = int(float(a.get("delta", 1)))
-        except ValueError: delta = 1
-        m = ref["month"]; d = int(ref.get("day") or 1) + delta; i = MONTHS.index(m)
-        while d > _DIM[MONTHS[i]]: d -= _DIM[MONTHS[i]]; i = (i + 1) % 12
-        while d < 1: i = (i - 1) % 12; d += _DIM[MONTHS[i]]
-        f = {"month": MONTHS[i], "day": str(d)}
-        if ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
-        return ("check", f)
-    if name == "next_free":
-        return ("check", {})
-    return (name, a)
+        return None if (state == "CONFIRM" and st.get("intent") == "check") else ("cancel", {})
+    if name not in ("book", "check_availability"):
+        return None
+    kind = "book" if name == "book" else "check"
+    a = {k: v for k, v in a.items() if v}
+    if state == "CONFIRM":
+        if kind == "book" and not a:
+            f = {"month": ref.get("month"), "day": ref.get("day")}
+            if ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
+            return ("book", f)
+        if kind == "check" and not a:
+            return None
+        if not a.get("month"):
+            # come la FSM: senza un mese nuovo si eredita l'offerta
+            f = {"month": ref.get("month"), "day": ref.get("day")}
+            if ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
+            f.update(a)
+            return (kind, f)
+    if state == "COLLECTING":
+        return (st.get("intent") or kind, a) if not a.get("month") else (kind, a)
+    return (kind, a)
 
 
 def run(url, verbose):

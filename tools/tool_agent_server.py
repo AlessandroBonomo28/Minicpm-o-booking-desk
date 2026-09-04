@@ -36,8 +36,9 @@ DEFAULT_TOOLS = [
             "intent": {"type": "string", "enum": ["book", "check", "cancel", "none"],
                        "description": "check = a QUESTION about availability, no reservation asked ('is X available?', 'is X free?', "
                                       "'do you have anything on X?', 'any slot on X?'); "
-                                      "book = an explicit request to reserve ('I'd like to book', 'book it', 'reserve', 'make an appointment'), "
-                                      "or a date/time given while a booking is in progress; "
+                                      "book = an explicit request to reserve ('I'd like to book', 'book it', 'reserve', 'make an appointment'); "
+                                      "when STATE says a request is IN PROGRESS and the customer just gives a date, a day or a time, "
+                                      "use the intent of the request in progress (book or check); "
                                       "cancel = gives up the request in progress ('never mind', 'forget it', 'cancel that', 'stop'); "
                                       "none = anything else (chat, thanks, greetings)."},
             "date": {"type": ["string", "null"], "description": "the date the customer said in the NOW line, written as month name + day number ('Month D'); null if they did not say a date"},
@@ -45,13 +46,14 @@ DEFAULT_TOOLS = [
             "required": ["intent", "date", "time"]}}},
 ]
 
-SYSTEM = ("You are the action extractor for a booking desk. You only see what the CUSTOMER said (USER lines) and the STATE of the "
-          "booking system. Always call the function `request` exactly once, about the NOW line only.\n"
+SYSTEM = ("You are the action extractor for a booking desk. You see ONE sentence the CUSTOMER just said (the NOW line) and the "
+          "STATE of the booking system. Always call the function `request` exactly once, about that sentence.\n"
           "A question about whether a date/time is free is a check, NOT a booking: book only when the customer asks to reserve.\n"
-          "date and time: ONLY if the customer said them in the NOW line, otherwise null. Never guess, never fill from the STATE or "
-          "from earlier lines, never invent. A sentence without a date has date=null; without a time has time=null.\n"
-          "If a booking is IN PROGRESS and the customer answers with a date or a time, intent=book with just that field. "
-          "If they correct a field ('no, the 3rd'), intent=book with the corrected value (use the month from STATE if only the day is said).\n"
+          "date and time: ONLY if the customer said them in this sentence, otherwise null. Never guess, never fill from the STATE, "
+          "never invent. A sentence without a date has date=null; without a time has time=null.\n"
+          "If a request is IN PROGRESS (see STATE) and the customer answers with a date, a day or a time, keep the intent in progress "
+          "(book stays book, check stays check) with just that field. If they correct a field ('no, the 3rd'), same intent with the "
+          "corrected value (use the month from STATE if only the day is said).\n"
           "cancel only while a request is in progress; after a finished request, 'thanks'/'bye' is intent=none.\n"
           "TIME RULES (24h HH:MM, convert spoken English): 'half past ten' -> 10:30; 'quarter past nine' -> 09:15; 'quarter to six' -> 05:45; "
           "'ten thirty' -> 10:30; '3 pm' / 'three in the afternoon' -> 15:00; '8 in the evening' -> 20:00; 'noon' -> 12:00; '9 am' -> 09:00; "
@@ -87,8 +89,9 @@ def decide(transcript, tools, fsm=None):
     users = [t.get("text", "") for t in transcript if t.get("role") == "user" and (t.get("text") or "").strip()]
     if not users:
         return {"tool_calls": [], "raw": "NO ACTION (nessuna riga utente)"}
-    earlier = "\n".join(f"EARLIER USER: {u}" for u in users[-4:-1])
-    convo = (earlier + "\n" if earlier else "") + f"NOW USER: {users[-1]}"
+    # SOLO la battuta appena detta: le righe precedenti erano una fonte da cui copiare campi ("is it free?" dopo una
+    # prenotazione -> check(May, 15) ripescati dai turni prima). Il contesto multi-turno lo porta la riga di stato.
+    convo = f"NOW USER: {users[-1]}"
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall request() about the NOW line."}]
     prompt = tok.apply_chat_template(messages, tools=tools, add_generation_prompt=True, tokenize=False, enable_thinking=False)

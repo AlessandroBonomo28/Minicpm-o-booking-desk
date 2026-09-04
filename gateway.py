@@ -1034,8 +1034,12 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         _hud_db_save()
         return fsm, False
     intent = "book" if name == "book" else "check"
-    # merge: si riparte da zero se cambia l'intento o non si stava raccogliendo; un campo si sovrascrive solo con un valore non vuoto
-    slots = dict(fsm.get("slots") or {}) if (fsm.get("state") == "COLLECTING" and fsm.get("intent") == intent) else {"date": "", "time": "", "time_raw": "", "month": ""}
+    if fsm.get("state") == "COLLECTING" and fsm.get("intent") in ("book", "check"):
+        # mentre si raccolgono i campi l'intento in corso non cambia ("30" in risposta a una verifica resta una verifica,
+        # anche se l'estrattore dice book); per cambiare richiesta si annulla prima
+        intent = fsm["intent"]
+    # merge: si riparte da zero se non si stava raccogliendo; un campo si sovrascrive solo con un valore non vuoto
+    slots = dict(fsm.get("slots") or {}) if fsm.get("state") == "COLLECTING" else {"date": "", "time": "", "time_raw": "", "month": ""}
     for k in ("date", "time"):
         v = str(args.get(k) or "").strip()
         if v and v.lower() not in ("none", "null", "unknown", "n/a"):

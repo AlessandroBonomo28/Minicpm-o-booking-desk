@@ -16,7 +16,7 @@
   th { color:#6b7280; font-weight:600; font-size:12px; }
   .pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600; color:#fff; }
   .available { background:#2e7d32; } .booked { background:#c62828; } .error { background:#b71c1c; }
-  .IDLE { background:#546e7a; } .COLLECTING { background:#1565c0; } .CHECKING { background:#f9a825; color:#1a1a1a; } .OK { background:#2e7d32; } .PARTIAL { background:#ef6c00; } .NO { background:#c62828; } .ERR { background:#b71c1c; }
+  .IDLE { background:#546e7a; } .COLLECTING { background:#1565c0; } .CONFIRM { background:#2e7d32; } .DONE { background:#37474f; } .CHECKING { background:#f9a825; color:#1a1a1a; } .OK { background:#2e7d32; } .PARTIAL { background:#ef6c00; } .NO { background:#c62828; } .ERR { background:#b71c1c; }
   .confirmed { background:#2e7d32; } .taken { background:#c62828; } .partial { background:#ef6c00; }
   .kv { font-size:13px; display:grid; grid-template-columns: 130px 1fr; gap:3px 8px; } .kv b { color:#6b7280; font-weight:600; }
   .hudbox { font-size:15px; margin:6px 0 10px; }
@@ -40,7 +40,7 @@
     <div class="card" style="margin-top:14px">
       <h2>Macchina a stati della prenotazione (FSM nel gateway)</h2>
       <div class="kv" id="fsm"><b>stato</b><span>IDLE</span></div>
-      <div class="small" style="margin-top:6px">IDLE → COLLECTING (manca qualcosa) → RESULT; cancel → IDLE. Il campo "ultima battuta" è la trascrizione ASR grezza: qui si controlla la precisione delle date.</div>
+      <div class="small" style="margin-top:6px">IDLE → COLLECTING (manca qualcosa) → CONFIRM (posto libero: offerta in sospeso, "yes" la prenota) oppure DONE (chiuso: prenotato / occupato / errore); cancel → IDLE. Il campo "ultima battuta" è la trascrizione ASR grezza: qui si controlla la precisione delle date.</div>
     </div>
     <div class="card" style="margin-top:14px">
       <h2>Inserisci una prenotazione</h2>

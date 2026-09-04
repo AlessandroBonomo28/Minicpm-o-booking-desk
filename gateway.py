@@ -1045,12 +1045,18 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     fsm["last_user_text"] = user_text or ""
     call = next((c for c in (calls or []) if isinstance(c, dict) and c.get("name")), None)
     if not call:
+        if fsm.get("state") == "CONFIRM":
+            # l'offerta (posto libero) resta in sospeso solo per la risposta del cliente: una battuta che non e' una
+            # richiesta ("no, thank you", chiacchiere) la chiude -> DONE (stesso schermo, nessun valore per l'estrattore)
+            fsm.update({"state": "DONE", "updated": datetime.now().isoformat(timespec="seconds"), "seq": int(fsm.get("seq") or 0) + 1})
+            _hud_db_save()
+            return fsm, True
         _hud_db_save()
         return fsm, False
     name = str(call["name"]).lower()
     args = call.get("arguments") or {}
     if name == "cancel":
-        # annulla solo una richiesta in corso; da RESULT/IDLE pulisce lo schermo senza nota (non c'e' nulla da annullare)
+        # annulla solo una richiesta in corso; da CONFIRM/DONE/IDLE pulisce lo schermo senza nota (non c'e' nulla da annullare)
         return _hud_fsm_reset(note="REQUEST CANCELLED" if fsm.get("state") == "COLLECTING" else ""), True
     if name not in ("book", "check", "check_availability"):
         _hud_db_save()
@@ -1061,9 +1067,19 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         # anche se l'estrattore dice book); per cambiare richiesta si annulla prima
         intent = fsm["intent"]
     # merge: si riparte da zero se non si stava raccogliendo; un campo si sovrascrive solo con un valore non vuoto e valido
-    slots = dict(_HUD_EMPTY_SLOTS, **(fsm.get("slots") or {})) if fsm.get("state") == "COLLECTING" else dict(_HUD_EMPTY_SLOTS)
     rejected = {}
     clean = lambda v: "" if str(v if v is not None else "").strip().lower() in ("", "none", "null", "unknown", "n/a") else str(v).strip()
+    if fsm.get("state") == "COLLECTING":
+        slots = dict(_HUD_EMPTY_SLOTS, **(fsm.get("slots") or {}))
+    elif fsm.get("state") == "CONFIRM" and not clean(args.get("month")) and not clean(args.get("date")):
+        # offerta in sospeso e nessun mese detto: "yes" / "that day" / "the 6th" / "at 3 pm" si riferiscono all'offerta ->
+        # si parte da mese, giorno (e ora se l'offerta ne aveva una) dell'offerta; cio' che viene detto sovrascrive
+        off = fsm.get("slots") or {}
+        slots = dict(_HUD_EMPTY_SLOTS, month=off.get("month", ""), day=off.get("day", ""))
+        if off.get("time") and off.get("time") != "all-day":
+            slots["time"] = off["time"]; slots["time_raw"] = off.get("time_raw") or off["time"]
+    else:
+        slots = dict(_HUD_EMPTY_SLOTS)
     # 'date' (form manuale / vecchio contratto): si spacca in mese e giorno
     if clean(args.get("date")):
         m, d = _hud_split_date(clean(args["date"]))
@@ -1118,9 +1134,12 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     else:
         res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)
     shown = dict(slots, date=date, time=tm)
-    fsm.update({"state": "RESULT", "intent": intent, "slots": shown, "missing": [], "rejected": {}, "status": res["status"],
+    # CONFIRM = verifica con posto libero: offerta in sospeso, i suoi valori sono azionabili ("yes" -> book).
+    # DONE = prenotazione fatta / slot occupato / verifica su slot occupato / errore: chiuso, niente in sospeso.
+    state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) else "DONE"
+    fsm.update({"state": state, "intent": intent, "slots": shown, "missing": [], "rejected": {}, "status": res["status"],
                 "detail": res.get("detail") or "", "note": "", "updated": now_s, "seq": int(fsm.get("seq") or 0) + 1})
-    _hud_db_save()   # da RESULT una nuova book()/check() riparte comunque da zero (merge solo in COLLECTING)
+    _hud_db_save()   # da DONE una nuova book()/check() riparte da zero; da CONFIRM eredita l'offerta se non si dice un mese
     return fsm, True
 
 

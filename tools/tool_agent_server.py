@@ -74,23 +74,24 @@ lock = threading.Lock()
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 
 
-def fsm_line(fsm, offer=False):
-    """Stato della macchina (dal gateway) reso in una riga per l'estrattore. In RESULT/IDLE NON si passano i campi:
-    una nuova richiesta riparte da zero e il modello, se li vede, li ricopia ("thank you" -> book(April 2, 15:00)).
-    In COLLECTING si dice solo COSA c'e' e COSA manca, senza i valori (mai copiabili).
-    offer=True (esperimento 05/09, idea di Alessandro): se l'ultimo esito e' una verifica con posto LIBERO, lo stato e'
-    un'OFFERTA in sospeso e porta la data offerta: 'yes' / 'that day' si risolvono da stato + domanda, senza dialogo."""
-    if offer and isinstance(fsm, dict) and fsm.get("state") == "RESULT" and fsm.get("intent") == "check" \
-            and fsm.get("status") in ("available", "partial"):
+def fsm_line(fsm):
+    """Stato della macchina (dal gateway) reso in una riga per l'estrattore.
+    CONFIRM: verifica con posto LIBERO in sospeso -> lo stato porta la data offerta: 'yes' / 'that day' si risolvono da
+    stato + domanda, senza righe di dialogo (idea di Alessandro, misurata 15/20 contro 13/20 del dialogo).
+    COLLECTING: solo i NOMI dei campi raccolti e mancanti, mai i valori (copiabili).
+    DONE/IDLE: nessun valore: una nuova richiesta riparte da zero (il "thank you" -> book(April 2, 15:00) veniva da qui)."""
+    if not isinstance(fsm, dict):
+        return "STATE: no request in progress."
+    if fsm.get("state") == "CONFIRM":
         sl = fsm.get("slots") or {}
         when = f"{str(sl.get('month', '')).capitalize()} {sl.get('day', '')}"
         if sl.get("time") and sl.get("time") != "all-day":
             when += f" at {sl['time']}"
         return (f"STATE: OFFER PENDING. The desk just checked {when} and it is FREE (not booked yet). "
                 f"If the customer accepts ('yes', 'ok', 'sure', 'book it', 'that day', 'the same day') -> intent=book with that month and day "
-                f"(and time if it was part of the offer or is said now). If they ask about another date -> use only what they say. "
-                f"If they decline, thank or chat -> intent=none, all null.")
-    if not isinstance(fsm, dict) or fsm.get("state") != "COLLECTING":
+                f"(and time if it was part of the offer or is said now). A QUESTION about another date/time ('and the day after?', "
+                f"'what about the 6th?') -> intent=check with only what they say. If they decline, thank or chat -> intent=none, all null.")
+    if fsm.get("state") != "COLLECTING":
         return "STATE: no request in progress."
     sl = fsm.get("slots") or {}
     got = [k for k in ("month", "day", "time") if sl.get(k)]
@@ -121,13 +122,12 @@ def decide(transcript, tools, fsm=None, context=0):
     last_user_idx = max(i for i, (r, _) in enumerate(lines) if r == "user")
     convo = f"NOW USER: {lines[last_user_idx][1]}"
     system = SYSTEM
-    offer = context == "state"
     if context and context != "state" and last_user_idx > 0:
         prev = lines[max(0, last_user_idx - int(context)):last_user_idx]
         convo = "\n".join(f"{'OPERATOR' if r == 'assistant' else 'USER'}: {x}" for r, x in prev) + "\n" + convo
         system = SYSTEM + CONTEXT_RULES
     messages = [{"role": "system", "content": system},
-                {"role": "user", "content": f"{fsm_line(fsm, offer=offer)}\n\n{convo}\n\nCall request() about the NOW line."}]
+                {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall request() about the NOW line."}]
     prompt = tok.apply_chat_template(messages, tools=tools, add_generation_prompt=True, tokenize=False, enable_thinking=False)
     with lock:
         ids = tok(prompt, return_tensors="pt").to(model.device)
@@ -207,7 +207,7 @@ class H(BaseHTTPRequestHandler):
                     # contesto SOLO con un'offerta in sospeso (ultimo esito: verifica con posto libero): li' 'yes'/'that day'
                     # devono prendere la data dall'offerta; in ogni altro stato il contesto e' solo una fonte di copie
                     f = req.get("fsm") or {}
-                    ctxmode = 3 if (f.get("state") == "RESULT" and f.get("intent") == "check" and f.get("status") in ("available", "partial")) else 0
+                    ctxmode = 3 if f.get("state") == "CONFIRM" else 0
                 res = decide(transcript, req.get("tools") or DEFAULT_TOOLS, req.get("fsm"), ctxmode if ctxmode == "state" else int(ctxmode))
             res["user_text"] = user_text; res["asr_s"] = asr_s; res["llm_s"] = round(time.time() - t_llm, 2); res["total_s"] = round(time.time() - t_all, 2)
             self._send(200, json.dumps(res, ensure_ascii=False).encode())

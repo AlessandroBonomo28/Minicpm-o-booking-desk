@@ -10,8 +10,8 @@ import argparse, json, sys, time, urllib.request, ssl
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from tool_agent_eval import IDLE, COLL, norm
 
-RES_CHECK = lambda m, d: {"state": "RESULT", "intent": "check", "status": "available", "slots": {"month": m, "day": d, "time": "all-day"}}
-RES_BOOK = lambda m, d, t: {"state": "RESULT", "intent": "book", "status": "confirmed", "slots": {"month": m, "day": d, "time": t}}
+RES_CHECK = lambda m, d: {"state": "CONFIRM", "intent": "check", "status": "available", "slots": {"month": m, "day": d, "time": "all-day"}}
+RES_BOOK = lambda m, d, t: {"state": "DONE", "intent": "book", "status": "confirmed", "slots": {"month": m, "day": d, "time": t}}
 A = lambda x: {"role": "assistant", "text": x}
 U = lambda x: {"role": "user", "text": x}
 
@@ -34,8 +34,9 @@ CASES = [
      ("book", {"month": "april", "day": "4", "time": "15:00"}), ()),
     (RES_CHECK("april", "4"), [A("April 4th is available all day. Would you like to book?"), U("And the day after?")],
      ("check", {"month": "april", "day": "5"}), ()),
+    # in CONFIRM la FSM eredita il mese dell'offerta se non se ne dice un altro: basta il giorno
     (RES_CHECK("april", "4"), [A("April 4th is available all day. Would you like to book?"), U("No, the 6th.")],
-     ("check", {"month": "april", "day": "6"}), ()),
+     ("check", {"day": "6"}), ()),
     # --- rifiuto dell'offerta
     (RES_CHECK("april", "4"), [A("April 4th is available all day. Would you like to book?"), U("No, thank you.")], None, ()),
     (RES_CHECK("april", "4"), [A("April 4th is available all day. Would you like to book?"), U("Not now, thanks.")], None, ()),
@@ -89,7 +90,5 @@ if __name__ == "__main__":
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args()
     url = "https://127.0.0.1:8006/api/tool_agent/decide"
-    print("== SENZA contesto (solo la battuta corrente)"); run(url, 0, a.verbose)
-    print("== CON contesto (ultime 3 righe, operatore compreso)"); run(url, 3, a.verbose)
-    print("== contesto AUTO (solo con un'offerta in sospeso: ultimo esito = verifica con posto libero)"); run(url, "auto", a.verbose)
-    print("== OFFERTA NELLO STATO (nessuna riga di dialogo: la riga di stato porta la data offerta)"); run(url, "state", a.verbose)
+    print("== CONTRATTO ATTUALE: stato (CONFIRM porta l'offerta) + frase, nessuna riga di dialogo"); run(url, 0, a.verbose)
+    print("== confronto: in piu' le ultime 3 righe di dialogo (operatore compreso)"); run(url, 3, a.verbose)

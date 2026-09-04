@@ -32,17 +32,18 @@ const hudLog = (cls, t) => logTo($('hudLog'), cls, t);
 const IDLE_FSM = () => ({ state: 'IDLE', intent: null, slots: { month: '', day: '', time: '', date: '' }, missing: [], status: null, detail: '', note: '' });
 const hud = {
     fsm: IDLE_FSM(),
-    screen: 'IDLE',         // IDLE | COLLECTING | CHECKING | RESULT  (CHECKING: solo lato pagina, con ritardo simulato > 0)
+    screen: 'IDLE',         // IDLE | COLLECTING | CHECKING | CONFIRM | DONE  (CHECKING: solo lato pagina, con ritardo simulato > 0)
     lastHash: null,
     pendingFrame: null,     // base64 JPEG da allegare al prossimo chunk
     framesSent: 0,
     lastFrameAt: null,      // per misurare la reazione
     fingerprint() {
         const f = this.fsm;
+        // impronta = quello che si VEDE (CONFIRM -> DONE non cambia i pixel: nessun frame nuovo);
         // un valore respinto e' un evento: entra nell'impronta con il numero di sequenza, cosi' produce un frame anche se
         // lo schermo e' uguale a prima (il frame e' il clock: "April" due volte -> due frame)
         const rej = Object.keys(f.rejected || {}).length ? `|rej${f.seq || 0}:${JSON.stringify(f.rejected)}` : '';
-        return `${this.screen}|${f.intent}|${f.slots.month || ''}|${f.slots.day || ''}|${f.slots.time}|${(f.missing || []).join(',')}|${f.status}|${f.detail}|${f.note}${rej}`;
+        return JSON.stringify(themeFor()) + rej;
     },
 };
 const canvas = $('hud'), ctx = canvas.getContext('2d');
@@ -67,7 +68,8 @@ function themeFor() {
         }
         case 'CHECKING':
             return { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: slotLine(f), line2: 'please wait', line3: '' };
-        case 'RESULT': {
+        case 'CONFIRM':
+        case 'DONE': {
             const s = f.status, d = (f.detail || '').toUpperCase();
             if (s === 'error') return { bg: '#b71c1c', fg: '#ffffff', title: 'ERROR / TIMEOUT', line1: slotLine(f), line2: f.intent === 'book' ? 'request failed' : 'check failed', line3: '' };
             if (f.intent === 'book') {
@@ -108,7 +110,7 @@ function hudSync(force = false) {
 /** Etichetta per db.html (pill): IDLE / COLLECTING / CHECKING / OK / PARTIAL / NO / ERR. */
 function screenLabel() {
     const f = hud.fsm;
-    if (hud.screen !== 'RESULT') return hud.screen;
+    if (hud.screen !== 'CONFIRM' && hud.screen !== 'DONE') return hud.screen;
     if (f.status === 'error') return 'ERR';
     if (f.status === 'available' || f.status === 'confirmed') return 'OK';
     if (f.status === 'partial') return 'PARTIAL';
@@ -128,9 +130,9 @@ function applyFsm(fsm, delay = 0) {
     fsm = Object.assign(IDLE_FSM(), fsm || {}); fsm.slots = Object.assign({ month: '', day: '', time: '', date: '' }, fsm.slots || {});
     const changed = JSON.stringify(fsm) !== JSON.stringify(hud.fsm);
     hud.fsm = fsm;
-    if (fsm.state === 'RESULT' && delay > 0 && changed) {
+    if ((fsm.state === 'CONFIRM' || fsm.state === 'DONE') && delay > 0 && changed && hud.screen !== 'CONFIRM' && hud.screen !== 'DONE') {
         hud.screen = 'CHECKING'; syncScreen();
-        queryTimer = setTimeout(() => { hud.screen = 'RESULT'; syncScreen(); hudLog('sys', `esito mostrato dopo ${delay}s: ${fsm.status}${fsm.detail ? ' (' + fsm.detail + ')' : ''}`); }, delay * 1000);
+        queryTimer = setTimeout(() => { hud.screen = fsm.state; syncScreen(); hudLog('sys', `esito mostrato dopo ${delay}s: ${fsm.status}${fsm.detail ? ' (' + fsm.detail + ')' : ''}`); }, delay * 1000);
     } else {
         hud.screen = fsm.state; syncScreen();
     }

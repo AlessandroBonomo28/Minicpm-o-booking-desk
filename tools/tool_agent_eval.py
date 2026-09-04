@@ -18,7 +18,7 @@ def COLL(intent, month="", day="", time_="", missing=None):
         req = ["month", "day"] + (["time"] if intent == "book" else [])
         missing = [k for k in req if not slots[k]]
     return {"state": "COLLECTING", "intent": intent, "slots": slots, "missing": missing}
-RES = {"state": "RESULT", "intent": "book", "status": "confirmed", "slots": {"month": "may", "day": "25", "time": "15:00"}}
+RES = {"state": "DONE", "intent": "book", "status": "confirmed", "slots": {"month": "may", "day": "25", "time": "15:00"}}
 
 # (stato, frase, atteso, vietati)
 CASES = [

@@ -1129,14 +1129,26 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         _hud_db_save()
         return fsm, True
     date = slots["date"]; tm = _hud_norm_time(slots.get("time"))
+    said_fields = any(clean(args.get(k)) for k in ("date", "month", "day", "time"))
     if intent == "check":
         res = _hud_exec_check(date, tm, outcome or "auto", source, delay_s)
-    else:
+    elif fsm.get("state") == "CONFIRM" and not said_fields:
+        # "yes" sullo schermo di conferma (offerta di una verifica o prenotazione in sospeso): ora si scrive
         res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)
+    else:
+        # prenotazione completa: NON si scrive ancora. Si verifica lo slot e, se libero, si chiede conferma
+        # (schermo "WAIT FOR USER CONFIRMATION / BOOKING FOR ...?"): e' li' che un mese/giorno capito male si becca a voce.
+        found, detail = ("error", "") if outcome == "err" else (("available", "") if outcome == "ok" else (("booked", _hud_time_label(tm)) if outcome == "no" else _hud_lookup(date, tm)))
+        if found == "available":
+            res = {"status": "pending", "detail": ""}
+        elif found == "error":
+            res = {"status": "error", "detail": ""}
+        else:
+            res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)   # registra il tentativo: taken
     shown = dict(slots, date=date, time=tm)
     # CONFIRM = verifica con posto libero: offerta in sospeso, i suoi valori sono azionabili ("yes" -> book).
     # DONE = prenotazione fatta / slot occupato / verifica su slot occupato / errore: chiuso, niente in sospeso.
-    state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) else "DONE"
+    state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] == "pending" else "DONE"
     fsm.update({"state": state, "intent": intent, "slots": shown, "missing": [], "rejected": {}, "status": res["status"],
                 "detail": res.get("detail") or "", "note": "", "updated": now_s, "seq": int(fsm.get("seq") or 0) + 1})
     _hud_db_save()   # da DONE una nuova book()/check() riparte da zero; da CONFIRM eredita l'offerta se non si dice un mese

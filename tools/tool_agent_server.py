@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import threading
@@ -28,45 +29,31 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL_DIR = "/home/alex/progetti/MiniCPM-o-Demo/modelli/Qwen3-1.7B"
 
+# Contratto nello SCHEMA, prompt minimo, valori VERBATIM (come Rasa: "extract slot values exactly as provided by the user,
+# avoid assumptions or format changes"): le conversioni (ore a parole, ordinali) le fa il gateway, in codice.
 DEFAULT_TOOLS = [
     {"type": "function", "function": {
         "name": "request",
-        "description": "Classify what the CUSTOMER just said (the NOW line) and extract the month, the day of the month and the time they said in it. Each field is independent: fill only the ones actually said.",
+        "description": "What the customer's last sentence asks the booking desk to do, and the month / day / time words it contains.",
         "parameters": {"type": "object", "properties": {
-            "intent": {"type": "string", "enum": ["book", "check", "cancel", "none"],
-                       "description": "check = a QUESTION about availability, no reservation asked ('is X available?', 'is X free?', "
-                                      "'do you have anything on X?', 'any slot on X?'); "
-                                      "book = an explicit request to reserve ('I'd like to book', 'book it', 'reserve', 'make an appointment'); "
-                                      "when STATE says a request is IN PROGRESS and the customer just gives a month, a day or a time, "
-                                      "use the intent of the request in progress (book or check); "
-                                      "cancel = gives up the request in progress ('never mind', 'forget it', 'cancel that', 'stop'); "
-                                      "none = anything else (chat, thanks, greetings)."},
-            "month": {"type": ["string", "null"], "description": "the month name the customer said in the NOW line ('April'); null if no month was said"},
-            "day": {"type": ["integer", "null"], "description": "the day of the month the customer said in the NOW line, as a number (1-31): 'the 2nd' -> 2, 'the twentieth' -> 20, 'April 2nd' -> 2; null if no day was said"},
-            "time": {"type": ["string", "null"], "description": "the time the customer said in the NOW line, as 24h HH:MM; null if they did not say a time"}},
+            "intent": {"type": "string", "enum": ["none", "check", "book", "cancel"],
+                       "description": "none = default: greetings, thanks, hesitation, thinking aloud, anything that is not a request; "
+                                      "check = asks whether a date or time is free/available (a question, no reservation); "
+                                      "book = asks to reserve / make an appointment, or gives a month/day/time while a request is in progress; "
+                                      "cancel = gives up the request in progress ('never mind', 'forget it', 'cancel')."},
+            "month": {"type": ["string", "null"], "description": "the month NAME the customer said, exactly as said (e.g. 'April'); null if no month name was said. Numbers are never a month."},
+            "day": {"type": ["string", "null"], "description": "the day of the month the customer said, exactly as said (e.g. '2nd', 'the second', 'twenty-first', '30'); null if no day was said."},
+            "time": {"type": ["string", "null"], "description": "the time the customer said, exactly as said (e.g. '3 pm', 'half past ten', 'nine thirty', '15'); null if no time was said."}},
             "required": ["intent", "month", "day", "time"]}}},
 ]
 
-SYSTEM = ("You are the action extractor for a booking desk. You see ONE sentence the CUSTOMER just said (the NOW line) and the "
-          "STATE of the booking system. Always call the function `request` exactly once, about that sentence.\n"
-          "A question about whether a date/time is free is a check, NOT a booking: book only when the customer asks to reserve.\n"
-          "month, day, time are INDEPENDENT fields: fill each one ONLY if the customer said it in this sentence, otherwise null. "
-          "The customer may give them in any order and any combination ('April' alone -> month only; 'the 2nd' alone -> day only; "
-          "'at 3 pm' alone -> time only; 'April 2nd at 3 pm' -> all three). Never guess, never fill from the STATE, never invent: "
-          "a day without a month has month=null, a month without a day has day=null. A day is a number or an ordinal "
-          "('25', 'the 3rd', 'third', 'the twentieth'); a month is ONLY an explicit month name (January...December). "
-          "Never turn an ordinal or a number into a month: 'third' -> day 3, month=null; '25' -> day 25, month=null.\n"
-          "If a request is IN PROGRESS (see STATE) and the customer answers with a month, a day or a time, keep the intent in progress "
-          "(book stays book, check stays check) with just the fields said. A bare number as the whole answer, in digits or in words: "
-          "if STATE says the day is missing it is the day ('30' -> day 30, 'the twentieth' -> day 20); if STATE says the time is "
-          "missing it is the hour ('15' -> 15:00, 'nine' -> 09:00, 'nine thirty' -> 09:30).\n"
-          "cancel only while a request is in progress; after a finished request, 'thanks'/'bye' is intent=none.\n"
-          "TIME RULES (24h HH:MM, convert spoken English): 'half past ten' -> 10:30; 'quarter past nine' -> 09:15; 'quarter to six' -> 05:45; "
-          "'ten thirty' -> 10:30; '3 pm' / 'three in the afternoon' -> 15:00; '8 in the evening' -> 20:00; 'noon' -> 12:00; '9 am' -> 09:00; "
-          "'at 15' -> 15:00; '5:20 pm' -> 17:20.\n"
-          "DATE EXPRESSIONS: 'the second of April' -> month April, day 2; 'March thirty-first' -> month March, day 31; "
-          "'the twenty-first of May' -> month May, day 21; 'book for May' / 'something in June' -> month only; "
-          "'tomorrow' / 'next Monday' -> month=null, day=null (the system will ask for a calendar date).")
+SYSTEM = ("You are the booking desk's request extractor. Read STATE and the customer's last sentence, then call `request` once.\n"
+          "Copy month, day and time words exactly as the customer said them in this sentence; null when not said. Never guess.\n"
+          "If STATE says a request is in progress, a bare number or a bare date/time word is the answer to what is still missing "
+          "(day if the day is missing, otherwise time), with the same intent as the request in progress.\n"
+          "If nothing is requested, intent is none."
+          + ("\nA number or an ordinal ('25', 'the 3rd', 'third', 'twentieth') is a day or a time, never a month; month is only a month name."
+             if os.environ.get("TA_ORDINAL_RULE") == "1" else ""))
 
 tok = None
 model = None

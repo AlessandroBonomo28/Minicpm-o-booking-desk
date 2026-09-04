@@ -91,13 +91,20 @@ CASES = [
 MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
 
 
+import re as _re
+_g = open(__file__.rsplit("/", 2)[0] + "/gateway.py").read(); _ns = {"re": _re}
+exec(_g[_g.index("_MONTHS = ["):_g.index("def _hud_time_span")], _ns)   # normalizzatori del gateway (data, giorno, ora)
+
+
 def norm(k, v):
+    """Confronto sui valori NORMALIZZATI come li vede la FSM: l'estrattore copia le parole, il gateway le converte."""
     v = str(v).strip().lower()
     if k == "month":
-        return v
+        return _ns["_hud_norm_date"](v)
     if k == "day":
-        return v.lstrip("0")
-    return v
+        d = _ns["_hud_words_to_digits"](_re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", v)).replace("the ", "").strip()
+        return d.lstrip("0")
+    return _ns["_hud_norm_time"](v)
 
 
 def run(url, verbose):
@@ -109,7 +116,22 @@ def run(url, verbose):
         r = urllib.request.urlopen(urllib.request.Request(url, data=body, headers={"content-type": "application/json"}), timeout=60, context=ctx)
         d = json.loads(r.read()); t_all.append(time.time() - t0)
         calls = d.get("tool_calls") or []
-        got = (calls[0]["name"], calls[0].get("arguments") or {}) if calls else None
+        got = (calls[0]["name"], dict(calls[0].get("arguments") or {})) if calls else None
+        if got and got[1].get("day") and got[1].get("time"):
+            # come la FSM: un solo numero nella battuta non e' insieme giorno e ora
+            nums = _re.findall(r"\d+", _ns["_hud_words_to_digits"](_re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", _re.sub(r"[^\w\s-]", " ", text.lower()))))
+            if len(nums) == 1:
+                if (st.get("slots") or {}).get("day"): got[1].pop("day")
+                else: got[1].pop("time")
+        if got and got[1].get("month"):
+            # come la FSM: un numero/ordinale nel campo mese e' la risposta alla domanda corrente (giorno, poi ora)
+            mv = norm("day", got[1]["month"])
+            if mv.isdigit():
+                slots = st.get("slots") or {}
+                if got[1].get("day") and norm("day", got[1]["day"]) == mv: got[1].pop("month")   # stesso numero gia' nel giorno
+                elif not got[1].get("day") and not slots.get("day") and 1 <= int(mv) <= 31: got[1]["day"] = mv; got[1].pop("month")
+                elif not got[1].get("time") and not slots.get("time"): got[1]["time"] = mv; got[1].pop("month")
+                else: got[1].pop("month")
         passed = False
         if exp is None:
             passed = got is None

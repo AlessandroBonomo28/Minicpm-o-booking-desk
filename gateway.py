@@ -835,15 +835,33 @@ _ALL_DAY = {"", "all day", "allday", "all-day", "whole day", "tutto il giorno", 
 
 
 def _hud_parse_clock(t: str):
-    """'3 pm' / '15' / '3:00' / '10.30' -> minuti dalla mezzanotte (None se non e' un orario).
-    Sportello: un'ora 1-7 senza am/pm si intende pomeridiana (3 -> 15:00)."""
-    t = t.strip().lower().replace(".", ":")
-    m = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm|h)?$", t)
-    if not m:
-        return None
-    h = int(m.group(1)); mi = int(m.group(2) or 0); ap = m.group(3)
-    if h > 24 or mi > 59:
-        return None
+    """Orario parlato -> minuti dalla mezzanotte (None se non e' un orario). Accetta cifre e parole:
+    '3 pm', '15', '3:00', '10.30', 'nine', 'nine thirty', 'half past ten', 'quarter past nine', 'quarter to six',
+    'three in the afternoon', '8 in the evening', 'noon', 'ten o'clock'. Sportello: 1-7 senza am/pm = pomeriggio."""
+    t = t.strip().lower().replace(".", ":").replace("o'clock", "").replace("oclock", "")
+    t = re.sub(r"^(at|alle|ore)\s+", "", t).strip()
+    if t in ("noon", "midday"): return 12 * 60
+    if t == "midnight": return 0
+    ap = None
+    m = re.search(r"(am|pm|a\.m|p\.m)\b", t)
+    if m: ap = m.group(1)[0] + "m"; t = t.replace(m.group(1), "").strip()
+    if re.search(r"\b(afternoon|evening|night)\b", t): ap = "pm"
+    elif re.search(r"\bmorning\b", t): ap = "am"
+    t = re.sub(r"\b(in the|the)\s+(morning|afternoon|evening|night)\b", "", t).strip()
+    h = mi = None
+    m = re.match(r"^(half|quarter)\s+(past|to)\s+(.+)$", t)
+    if m:
+        base = _hud_words_to_digits(m.group(3)).strip()
+        if not re.fullmatch(r"\d{1,2}", base): return None
+        h = int(base); delta = 30 if m.group(1) == "half" else 15
+        if m.group(2) == "past": mi = delta
+        else: h -= 1; mi = 60 - delta
+    else:
+        t = _hud_words_to_digits(t)
+        m = re.match(r"^(\d{1,2})(?:[: ](\d{1,2}))?\s*h?$", t.strip())
+        if not m: return None
+        h = int(m.group(1)); mi = int(m.group(2) or 0)
+    if h > 24 or mi > 59: return None
     if ap == "pm" and h < 12: h += 12
     elif ap == "am" and h == 12: h = 0
     elif ap is None and 1 <= h <= 7: h += 12
@@ -857,10 +875,6 @@ def _hud_norm_time(x: str) -> str:
     if t in _ALL_DAY:
         return "all-day"
     t = re.sub(r"^(at|alle|ore)\s+", "", t)
-    if re.search(r"[a-z]", t.replace("am", "").replace("pm", "")):
-        # solo con parole ('nine', 'nine thirty'): la conversione toglie i trattini e rovinerebbe '3-17'
-        t = _hud_words_to_digits(t)
-        t = re.sub(r"^(\d{1,2}) (\d{2})(\s*(am|pm))?$", r"\1:\2\3", t)   # '9 30' -> '9:30'
     parts = re.split(r"\s*(?:-|–|to|a|alle)\s*", t)
     if len(parts) == 2:
         a, b = _hud_parse_clock(parts[0]), _hud_parse_clock(parts[1])
@@ -1103,6 +1117,14 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         if want_time and _hud_time_valid(_hud_norm_time(n), intent):
             slots["time"] = n; slots["time_raw"] = n; return True
         return False
+    # un solo numero nella battuta non puo' essere insieme giorno E ora ("the 2nd" -> day='the 2nd', time='2'):
+    # resta il campo che lo schermo sta chiedendo (giorno se manca, altrimenti ora)
+    if user_text and clean(args.get("day")) and clean(args.get("time")):
+        nums = re.findall(r"\d+", _hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", re.sub(r"[^\w\s-]", " ", user_text.lower()))))
+        if len(nums) == 1:
+            args = dict(args)
+            if slots.get("day") or "day" not in _HUD_REQUIRED[intent]: args["day"] = None
+            else: args["time"] = None
     if clean(args.get("month")):
         m = _hud_norm_date(clean(args["month"]))
         if m in _MONTHS: slots["month"] = m

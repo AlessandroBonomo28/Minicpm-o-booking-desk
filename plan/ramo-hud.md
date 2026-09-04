@@ -490,3 +490,20 @@ e "yes" come intenti anche senza richiesta: se pesa nei test dal vivo, si misura
 - Test a variabile singola (da fare): 6 min, tre "What's your name?" a 60, 200, 330 s, finestra basic vs off. Se con off
   risponde a 330 e con basic no → sono i tagli; se non risponde in nessuno → è il prompt → riga "answer the customer
   whenever they talk to you; the screen is only the booking system".
+
+## 05/09 — Prompt dell'estrattore ridotto all'essenziale (contratto nello schema, valori verbatim)
+Ricerca: la doc Qwen mette la specifica nello schema (descrizioni, enum, required), non nel system prompt, e per i casi
+ostinati indica il fine-tuning; Rasa (task-oriented in produzione) fa stato + ultimo messaggio → comandi e impone
+"estrai i valori esattamente come detti, niente conversioni": la normalizzazione la fa il codice. Benchmark
+indipendente: Qwen3 1,7B (0,67) sotto 0,6B e 4B (0,88) sul tool calling; confronto on-device 2026: 4B/Gemma4/Phi-4-mini
+high-80 su BFCL, tutti >95% dopo QLoRA con 600 esempi.
+Applicato: system prompt di 4 righe; regole nelle descrizioni dei campi; month/day/time copiati come detti (il gateway
+converte: 'half past ten', 'quarter to six', 'three in the afternoon', 'noon', '9pm', ordinali); `none` = default.
+Due regole in più nella FSM (deterministiche): un numero/ordinale finito in `month` va al campo che lo schermo chiede;
+un solo numero nella battuta non è insieme giorno e ora. La regressione applica le stesse regole (punteggio effettivo).
+| prompt | base 55 | dialogo 20 | note |
+|---|---|---|---|
+| lungo (regole nel testo) | 55 | 15 | falsi positivi: "let me think", "yes" dopo conferma |
+| **minimo** | **52** | **17** | spariti "let me think" → none e "yes" dopo conferma → none; persi: "the second of April" (day='of'), "tomorrow at 9" (mese 'Tomorrow' respinto → chiede il mese), "Um…" → book vuoto in raccolta (nessun effetto) |
+| minimo + riga ordinali | 52 | 17 | nessuna differenza: la riga non serve, la FSM instrada |
+Adottato il minimo. L'aritmetica ("next day") resta fuori con l'1,7B. Rumore di misura ±1 caso (GPU non deterministica).

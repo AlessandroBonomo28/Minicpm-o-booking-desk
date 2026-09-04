@@ -327,3 +327,7 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   tavolino con curl e con testi scritti. Scoperta strutturale: con tre strumenti separati il 1,7B riempie i campi a
   forza; con UN solo strumento `request(intent, date|null, time|null)` e SOLO le righe dell'utente in ingresso
   smette (dettagli e limiti in `plan/ramo-hud.md`). Gate: test dal vivo D8-D11 di Alessandro (cuffie).
+- 04/09 (16:00) — **P2 passata dal vivo**: l'omni chiede data e ora seguendo MISSING sullo schermo e annuncia
+  l'esito. Difetto a valle ("the second of April" non canonicalizzato → CONFIRMED falso) corretto alla radice:
+  FSM accetta solo campi validi (altrimenti richiede), estrattore emette "Month D", normalizzatore con numeri a
+  parole. S1-mini valutato e rimandato (motivi in plan/ramo-hud.md). DB azzerato per le prove pulite.

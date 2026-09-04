@@ -83,6 +83,7 @@ async function refresh() {
     $('fsm').innerHTML = [['stato', `<span class="pill ${esc(f.state || 'IDLE')}">${esc(f.state || 'IDLE')}</span>`], ['intento', esc(f.intent || '—')],
       ['data', esc(sl.date || '—')], ['ora', esc(sl.time_raw || sl.time || '—')], ['manca', esc((f.missing || []).join(', ') || '—')],
       ['esito', f.status ? `<span class="pill ${esc(f.status)}">${labelStatus[f.status] || esc(f.status)}</span> ${esc(f.detail || '')}` : '—'],
+      ['non capito', Object.keys(f.rejected || {}).length ? esc(Object.entries(f.rejected).map(([k, v]) => `${k}: "${v}"`).join(', ')) : '—'],
       ['nota', esc(f.note || '—')], ['ultima battuta', esc(f.last_user_text || '—')], ['aggiornato', esc((f.updated || '').slice(11, 19) || '—')]]
       .map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join('');
     const slots = Object.values(d.slots || {}).sort((a, b) => (b.last_check || '').localeCompare(a.last_check || ''));

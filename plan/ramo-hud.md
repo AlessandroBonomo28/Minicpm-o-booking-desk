@@ -286,3 +286,28 @@ result, tell the customer. Otherwise just talk."*
   hanno funzionato: "I'd like to book a call" → book() → MISSING date,time; "31 March" → check (frase ambigua, senza
   "book"); "the second of April" → manca time; "At 12" → book(April 2, 12:00) → SLOT TAKEN (2 aprile tutto il giorno).
   Nota ASR: "31 March", "2nd April" trascritti bene. P2 (l'omni chiede la data) resta da verificare.
+
+### 04/09 (16:00) — secondo test dal vivo: P2 PASSATA; difetto a valle sulla data "the second of April"
+- **P2 passata**: al frame `MISSING: DATE` l'omni ha chiesto la data ("What date would you like to book your appointment
+  for?"), al frame `MISSING: TIME` l'ora ("And what time on the second of April works best?"), al RESULT ha annunciato.
+  Reazioni fluide, nessun silenzio lungo (RESULT diretto, senza CHECKING: P4 confermata su questo test).
+- **Difetto**: "the second of April" → l'estrattore copiava la data com'era detta (regola "copy as spoken", mia) e il
+  normalizzatore conosceva solo i giorni in cifre → chiave `second of april 15:00` ≠ `april 2 all-day` → slot nuovo,
+  CONFIRMED falso (l'omni ha letto lo schermo: ha fatto il suo). Tre correzioni:
+  1. **Regola FSM: campo obbligatorio = valido, non solo presente.** Data che non si riduce a `month d`, ora che non si
+     riduce a `HH:MM` (o intervallo) → campo respinto (`rejected`, visibile in db.html e nel registro come NON CAPITO),
+     resta COLLECTING con MISSING → l'omni richiede. Nessuna scrittura nel DB su chiave non canonica, chiunque la produca.
+  2. **Contratto dell'estrattore: data in forma "Month D"** (come l'ora in HH:MM), mese dallo stato se detto solo il
+     giorno. Sonde: "the second of April" → April 2; "March thirty-first at half past two" → March 31, 2:30 (→ 14:30
+     per la convenzione 1-7 = pomeriggio); "the twenty-first of May" → May 21; "No, the 3rd" con aprile → **April 3**
+     (prima: March 3rd); "Tomorrow at 9" → tomorrow (respinta dalla FSM → richiede la data) + 09:00.
+  3. Normalizzatore del gateway: ordinali e numeri a parole (first…thirty-first) → cifre, per il form e per l'ASR.
+  FSM via curl: book("second of april","15") con 2 aprile occupato → **SLOT TAKEN, chiave `april 2`** ✓;
+  book("tomorrow") → COLLECTING manca date (respinta "tomorrow") ✓; time "soonish" → manca time ✓.
+- **S1-mini (Superwhisper)** valutato su richiesta di Alessandro: normalizzatore post-ASR 0,6B, solo inglese, converte
+  date/ore/numeri parlati e autocorrezioni. Non adottato ora: l'ASR non aveva sbagliato, duplica la conversione che
+  l'estrattore già fa, terzo modello in catena (+0,2-0,3 s, +1,5 GB su GPU al limite), inutile in italiano. Candidato
+  solo se il registro mostra errori sistematici sui numeri parlati dopo il contratto "Month D"; utile in
+  `transcribe_sessions.py`.
+- **DB azzerato** (slot, registro, FSM) su richiesta: le prove ripartono da zero. Prenotazioni di prova da inserire in
+  db.html prima dei test (es. April 2 all day per D9c).

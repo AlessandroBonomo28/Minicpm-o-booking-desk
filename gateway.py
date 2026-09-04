@@ -743,7 +743,7 @@ async def get_presets():
 
 # ============ Ramo HUD: stato del "gestionale" (DB simulato, sola lettura dalla pagina db.html) ============
 _HUD_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "hud_db.json")
-_HUD_FSM_IDLE: Dict[str, Any] = {"state": "IDLE", "intent": None, "slots": {"date": "", "time": ""}, "missing": [],
+_HUD_FSM_IDLE: Dict[str, Any] = {"state": "IDLE", "intent": None, "slots": {"date": "", "time": ""}, "missing": [], "rejected": {},
                                  "status": None, "detail": "", "note": "", "last_user_text": "", "updated": None}
 _HUD_DB: Dict[str, Any] = {"slots": {}, "log": [], "hud": {"state": "IDLE", "date": "", "time": "", "updated": None},
                            "fsm": dict(_HUD_FSM_IDLE, slots={"date": "", "time": ""}, missing=[])}
@@ -788,14 +788,47 @@ def _hud_db_migrate():
 _MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
 
 
+_NUM_WORDS = {w: i for i, w in enumerate(["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
+                                              "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"])}
+_NUM_WORDS.update({"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9,
+                   "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13, "fourteenth": 14, "fifteenth": 15, "sixteenth": 16,
+                   "seventeenth": 17, "eighteenth": 18, "nineteenth": 19, "twentieth": 20, "thirtieth": 30, "twenty": 20, "thirty": 30})
+
+
+def _hud_words_to_digits(t: str) -> str:
+    """'second' -> '2', 'twenty first' / 'twenty-first' -> '21' (giorni del mese a parole, per il form e per l'ASR)."""
+    out = []; toks = t.replace("-", " ").split()
+    i = 0
+    while i < len(toks):
+        w = toks[i]
+        if w in ("twenty", "thirty") and i + 1 < len(toks) and toks[i + 1] in _NUM_WORDS and 1 <= _NUM_WORDS[toks[i + 1]] <= 9:
+            out.append(str(_NUM_WORDS[w] + _NUM_WORDS[toks[i + 1]])); i += 2; continue
+        out.append(str(_NUM_WORDS[w]) if w in _NUM_WORDS else w); i += 1
+    return " ".join(out)
+
+
 def _hud_norm_date(d: str) -> str:
-    """'March 31st' / '31 march' / 'march 31' -> 'march 31'; altro testo -> minuscolo."""
+    """'March 31st' / '31 march' / 'the second of April' / 'twenty-first of may' -> 'march 31' / 'april 2' / 'may 21';
+    altro testo -> minuscolo (NON valido come chiave: vedi _hud_date_valid)."""
     t = re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", str(d or "").strip().lower())
     t = re.sub(r"[,.]", " ", t); t = re.sub(r"\s+", " ", t).strip()
+    t = _hud_words_to_digits(t)
     m = re.search(r"\b(" + "|".join(_MONTHS) + r")\b", t); n = re.search(r"\b(\d{1,2})\b", t)
-    if m and n:
+    if m and n and 1 <= int(n.group(1)) <= 31:
         return f"{m.group(1)} {int(n.group(1))}"
     return t
+
+
+def _hud_date_valid(norm: str) -> bool:
+    """Chiave canonica 'month d': solo questa puo' entrare nel DB."""
+    return re.fullmatch(r"(" + "|".join(_MONTHS) + r") ([1-9]|[12]\d|3[01])", norm or "") is not None
+
+
+def _hud_time_valid(norm: str, intent: str) -> bool:
+    """'HH:MM' o 'HH:MM-HH:MM'; 'all-day' solo per una verifica senza ora."""
+    if norm == "all-day":
+        return intent == "check"
+    return re.fullmatch(r"\d{2}:\d{2}(-\d{2}:\d{2})?", norm or "") is not None
 
 
 _ALL_DAY = {"", "all day", "allday", "all-day", "whole day", "tutto il giorno", "giornata", "day"}
@@ -978,7 +1011,7 @@ _HUD_REQUIRED = {"check": ["date"], "book": ["date", "time"]}
 
 
 def _hud_fsm_reset(note: str = ""):
-    _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots={"date": "", "time": ""}, missing=[], note=note,
+    _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots={"date": "", "time": ""}, missing=[], rejected={}, note=note,
                           updated=datetime.now().isoformat(timespec="seconds"))
     _hud_db_save()
     return _HUD_DB["fsm"]
@@ -1009,10 +1042,19 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
             slots[k] = v
             if k == "time":
                 slots["time_raw"] = v
+    # un campo vale solo se si riduce alla forma canonica: altrimenti e' "non capito" e resta mancante (si richiede)
+    rejected = {}
+    if slots.get("date") and not _hud_date_valid(_hud_norm_date(slots["date"])):
+        rejected["date"] = slots["date"]; slots["date"] = ""
+    if slots.get("time") and not _hud_time_valid(_hud_norm_time(slots["time"]), intent):
+        rejected["time"] = slots["time"]; slots["time"] = ""; slots["time_raw"] = ""
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
+    if "time" in rejected and "time" not in missing:
+        missing.append("time")   # verifica con un'ora detta ma non capita: si richiede l'ora, non si assume la giornata
     now_s = datetime.now().isoformat(timespec="seconds")
     if missing:
-        fsm.update({"state": "COLLECTING", "intent": intent, "slots": slots, "missing": missing, "status": None, "detail": "", "note": "", "updated": now_s})
+        fsm.update({"state": "COLLECTING", "intent": intent, "slots": slots, "missing": missing, "rejected": rejected,
+                    "status": None, "detail": "", "note": "", "updated": now_s})
         _hud_db_save()
         return fsm, True
     date = _hud_norm_date(slots["date"]); tm = _hud_norm_time(slots.get("time"))
@@ -1021,8 +1063,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     else:
         res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)
     shown = dict(slots, date=date, time=tm)
-    fsm.update({"state": "RESULT", "intent": intent, "slots": shown, "missing": [], "status": res["status"], "detail": res.get("detail") or "",
-                "note": "", "updated": now_s})
+    fsm.update({"state": "RESULT", "intent": intent, "slots": shown, "missing": [], "rejected": {}, "status": res["status"],
+                "detail": res.get("detail") or "", "note": "", "updated": now_s})
     _hud_db_save()   # da RESULT una nuova book()/check() riparte comunque da zero (merge solo in COLLECTING)
 
     return fsm, True

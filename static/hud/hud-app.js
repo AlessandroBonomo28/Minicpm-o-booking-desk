@@ -137,7 +137,8 @@ async function fsmEvent(toolCalls, userText, source) {
     if (!r.ok) { hudLog('warn', 'FSM: ' + (d.error || r.status)); return null; }
     const f = d.fsm;
     hudLog(d.changed ? 'hud' : 'sys', `FSM → ${f.state}${f.intent ? ' ' + f.intent : ''} ${f.slots.date || ''} ${f.slots.time || ''}` +
-        ((f.missing || []).length ? ' · manca ' + f.missing.join(', ') : '') + (f.status ? ' · ' + f.status : '') + (f.detail ? ' (' + f.detail + ')' : '') + (f.note ? ' · ' + f.note : '') + (d.changed ? '' : ' · invariato'));
+        ((f.missing || []).length ? ' · manca ' + f.missing.join(', ') : '') +
+        (Object.keys(f.rejected || {}).length ? ' · NON CAPITO ' + Object.entries(f.rejected).map(([k, v]) => `${k}="${v}"`).join(' ') : '') + (f.status ? ' · ' + f.status : '') + (f.detail ? ' (' + f.detail + ')' : '') + (f.note ? ' · ' + f.note : '') + (d.changed ? '' : ' · invariato'));
     applyFsm(f, delay);
     return f;
 }

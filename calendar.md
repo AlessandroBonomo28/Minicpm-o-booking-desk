@@ -331,3 +331,6 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   l'esito. Difetto a valle ("the second of April" non canonicalizzato → CONFIRMED falso) corretto alla radice:
   FSM accetta solo campi validi (altrimenti richiede), estrattore emette "Month D", normalizzatore con numeri a
   parole. S1-mini valutato e rimandato (motivi in plan/ramo-hud.md). DB azzerato per le prove pulite.
+- 04/09 (17:30) — **Contesto misurato** (~18 tok/s, 3.5k in 3 min) e **finestra scorrevole duplex accesa per
+  sessione** (upstream l'aveva a off; 8k era solo l'auto-stop del client). Pannello HUD mostra KV e scorrimenti.
+  Prossimo: basic vs off a variabile singola, poi soglie più basse se il degrado del minuto 2-3 resta.

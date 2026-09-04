@@ -348,3 +348,22 @@ result, tell the customer. Otherwise just talk."*
 - Regola per i numeri secchi: manca il giorno → è il giorno (mese dallo stato); manca l'ora → è l'ora.
 - L'omni ha letto AVAILABLE e detto "March thirty-fifth … fifteen hundred hours available": lo schermo diceva
   MARCH 30 15:00; errore di lettura/pronuncia suo, da osservare se si ripete.
+
+## 04/09 (17:30) — Crescita del contesto: misura e finestra scorrevole
+- **Misura** (sess_0f7d80434c4b, 3 min): KV 140 → 3.528 token, ~18-19 token/s (10 audio in + 3-4 controllo + ~1,5
+  testo generato + 64 per frame; 10 frame = 640 = 18%). I token vocali in uscita NON stanno nella KV del LLM.
+- **Stato di fatto**: la finestra scorrevole duplex upstream (basic 4000/3500 o context 24 unità + riassunto 500 token,
+  con protezione del system prompt) era **off** (nessuno passava il parametro all'init). Gli 8.192 sono una soglia del
+  client (auto-stop della pagina), non del modello (Qwen3-8B: 40.960 posizioni). Il system prompt quindi non era mai
+  tagliato: il degrado a 2-3 min (divagazioni, sbrodolamento "database systems…") è del modello con cache lunga, coerente
+  con le soglie upstream 3.500-4.000.
+- **Fatto**: `sliding_window_mode` / `_high_tokens` / `_low_tokens` nel config di prepare (`DuplexConfig`, default off =
+  comportamento upstream); `DuplexCapability.set_sliding_window()` chiamato dal processor prima di `duplex_prepare`
+  (commit separato in MiniCPMO45, con `window_stats()` e un log a ogni scorrimento); stato della finestra in
+  `metrics.window` (mode, high, low, events, dropped_tokens, dropped_units, units, preserved); pagina HUD: select
+  "Finestra KV" (default **basic 4000/3500**; "off" per il confronto) e riga live `KV: n token · finestra: … ·
+  scorrimenti k · scartati m tok`; nella conversazione una riga "FINESTRA KV: scorrimento #k" a ogni taglio.
+- **Esperimento a variabile singola** (prossimo): stesso protocollo (D8 → D9 → check → seconda prenotazione), 5 min,
+  basic contro off. Predizione: con basic il primo scorrimento arriva a ~3,5 min (4.000 token) e le divagazioni del
+  minuto 2-3 NON spariscono (arrivano prima della soglia); per vederle sparire va abbassata la soglia (es. 2500/2000),
+  variabile da provare dopo. L'omni, dimenticando l'inizio, può richiedere dati che lo schermo mostra: la FSM li tiene.

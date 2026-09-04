@@ -67,14 +67,16 @@ TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 
 
 def fsm_line(fsm):
-    """Stato della macchina (dal gateway) reso in una riga per l'estrattore."""
-    if not isinstance(fsm, dict) or fsm.get("state") not in ("COLLECTING", "RESULT"):
+    """Stato della macchina (dal gateway) reso in una riga per l'estrattore. In RESULT/IDLE NON si passano i campi:
+    una nuova richiesta riparte da zero e il modello, se li vede, li ricopia ("thank you" -> book(April 2, 15:00))."""
+    if not isinstance(fsm, dict) or fsm.get("state") != "COLLECTING":
         return "STATE: no request in progress."
     sl = fsm.get("slots") or {}
-    got = ", ".join(f"{k}={sl.get(k)}" for k in ("date", "time") if sl.get(k)) or "nothing yet"
-    if fsm.get("state") == "COLLECTING":
-        return f"STATE: {fsm.get('intent')} IN PROGRESS, collected: {got}; still missing: {', '.join(fsm.get('missing') or [])}."
-    return f"STATE: last {fsm.get('intent')} finished ({fsm.get('status')}) for {got}; a new request starts from scratch."
+    got = [f"{k}={sl.get(k)}" for k in ("date", "time") if sl.get(k)]
+    if not sl.get("date") and sl.get("month"):
+        got.append(f"month={sl['month']} (day not said yet)")
+    miss = [("day of the month" if (m == "date" and sl.get("month")) else m) for m in (fsm.get("missing") or [])]
+    return f"STATE: {fsm.get('intent')} IN PROGRESS, collected: {', '.join(got) or 'nothing yet'}; still missing: {', '.join(miss)}."
 
 
 _EMPTY = {"", "none", "null", "unknown", "n/a", "not specified", "not mentioned"}

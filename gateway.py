@@ -1035,17 +1035,25 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         return fsm, False
     intent = "book" if name == "book" else "check"
     # merge: si riparte da zero se cambia l'intento o non si stava raccogliendo; un campo si sovrascrive solo con un valore non vuoto
-    slots = dict(fsm.get("slots") or {}) if (fsm.get("state") == "COLLECTING" and fsm.get("intent") == intent) else {"date": "", "time": "", "time_raw": ""}
+    slots = dict(fsm.get("slots") or {}) if (fsm.get("state") == "COLLECTING" and fsm.get("intent") == intent) else {"date": "", "time": "", "time_raw": "", "month": ""}
     for k in ("date", "time"):
         v = str(args.get(k) or "").strip()
         if v and v.lower() not in ("none", "null", "unknown", "n/a"):
             slots[k] = v
             if k == "time":
                 slots["time_raw"] = v
-    # un campo vale solo se si riduce alla forma canonica: altrimenti e' "non capito" e resta mancante (si richiede)
+    # un campo vale solo se si riduce alla forma canonica: altrimenti e' "non capito" e resta mancante (si richiede).
+    # Data parziale: solo il mese ("April") -> si tiene il mese e manca il giorno; solo il giorno con mese gia' noto -> si compone.
     rejected = {}
-    if slots.get("date") and not _hud_date_valid(_hud_norm_date(slots["date"])):
-        rejected["date"] = slots["date"]; slots["date"] = ""
+    if slots.get("date"):
+        nd = _hud_norm_date(slots["date"])
+        if not _hud_date_valid(nd):
+            if nd in _MONTHS:
+                slots["month"] = nd; slots["date"] = ""
+            elif re.fullmatch(r"(the )?([1-9]|[12]\d|3[01])", nd) and slots.get("month"):
+                slots["date"] = f"{slots['month']} {nd.split()[-1]}"
+            else:
+                rejected["date"] = slots["date"]; slots["date"] = ""
     if slots.get("time") and not _hud_time_valid(_hud_norm_time(slots["time"]), intent):
         rejected["time"] = slots["time"]; slots["time"] = ""; slots["time_raw"] = ""
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
@@ -1054,7 +1062,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     now_s = datetime.now().isoformat(timespec="seconds")
     if missing:
         fsm.update({"state": "COLLECTING", "intent": intent, "slots": slots, "missing": missing, "rejected": rejected,
-                    "status": None, "detail": "", "note": "", "updated": now_s})
+                    "status": None, "detail": "", "note": "", "updated": now_s, "seq": int(fsm.get("seq") or 0) + 1})
         _hud_db_save()
         return fsm, True
     date = _hud_norm_date(slots["date"]); tm = _hud_norm_time(slots.get("time"))
@@ -1063,8 +1071,9 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     else:
         res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)
     shown = dict(slots, date=date, time=tm)
+    shown.pop("month", None)
     fsm.update({"state": "RESULT", "intent": intent, "slots": shown, "missing": [], "rejected": {}, "status": res["status"],
-                "detail": res.get("detail") or "", "note": "", "updated": now_s})
+                "detail": res.get("detail") or "", "note": "", "updated": now_s, "seq": int(fsm.get("seq") or 0) + 1})
     _hud_db_save()   # da RESULT una nuova book()/check() riparte comunque da zero (merge solo in COLLECTING)
 
     return fsm, True

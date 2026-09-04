@@ -39,7 +39,10 @@ const hud = {
     lastFrameAt: null,      // per misurare la reazione
     fingerprint() {
         const f = this.fsm;
-        return `${this.screen}|${f.intent}|${f.slots.date}|${f.slots.time}|${(f.missing || []).join(',')}|${f.status}|${f.detail}|${f.note}`;
+        // un valore respinto e' un evento: entra nell'impronta con il numero di sequenza, cosi' produce un frame anche se
+        // lo schermo e' uguale a prima (il frame e' il clock: "April" due volte -> due frame)
+        const rej = Object.keys(f.rejected || {}).length ? `|rej${f.seq || 0}:${JSON.stringify(f.rejected)}` : '';
+        return `${this.screen}|${f.intent}|${f.slots.date}|${f.slots.month || ''}|${f.slots.time}|${(f.missing || []).join(',')}|${f.status}|${f.detail}|${f.note}${rej}`;
     },
 };
 const canvas = $('hud'), ctx = canvas.getContext('2d');
@@ -53,10 +56,14 @@ function themeFor() {
     switch (hud.screen) {
         case 'COLLECTING': {
             const miss = (f.missing || [])[0] || '';
+            const month = f.slots.month || '';
+            const rejKeys = Object.keys(f.rejected || {});
+            let line3 = (f.slots.time && miss === 'date') ? `TIME: ${timeLabel(f.slots.time)}` : '';
+            if (rejKeys.length) line3 = `"${String(f.rejected[rejKeys[0]]).toUpperCase()}" NOT VALID`;
             return { bg: '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'AVAILABILITY CHECK' : 'NEW BOOKING',
-                     line1: f.slots.date ? f.slots.date.toUpperCase() : 'DATE: ?',
-                     line2: `MISSING: ${miss.toUpperCase()}`,
-                     line3: (f.slots.time && miss === 'date') ? `TIME: ${timeLabel(f.slots.time)}` : '' };
+                     line1: f.slots.date ? f.slots.date.toUpperCase() : (month ? `DATE: ${month.toUpperCase()} ?` : 'DATE: ?'),
+                     line2: `MISSING: ${(miss === 'date' && month) ? 'DAY' : miss.toUpperCase()}`,
+                     line3 };
         }
         case 'CHECKING':
             return { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: slotLine(f), line2: 'please wait', line3: '' };
@@ -64,12 +71,12 @@ function themeFor() {
             const s = f.status, d = (f.detail || '').toUpperCase();
             if (s === 'error') return { bg: '#b71c1c', fg: '#ffffff', title: 'ERROR / TIMEOUT', line1: slotLine(f), line2: f.intent === 'book' ? 'request failed' : 'check failed', line3: '' };
             if (f.intent === 'book') {
-                if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'CONFIRMED', line3: '' };
+                if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: 'BOOKING DONE', line1: slotLine(f), line2: 'CONFIRMED', line3: '' };
                 return { bg: '#c62828', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'SLOT TAKEN', line3: d ? 'BOOKED ' + d : '' };
             }
             if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
             if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'PARTLY BOOKED', line3: d };
-            return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'BOOKED ' + d, line3: '' };
+            return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: d };
         }
         default:
             return { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: 'waiting for a request', line2: f.note || '', line3: '' };
@@ -137,7 +144,7 @@ async function fsmEvent(toolCalls, userText, source) {
     if (!r.ok) { hudLog('warn', 'FSM: ' + (d.error || r.status)); return null; }
     const f = d.fsm;
     hudLog(d.changed ? 'hud' : 'sys', `FSM → ${f.state}${f.intent ? ' ' + f.intent : ''} ${f.slots.date || ''} ${f.slots.time || ''}` +
-        ((f.missing || []).length ? ' · manca ' + f.missing.join(', ') : '') +
+        ((f.missing || []).length ? ' · manca ' + f.missing.join(', ') : '') + (f.slots.month && !f.slots.date ? ` · mese ${f.slots.month}` : '') +
         (Object.keys(f.rejected || {}).length ? ' · NON CAPITO ' + Object.entries(f.rejected).map(([k, v]) => `${k}="${v}"`).join(' ') : '') + (f.status ? ' · ' + f.status : '') + (f.detail ? ' (' + f.detail + ')' : '') + (f.note ? ' · ' + f.note : '') + (d.changed ? '' : ' · invariato'));
     applyFsm(f, delay);
     return f;

@@ -311,3 +311,24 @@ result, tell the customer. Otherwise just talk."*
   `transcribe_sessions.py`.
 - **DB azzerato** (slot, registro, FSM) su richiesta: le prove ripartono da zero. Prenotazioni di prova da inserire in
   db.html prima dei test (es. April 2 all day per D9c).
+
+### 04/09 (16:30) — terzo test dal vivo: flusso completo OK; due difetti trovati e corretti
+- **Flusso completo riuscito** (sess_6e49cb6d6c58): "I'd like to book" → chiede la data → "April 2nd" → chiede l'ora →
+  "15" → BOOKING DONE/CONFIRMED → "Your booking is confirmed! … April 2nd at 15 o'clock". Reazioni ai frame 0,4-0,9 s.
+- **Difetto 1**: dopo la conferma, "Okay, thank you" → l'estrattore ha emesso `book(April 2, 15:00)` copiando i campi dalla
+  riga di stato ("last book finished for date=april 2, time=15:00") → seconda prenotazione sullo stesso slot → schermo
+  SLOT TAKEN subito dopo CONFIRMED (Alessandro l'ha letto come "dice BOOKED come se fosse già prenotato"). Causa: in
+  RESULT passavo ancora i campi all'estrattore, che non gli servono. Ora in RESULT/IDLE la riga di stato è solo
+  "no request in progress". Sonda: "Okay, thank you" dopo CONFIRMED → none ✓.
+- **Difetto 2**: "April" da solo → respinto dalla FSM (NON CAPITO) ma lo schermo era identico a prima (DATE: ? /
+  MISSING: DATE) → nessun frame → l'omni non ha avuto il segnale ed è rimasto zitto. Due correzioni strutturali:
+  (a) **data parziale**: il solo mese si tiene (`slots.month`) e manca il giorno → frame `DATE: APRIL ? / MISSING: DAY`;
+  il solo giorno con mese noto si compone (FSM) e l'estrattore stesso compone "The 2nd"/"The second" → April 2 (stato:
+  month=april); (b) **un valore respinto è un evento**: entra nell'impronta del frame con il numero di sequenza (`seq`)
+  → frame `"TOMORROW" NOT VALID` anche se lo schermo è uguale a prima ("tomorrow" due volte → due frame). Il frame è
+  il clock. Sonde FSM: book() → book(April) → month=april manca date; book(tomorrow) ×2 → respinto, seq 3 e 4;
+  book("the 2nd") → april 2; book(time=15) → RESULT.
+- **Diciture** (richiesta di Alessandro: "BOOKED" ambiguo tra azione riuscita e già occupato): prenotazione riuscita =
+  `BOOKING DONE / CONFIRMED`; prenotazione fallita = `BOOKING / SLOT TAKEN / BOOKED <ora>`; verifica su slot occupato =
+  `RESULT / ALREADY BOOKED / <ora>`.
+- DB azzerato di nuovo (il test aveva creato april 2 15:00).

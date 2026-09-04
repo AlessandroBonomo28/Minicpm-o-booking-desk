@@ -92,3 +92,4 @@ if __name__ == "__main__":
     print("== SENZA contesto (solo la battuta corrente)"); run(url, 0, a.verbose)
     print("== CON contesto (ultime 3 righe, operatore compreso)"); run(url, 3, a.verbose)
     print("== contesto AUTO (solo con un'offerta in sospeso: ultimo esito = verifica con posto libero)"); run(url, "auto", a.verbose)
+    print("== OFFERTA NELLO STATO (nessuna riga di dialogo: la riga di stato porta la data offerta)"); run(url, "state", a.verbose)

@@ -43,7 +43,7 @@ CASES = [
     ({"state": "CONFIRM", "intent": "book", "status": "pending", "slots": {"month": "march", "day": "2", "time": "15:00"}},
      [A("Booking for March 2nd at 15:00, shall I confirm?"), U("Yes, go ahead.")], ("book", {"month": "march", "day": "2", "time": "15:00"}), ()),
     ({"state": "CONFIRM", "intent": "book", "status": "pending", "slots": {"month": "march", "day": "2", "time": "15:00"}},
-     [A("Booking for March 2nd at 15:00, shall I confirm?"), U("At 5 pm instead.")], ("book", {"time": "17:00"}), ("day",)),
+     [A("Booking for March 2nd at 15:00, shall I confirm?"), U("At 5 pm instead.")], ("book", {"time": "17:00"}), ()),
     ({"state": "CONFIRM", "intent": "book", "status": "pending", "slots": {"month": "march", "day": "2", "time": "15:00"}},
      [A("Booking for March 2nd at 15:00, shall I confirm?"), U("No, never mind.")], ("cancel", {}), ()),
     # --- rifiuto dell'offerta

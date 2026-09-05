@@ -211,3 +211,19 @@ di 3 s** non aiuta perché il microfono in silenzio manda zeri digitali (Windows
 Entrambi restano come opzioni nella richiesta, spenti di default. Conclusione: per le battute corte e povere l'orecchio
 laterale non si ripara con Whisper; la via è la ripetizione dell'operatore (`heard`, tentativo + conferma) o l'omni
 che emette gli eventi.
+
+## 13. Secondo orecchio: `heard` (05/09 sera), attivabile dalla UI
+L'omni sente meglio di Whisper ("April" contro "incredible") ma non produce trascrizioni: produce solo ciò che dice, e
+spesso ripete ciò che ha capito ("Got it, April 20th"). A fine turno dell'omni un estrattore separato legge la sua frase
+(`/heard`, solo cloud) e ne ricava `heard(month?, day?, time?)`; domande e proposte ("how about 16:00?", "we have 9 or
+11") → niente (verificato su 8 frasi). Regole nella FSM, che rendono la macchina più stabile e mai meno:
+- solo in raccolta; riempie solo i campi MANCANTI; mai sopra un valore del cliente (il cliente vince, anche dopo);
+- il campo riempito è **tentativo** (`APRIL?` sullo schermo, atto `CONFIRM: MONTH`); il `yes` del cliente lo rende solido,
+  il `no` lo scarta (torna `ASK: MONTH`); un `set` del cliente sullo stesso campo lo supera;
+- **non si esegue né si scrive con un tentativo nel record**: prima la conferma del campo, poi il flusso normale;
+- monotono e idempotente: nessuna oscillazione frame → omni → frame.
+Il rischio residuo (entrambi gli orecchi sbagliano) costa un "no" al livello del campo, mai una scrittura. Spunta
+"Secondo orecchio" nel pannello per provare con e senza. Provato via curl: il caso "April" si allinea in un turno.
+Scartati oggi: schermo "NOT UNDERSTOOD" (troppo lungo, e l'omni spesso ha capito), iniezione di token nell'omni
+(possibile via backend, rimandata: il prefisso forzato "Let me confirm:" è l'evoluzione se le ripetizioni spontanee
+non bastano).

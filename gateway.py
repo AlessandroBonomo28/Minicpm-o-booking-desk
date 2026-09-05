@@ -1034,7 +1034,7 @@ _HUD_EMPTY_SLOTS = {"month": "", "day": "", "time": "", "time_raw": "", "date": 
 
 
 def _hud_fsm_reset(note: str = ""):
-    _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots=dict(_HUD_EMPTY_SLOTS), missing=[], rejected={}, note=note,
+    _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots=dict(_HUD_EMPTY_SLOTS), missing=[], rejected={}, tentative={}, note=note,
                           updated=datetime.now().isoformat(timespec="seconds"))
     _hud_db_save()
     return _HUD_DB["fsm"]
@@ -1132,6 +1132,39 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         said_intent = "book" if name == "book" else "check"; name = "set"
     if name == "yes" and any_said:
         name = "set"   # "yes, at 3 pm" = correzione + nuova conferma: yes non porta valori
+    tentative = dict(fsm.get("tentative") or {})
+    if name == "heard":
+        # secondo orecchio: solo in raccolta, solo campi MANCANTI, mai sopra un valore del cliente; il campo diventa TENTATIVO
+        if state != "COLLECTING":
+            _hud_db_save(); return fsm, False
+        slots = dict(_HUD_EMPTY_SLOTS, **ref); filled = []
+        if said["month"] and not slots.get("month"):
+            m = _hud_norm_date(said["month"])
+            if m in _MONTHS: slots["month"] = m; filled.append("month")
+        if said["day"] and not slots.get("day"):
+            d = _hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", said["day"].lower())).replace("the ", "").strip()
+            if re.fullmatch(r"([1-9]|[12]\d|3[01])", d): slots["day"] = d; filled.append("day")
+        if said["time"] and not slots.get("time") and "time" in _HUD_REQUIRED[fsm.get("intent") or "check"]:
+            if _hud_time_valid(_hud_norm_time(said["time"]), fsm.get("intent") or "check"): slots["time"] = said["time"]; slots["time_raw"] = said["time"]; filled.append("time")
+        if not filled:
+            _hud_db_save(); return fsm, False
+        for k in filled: tentative[k] = True
+        slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
+        missing = [k for k in _HUD_REQUIRED[fsm["intent"]] if not slots.get(k)]
+        return bump(state="COLLECTING", slots=slots, missing=missing, tentative=tentative, rejected={}, status=None, detail="", note="")
+    if state == "COLLECTING" and tentative and name in ("yes", "no") and not any_said:
+        # conferma a livello di campo dei valori tentativi (CONFIRM: MONTH sullo schermo)
+        slots = dict(_HUD_EMPTY_SLOTS, **ref)
+        if name == "no":
+            for k in list(tentative): slots[k] = ""; slots["time_raw"] = "" if k == "time" else slots.get("time_raw", "")
+            slots["date"] = ""
+            missing = [k for k in _HUD_REQUIRED[fsm["intent"]] if not slots.get(k)]
+            return bump(state="COLLECTING", slots=slots, missing=missing, tentative={}, rejected={}, status=None, detail="", note="")
+        tentative = {}   # yes: i tentativi diventano solidi; si prosegue come dopo un set completo
+        intent = fsm["intent"]; name = "set"; args = {}; said = {k: "" for k in said}; any_said = False
+        _solidified = True
+    else:
+        _solidified = False
     if name == "no":
         if state == "CONFIRM" and fsm.get("intent") == "book":
             return _hud_fsm_reset(note="BOOKING NOT CONFIRMED"), True
@@ -1147,9 +1180,11 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         if ref.get("time") and ref.get("time") != "all-day":
             slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
     elif name == "set":
-        if not any_said and said_intent not in ("book", "check"):
+        if not any_said and said_intent not in ("book", "check") and not _solidified:
             _hud_db_save(); return fsm, False   # set senza campi = evento nullo
-        if state == "COLLECTING":
+        if _solidified:
+            pass   # slots e intent gia' impostati sopra
+        elif state == "COLLECTING":
             intent = said_intent if said_intent in ("book", "check") else fsm["intent"]   # merge sempre; l'intento detto e' una correzione
             slots = dict(_HUD_EMPTY_SLOTS, **ref)
         elif state == "CONFIRM":
@@ -1190,6 +1225,9 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         else:
             if m: slots["month"] = m
             if d: slots["day"] = d
+    for k in ("month", "day", "time"):
+        if clean(args.get(k)) and k in tentative:
+            tentative.pop(k)   # il cliente dice il valore: il tentativo dell'operatore e' superato (il cliente vince)
     if clean(args.get("month")):
         m = _hud_norm_date(clean(args["month"]))
         if m in _MONTHS: slots["month"] = m
@@ -1208,8 +1246,9 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
     if "time" in rejected and "time" not in missing:
         missing.append("time")
-    if missing:
-        return bump(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, status=None, detail="", note="", free=None)
+    if missing or tentative:
+        # con un tentativo ancora da confermare non si esegue: prima CONFIRM del campo (yes/no a livello di campo)
+        return bump(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, tentative=tentative, status=None, detail="", note="", free=None)
     date = slots["date"]; tm = _hud_norm_time(slots.get("time"))
     if intent == "check":
         res = _hud_exec_check(date, tm, outcome or "auto", source, delay_s)
@@ -1229,7 +1268,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     # riparte da zero e passa dalla conferma.
     free = None
     new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] == "pending" else "DONE"
-    return bump(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, status=res["status"], detail=res.get("detail") or "", note="", free=free)
+    return bump(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative={}, status=res["status"], detail=res.get("detail") or "", note="", free=free)
 
 
 @app.post("/api/hud_fsm/event")
@@ -1303,6 +1342,19 @@ async def hud_asr_profile_set(request: Request):
             subprocess.run(["bash", script, prof], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     threading.Thread(target=_run, daemon=True).start()
     return JSONResponse(content={"ok": True, "profile": prof})
+
+
+@app.post("/api/tool_agent/heard")
+async def tool_agent_heard(request: Request):
+    """Ramo HUD: ripetizioni dell'operatore -> valori tentativi (estrattore separato, solo cloud)."""
+    import httpx
+    body = await request.body()
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post("http://127.0.0.1:22700/heard", content=body, headers={"content-type": "application/json"})
+        return JSONResponse(status_code=r.status_code, content=r.json())
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"error": f"tool agent non raggiungibile: {type(e).__name__}: {e}"})
 
 
 @app.post("/api/tool_agent/decide")

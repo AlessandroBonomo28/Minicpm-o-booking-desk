@@ -354,3 +354,6 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 05/09 (sera) — **Whisper large-v3-turbo** al posto di small, fallback locale tolto (profilo scelto dalla UI, script
   `tools/switch_asr_profile.sh`). Contratto set/yes/no/cancel in produzione. Prossimo: confidenza ASR come terzo
   esito del validatore.
+- 05/09 (notte) — **Secondo orecchio `heard`**: le ripetizioni dell'omni riempiono i campi mancanti come tentativi,
+  conferma a livello di campo, scrittura solo con valori solidi; attivabile dalla UI per il confronto. Lessico e
+  contesto per Whisper misurati e spenti (allucina su audio povero; il mic in silenzio manda zeri).

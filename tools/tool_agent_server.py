@@ -67,6 +67,30 @@ TOOL_DEFS = {
 def tools_for_state(fsm):
     return [TOOL_DEFS[n] for n in ("set", "yes", "no", "cancel")]
 
+# ---- heard (05/09 sera): secondo orecchio = le RIPETIZIONI dell'operatore. L'omni sente meglio di Whisper; quando ripete un
+#      valore ("Got it, April 20th") lo si legge come valore TENTATIVO (solo campi mancanti, conferma a livello di campo).
+HEARD_TOOL = _fn("heard", "The OPERATOR (the desk) states a month, a day or a time as something the customer said (a readback: 'Got it, April 20th', 'April 20th at 15, what time?', 'so, the 2nd of May'). Pass only values the operator repeats as the customer's. NOT questions ('what day?'), NOT proposals ('how about 16:00?', 'we have 9 or 11'), NOT examples.", dict(_FIELDS))
+HEARD_PROMPT = ("You read what the OPERATOR of a voice booking desk just said to the customer. Call `heard` with the month / day / time "
+                "the operator repeats as understood from the customer; if the sentence repeats nothing (a question, a proposal, a greeting, "
+                "a confirmation without values), call no function and answer NONE.")
+
+
+def decide_heard(operator_text, fsm):
+    """Ritorna la chiamata heard (o nessuna) sul testo dell'operatore. Solo con il backend cloud (il locale non e' usato)."""
+    messages = [{"role": "system", "content": HEARD_PROMPT},
+                {"role": "user", "content": f"OPERATOR: {operator_text}\n\nCall heard() or answer NONE."}]
+    fname, args_json, used_model, ms = decide_cloud(messages, [HEARD_TOOL])
+    calls = []
+    if fname == "heard":
+        try:
+            a = json.loads(args_json or "{}")
+        except Exception:
+            a = {}
+        args = {k: str(v).strip() for k, v in a.items() if k in ("month", "day", "time") and isinstance(v, (str, int, float)) and str(v).strip().lower() not in _EMPTY}
+        if args:
+            calls.append({"name": "heard", "arguments": args})
+    return {"tool_calls": calls, "backend": f"cline:{used_model} {ms:.0f}ms"}
+
 LOCAL_PROMPT = ("You are the request extractor of a booking desk. Read STATE and the customer's last sentence, then call at most ONE "
                 "function: set (values said, copied exactly), yes / no (answer to the desk's open question), cancel. "
                 "If the sentence is not a request or an answer (greeting, thanks, hesitation), call no function and answer NO ACTION.")
@@ -97,6 +121,10 @@ def fsm_line(fsm):
         return "STATE: the desk asked the customer to CONFIRM a booking. Open question: yes / no (a corrected value is also possible)."
     if st == "CONFIRM":
         return "STATE: the desk said a slot is free and asked if the customer wants to book it. Open question: yes / no (or another date/time)."
+    if st == "COLLECTING" and (fsm.get("tentative") or {}):
+        tk = [k for k in ("month", "day", "time") if (fsm.get("tentative") or {}).get(k)]
+        return (f"STATE: a {fsm.get('intent')} request is in progress; the desk asked the customer to CONFIRM the {' and '.join(tk)} "
+                f"it understood. Open question: yes / no (or a corrected value with set).")
     if st == "COLLECTING":
         sl = fsm.get("slots") or {}
         got = [k for k in ("month", "day", "time") if sl.get(k)]
@@ -261,6 +289,19 @@ class H(BaseHTTPRequestHandler):
             self._send(404, b"")
 
     def do_POST(self):
+        if self.path == "/heard":
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                req = json.loads(self.rfile.read(n) or b"{}")
+                if BACKEND != "cline":
+                    self._send(200, json.dumps({"tool_calls": [], "backend": "local: heard non disponibile"}).encode()); return
+                t0 = time.time()
+                res = decide_heard((req.get("operator_text") or "").strip(), req.get("fsm"))
+                res["total_s"] = round(time.time() - t0, 2)
+                self._send(200, json.dumps(res, ensure_ascii=False).encode())
+            except Exception as e:
+                self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}).encode())
+            return
         if self.path != "/decide":
             self._send(404, b""); return
         n = int(self.headers.get("Content-Length", 0))

@@ -61,11 +61,14 @@ function themeFor() {
             const miss = (f.missing || [])[0] || '';
             const month = (f.slots.month || '').toUpperCase(), day = f.slots.day || '';
             const rejKeys = Object.keys(f.rejected || {});
-            const dateLine = (month || day) ? `DATE: ${month || '?'} ${day || '?'}` : 'DATE: ?';
+            const tent = f.tentative || {};
+            const mq = tent.month ? '?' : '', dq = tent.day ? '?' : '';   // valore tentativo (dall'operatore): punto interrogativo
+            const dateLine = (month || day) ? `DATE: ${month ? month + mq : '?'} ${day ? day + dq : '?'}` : 'DATE: ?';
             const line3 = (f.slots.time && miss !== 'time') ? `TIME: ${timeLabel(f.slots.time)}` : '';
             // un valore respinto (sintassi o DB) e' il fatto nuovo: va nella riga grande, da solo ("15:00 TAKEN", "TOMORROW NOT VALID");
             // niente elenco delle ore libere: sarebbe un OFFER non richiesto (05/09, Alessandro)
-            let line2 = `MISSING: ${miss.toUpperCase()}`;
+            const tentKeys = Object.keys(tent).filter(k => tent[k]);
+            let line2 = tentKeys.length ? `CONFIRM: ${tentKeys.map(k => k.toUpperCase()).join(' + ')}` : `MISSING: ${miss.toUpperCase()}`;
             if (rejKeys.length) {
                 const v = String(f.rejected[rejKeys[0]]).toUpperCase();
                 line2 = / TAKEN$| FULL$/.test(v) ? v : `${v} NOT VALID`;
@@ -116,6 +119,8 @@ function actFor() {
     const f = hud.fsm, s = f.status;
     switch (hud.screen) {
         case 'COLLECTING': {
+            const tentKeys = Object.keys(f.tentative || {}).filter(k => f.tentative[k]);
+            if (tentKeys.length) return `CONFIRM: ${tentKeys[0].toUpperCase()}`;   // valore dell'operatore da confermare col cliente
             const miss = (f.missing || [])[0] || '';
             return miss ? `ASK: ${miss.toUpperCase()}` : '';   // il perche' (15:00 TAKEN) sta nello stato, non nell'atto
         }
@@ -375,7 +380,10 @@ async function startSessionInner() {
         if (d.modelState && d.modelState !== lastModelState) {
             if (d.modelState === 'end_of_turn') {
                 conv('sys', stateLine('fine turno AI'));
-                if (currentAiText) { dialog.push({ role: 'assistant', text: currentAiText }); if (dialog.length > 12) dialog.shift(); currentAiText = ''; }
+                if (currentAiText) {
+                    dialog.push({ role: 'assistant', text: currentAiText }); if (dialog.length > 12) dialog.shift();
+                    onOperatorTurnEnd(currentAiText); currentAiText = '';
+                }
             }
             lastModelState = d.modelState;
         }
@@ -521,6 +529,24 @@ $('btnAsrProfile').onclick = async () => {
     }, 3000);
 };
 refreshAsrProfile();
+
+/** Secondo orecchio: a fine turno dell'omni, le sue ripetizioni diventano valori tentativi (solo in raccolta). */
+async function onOperatorTurnEnd(text) {
+    if (!$('heardOn').checked || hud.fsm.state !== 'COLLECTING') return;
+    try {
+        const t0 = performance.now();
+        const r = await fetch('/api/tool_agent/heard', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ operator_text: text, fsm: hud.fsm }) });
+        const d = await r.json();
+        const dt = ((performance.now() - t0) / 1000).toFixed(2);
+        if (!r.ok) { hudLog('warn', `heard: ${d.error || r.status}`); return; }
+        const calls = d.tool_calls || [];
+        if (!calls.length) { hudLog('sys', `heard (${dt} s): l'omni non ripete valori — "${text.slice(0, 50)}"`); return; }
+        hudLog('hud', `HEARD (${dt} s · ${d.backend || ''}): ${JSON.stringify(calls[0].arguments)} da "${text.slice(0, 50)}"`);
+        await fsmEvent(calls, '', 'heard (turno omni)');
+        conv('sys', stateLine(`heard dall'omni: ${JSON.stringify(calls[0].arguments)}`));
+    } catch (e) { hudLog('warn', 'heard errore: ' + e.message); }
+}
 
 async function checkToolAgent() {
     try {

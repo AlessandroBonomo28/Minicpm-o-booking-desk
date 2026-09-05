@@ -348,3 +348,6 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 05/09 (pom.) — Decimo test: ping-pong mese/giorno → due correzioni nell'algebra (merge sempre in raccolta; slot
   occupato = campo respinto, ore libere nello stato). Schermo a due metà di default. Decisione anticipata alla
   pausa confermata dal vivo (frame a 0,3-0,6 s dalla fine della frase).
+- 05/09 (sera) — **Contratto set / yes / no / cancel** (l'algebra senza scorciatoie): yes è l'unico evento che
+  scrive e non porta valori; set fa merge e non dimentica; slot occupato chiude la richiesta (stato intermedio
+  tolto). Cloud 53/55 e 23/24; locale 48/55 e 18/24. Undicesimo test: "No, time is…" scritto come sì → chiuso.

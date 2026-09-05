@@ -186,6 +186,6 @@ scritto; yes(time=17) → set → nuova conferma → `yes` → scritto.
 | backend | base 55 | dialogo 24 | latenza |
 |---|---|---|---|
 | gemini-3.5-flash-lite + dialogo | **53** | **23** | 0,9-1,0 s |
-| Qwen3-1.7B locale (fallback) | vedi calendar | | 0,5 s |
+| Qwen3-1.7B locale (fallback) | 48 | 18 | 0,5 s |
 Mancati cloud: "tomorrow at 9" (giorno respinto, chiede la data), "I don't need you anymore" → cancel a richiesta chiusa
 (innocuo), "the next day" → set(day=31) senza mese → chiede il mese (niente aritmetica, per contratto).

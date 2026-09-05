@@ -1199,8 +1199,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     if "time" in rejected and "time" not in missing:
         missing.append("time")
     if missing:
-        free = _hud_free_hours(slots["month"], slots["day"]) if (slots["date"] and "time" in missing) else None
-        return bump(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, status=None, detail="", note="", free=free)
+        return bump(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, status=None, detail="", note="", free=None)
     date = slots["date"]; tm = _hud_norm_time(slots.get("time"))
     if intent == "check":
         res = _hud_exec_check(date, tm, outcome or "auto", source, delay_s)
@@ -1214,16 +1213,11 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         elif found == "error": res = {"status": "error", "detail": ""}
         else: res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)   # registra il tentativo: taken
     shown = dict(slots, date=date, time=tm)
-    if intent == "book" and res["status"] == "taken":
-        # ora occupata = valore che non passa la validazione contro il DB: la richiesta NON si chiude, resta April 20 e si
-        # richiede l'ora, con le ore libere del giorno nello stato (l'omni le legge). Giorno tutto pieno -> si richiede il giorno.
-        free = _hud_free_hours(slots["month"], slots["day"])
-        kept = dict(_HUD_EMPTY_SLOTS, month=slots["month"], day=slots["day"] if free else "")
-        kept["date"] = f"{kept['month']} {kept['day']}" if kept["day"] else ""
-        rej = {"time": f"{_hud_time_label(tm)} taken"} if free else {"day": f"{date} full"}   # 'free' resta nello stato per db.html, non sullo schermo
-        return bump(state="COLLECTING", intent="book", slots=kept, missing=(["time"] if free else ["day", "time"]), rejected=rej,
-                    status=None, detail=res.get("detail") or "", note="", free=free)
-    free = _hud_free_hours(slots["month"], slots["day"]) if (intent == "check" and res["status"] == "booked") else None
+    # 05/09 sera (Alessandro): uno slot occupato CHIUDE la richiesta (DONE), come prima. Lo stato intermedio "resta in raccolta
+    # con ASK: TIME" e' stato provato e tolto: l'omni proponeva ore da solo, l'utente diceva "si'" a un'offerta che la macchina
+    # non conosceva, e una `book` vuota su "No, time is..." e' finita scritta senza una conferma vera. Una richiesta nuova
+    # riparte da zero e passa dalla conferma.
+    free = None
     new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] == "pending" else "DONE"
     return bump(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, status=res["status"], detail=res.get("detail") or "", note="", free=free)
 

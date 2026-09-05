@@ -80,6 +80,8 @@
         <select id="asrProfile"><option value="turbo">Whisper large-v3-turbo · estrattore cloud senza fallback locale</option><option value="small">Whisper small · estrattore cloud con fallback locale (Qwen3-1.7B)</option></select>
         <button id="btnAsrProfile">Applica (riavvia ASR ed estrattore, ~1 min)</button>
         <span class="small" id="asrProfileState">—</span></div>
+      <div class="row"><label>Lampeggio</label>
+        <input type="checkbox" id="blinkAlways" checked> <span class="small">banner del semaforo <b>sempre</b> lampeggiante (un frame per chunk, banner pieno/bianco alternati); senza spunta lampeggia solo 4 frame al cambio di livello</span></div>
       <div class="row"><label>Secondo orecchio</label>
         <input type="checkbox" id="heardOn" checked> <span class="small"><b>heard</b>: a fine turno dell'omni le sue ripetizioni ("Got it, April 20th") riempiono i campi mancanti come valori TENTATIVI (schermo <code>APRIL?</code>, atto <code>CONFIRM: MONTH</code>); si scrive solo con valori confermati. Spunta via per testare senza.</span></div>
       <div class="row"><label>Frame iniziale</label>

@@ -144,7 +144,7 @@ function drawHud() {
     ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = theme.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     // banner del semaforo in alto (lampeggia: colore pieno / bianco a fasi alterne)
-    const on = blinkLeft > 0 ? (blinkPhase % 2 === 0) : true;
+    const on = ($('blinkAlways') && $('blinkAlways').checked) || blinkLeft > 0 ? (blinkPhase % 2 === 0) : true;
     ctx.fillStyle = on ? LIGHT[level] : '#ffffff'; ctx.fillRect(0, 0, W, H * 0.16);
     ctx.fillStyle = on ? '#ffffff' : LIGHT[level]; ctx.font = 'bold 30px system-ui, sans-serif';
     const bannerText = level === 'green' ? 'OK' : (level === 'yellow' ? `⚠ ${hint || 'CHECK THE SCREEN'}` : `■ ${hint || 'STOP'}`);
@@ -427,7 +427,8 @@ async function startSessionInner() {
                                            (audio, speechMs, ctxSec) => onUserPause(audio, speechMs, ctxSec), () => { if (speculative) speculative.stale = true; });
             mic = new MicCapture((audioF32) => {
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
-                if (!hud.pendingFrame && blinkLeft > 0) { blinkPhase++; blinkLeft--; hudSync(true); }   // fasi del lampeggio: un frame per chunk
+                // lampeggio: costante (un frame per chunk, banner alternato) oppure solo 4 frame al cambio di livello
+                if (!hud.pendingFrame && ($('blinkAlways').checked || blinkLeft > 0)) { blinkPhase++; if (blinkLeft > 0) blinkLeft--; hudSync(true); }
                 if (hud.pendingFrame) {
                     msg.frame_base64_list = [hud.pendingFrame];
                     hud.pendingFrame = null; hud.framesSent++; hud.lastFrameAt = now(); awaitingReaction = true;

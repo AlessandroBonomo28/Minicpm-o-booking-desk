@@ -14,6 +14,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 
 model = None; lock = threading.Lock(); DEV = "cuda"; MODEL_NAME = "?"
+# lessico dello sportello come initial_prompt: condiziona Whisper verso date e ore dette separate ("April 20 at 16", non "2016")
+LEXICON = "Booking desk. The customer books an appointment: April 20th at 16:00, the 2nd of May at 3 pm, half past ten, 9 am, March, June."
 
 
 class H(BaseHTTPRequestHandler):
@@ -34,9 +36,16 @@ class H(BaseHTTPRequestHandler):
             x = np.frombuffer(base64.b64decode(req.get("audio_b64") or ""), dtype=np.float32)
             if len(x) < 1600: self._send(200, b'{"text": ""}'); return
             t0 = time.time()
+            ctx_s = float(req.get("context_s") or 0)
             with lock:
-                r = model.transcribe(x, language=req.get("language") or None, fp16=(DEV == "cuda"), condition_on_previous_text=False)
-            self._send(200, json.dumps({"text": (r.get("text") or "").strip(), "language": r.get("language"), "asr_s": round(time.time() - t0, 2), "audio_s": round(len(x) / 16000, 1), "model": MODEL_NAME}).encode())
+                r = model.transcribe(x, language=req.get("language") or None, fp16=(DEV == "cuda"), condition_on_previous_text=False,
+                                     initial_prompt=LEXICON if req.get("lexicon", False) else None)   # default OFF: misurato 05/09, allucina su audio povero
+            # con il contesto davanti alla battuta: si tiene solo cio' che finisce dopo l'inizio della battuta
+            segs = r.get("segments") or []
+            kept = [s for s in segs if float(s.get("end", 0)) > ctx_s + 0.2] if ctx_s > 0 else segs
+            text = " ".join((s.get("text") or "").strip() for s in kept).strip() if ctx_s > 0 else (r.get("text") or "").strip()
+            self._send(200, json.dumps({"text": text, "language": r.get("language"), "asr_s": round(time.time() - t0, 2), "audio_s": round(len(x) / 16000, 1),
+                                        "model": MODEL_NAME, "context_s": ctx_s, "dropped": len(segs) - len(kept)}).encode())
         except Exception as e:
             self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}).encode())
 

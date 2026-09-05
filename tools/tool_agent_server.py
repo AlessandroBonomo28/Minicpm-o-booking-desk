@@ -271,7 +271,7 @@ class H(BaseHTTPRequestHandler):
             if req.get("user_audio_b64"):
                 # ASR degli ultimi secondi del microfono (servizio separato, env cosyvoice2)
                 try:
-                    body = json.dumps({"audio_b64": req["user_audio_b64"], "language": req.get("language") or "en"}).encode()
+                    body = json.dumps({"audio_b64": req["user_audio_b64"], "language": req.get("language") or "en", "context_s": float(req.get("context_s") or 0)}).encode()
                     r = urllib.request.urlopen(urllib.request.Request(ASR_URL, data=body, headers={"content-type": "application/json"}), timeout=20)
                     rj = json.loads(r.read()); user_text = (rj.get("text") or "").strip(); asr_s = rj.get("asr_s"); asr_model = rj.get("model")
                 except Exception as e:

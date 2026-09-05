@@ -201,3 +201,13 @@ Misura sulle clip della sessione: sulla clip lunga (10 s) entrambi trascrivono b
 Whisper peggiora sulle clip brevi. Da valutare dopo: confidenza (avg_logprob) come terzo esito del validatore ("dubbio" →
 CONFIRM del valore), `initial_prompt` con il lessico dello sportello, audio diretto al modello cloud.
 VRAM con il profilo turbo: ~29,3 GB (omni + turbo, senza Qwen).
+
+### 12.1 Contesto e lessico per Whisper: misurati, spenti
+Sulle battute vere della sessione sess_2443a727985c (blob 16 kHz con voce): "Hello", "I'd like to book a call", "the 20",
+"yeah go ahead" sono trascritte bene in ogni variante; la battuta "April" (trascritta "incredible" dal vivo) è
+inintelligibile per Whisper in tutte le varianti ('uh tabs', 'Eyebrill?'), mentre l'omni l'ha capita. Il **lessico come
+initial_prompt** fa allucinare su audio povero (frasi in lingue a caso, "I got a new ancient 800 years old"); il **contesto
+di 3 s** non aiuta perché il microfono in silenzio manda zeri digitali (Windows attenua) e con il lessico peggiora.
+Entrambi restano come opzioni nella richiesta, spenti di default. Conclusione: per le battute corte e povere l'orecchio
+laterale non si ripara con Whisper; la via è la ripetizione dell'operatore (`heard`, tentativo + conferma) o l'omni
+che emette gli eventi.

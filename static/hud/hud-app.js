@@ -228,13 +228,17 @@ function manualRequest() {
 class TurnDetector {
     constructor(onTurnEnd, onPause, onResume) {
         this.onTurnEnd = onTurnEnd; this.onPause = onPause || (() => {}); this.onResume = onResume || (() => {});
-        this.speaking = false; this.speechMs = 0; this.silenceMs = 0; this.frames = []; this.preroll = []; this.pausedFired = false;
+        this.speaking = false; this.speechMs = 0; this.silenceMs = 0; this.frames = []; this.preroll = []; this.ctx = []; this.pausedFired = false;
     }
+    // audio della battuta PRECEDUTO da fino a 3 s di contesto (Whisper sbaglia di piu' sulle clip corte: "April" -> "incredible");
+    // il servizio ASR scarta dalla trascrizione cio' che finisce dentro il contesto
     audioSoFar() {
-        const n = this.frames.reduce((a, f) => a + f.length, 0); const out = new Float32Array(n); let o = 0;
-        for (const f of this.frames) { out.set(f, o); o += f.length; }
+        const all = this.ctx.concat(this.frames);
+        const n = all.reduce((a, f) => a + f.length, 0); const out = new Float32Array(n); let o = 0;
+        for (const f of all) { out.set(f, o); o += f.length; }
         return out;
     }
+    contextSec() { return this.ctx.length * 0.1; }
     params() {
         return { thr: parseFloat($('vadThr').value) || 0.02, silence: parseInt($('vadSilence').value, 10) || 600, minSpeech: parseInt($('vadMin').value, 10) || 300 };
     }
@@ -243,8 +247,8 @@ class TurnDetector {
         let e = 0; for (let i = 0; i < frame.length; i++) e += frame[i] * frame[i]; const rms = Math.sqrt(e / frame.length);
         $('vadMeter').textContent = rms.toFixed(3); $('vadState').textContent = this.speaking ? 'PARLI' : 'silenzio';
         if (!this.speaking) {
-            this.preroll.push(frame); if (this.preroll.length > 3) this.preroll.shift();   // 300 ms prima dell'attacco
-            if (rms > thr) { this.speaking = true; this.speechMs = 100; this.silenceMs = 0; this.frames = this.preroll.slice(); this.frames.push(frame); }
+            this.preroll.push(frame); if (this.preroll.length > 3) this.preroll.shift();    // 300 ms prima dell'attacco (i 3 s di contesto: misurati inutili, il mic in silenzio manda zeri)
+            if (rms > thr) { this.speaking = true; this.speechMs = 100; this.silenceMs = 0; this.ctx = this.preroll.slice(); this.frames = [frame]; }
             return;
         }
         this.frames.push(frame);
@@ -254,11 +258,11 @@ class TurnDetector {
         } else { this.silenceMs += 100; }
         // pausa di 300 ms: si parte SUBITO con ASR + estrattore sull'audio detto finora (decisione anticipata);
         // il risultato si applica solo se il turno finisce senza altra voce (nessun evento da frasi a meta')
-        if (this.silenceMs === 300 && this.speechMs >= minSpeech && !this.pausedFired) { this.pausedFired = true; this.onPause(this.audioSoFar(), this.speechMs); }
+        if (this.silenceMs === 300 && this.speechMs >= minSpeech && !this.pausedFired) { this.pausedFired = true; this.onPause(this.audioSoFar(), this.speechMs, this.contextSec()); }
         if (this.silenceMs >= silence) {
-            const spoke = this.speechMs >= minSpeech; const speechMs = this.speechMs; const out = this.audioSoFar();
-            this.speaking = false; this.frames = []; this.preroll = []; this.speechMs = 0; this.silenceMs = 0; this.pausedFired = false;
-            if (spoke) this.onTurnEnd(out, speechMs);
+            const spoke = this.speechMs >= minSpeech; const speechMs = this.speechMs; const out = this.audioSoFar(); const ctxSec = this.contextSec();
+            this.speaking = false; this.frames = []; this.preroll = []; this.ctx = []; this.speechMs = 0; this.silenceMs = 0; this.pausedFired = false;
+            if (spoke) this.onTurnEnd(out, speechMs, ctxSec);
         }
     }
 }
@@ -399,8 +403,8 @@ async function startSessionInner() {
     try {
         await sess.start($('systemPrompt').value, preparePayload, async () => {
             if ($('sendInitial').checked) hudSync(true);
-            const turns = new TurnDetector((utterance, speechMs) => onUserTurnEnd(utterance, speechMs),
-                                           (audio, speechMs) => onUserPause(audio, speechMs), () => { if (speculative) speculative.stale = true; });
+            const turns = new TurnDetector((utterance, speechMs, ctxSec) => onUserTurnEnd(utterance, speechMs, ctxSec),
+                                           (audio, speechMs, ctxSec) => onUserPause(audio, speechMs, ctxSec), () => { if (speculative) speculative.stale = true; });
             mic = new MicCapture((audioF32) => {
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
                 if (hud.pendingFrame) {
@@ -448,27 +452,27 @@ let toolBusy = false;
 const pendingTurns = [];        // battute arrivate mentre l'estrattore era occupato: si accodano, non si scartano
 
 /** Chiama ASR + estrattore su una battuta (non applica nulla). */
-async function decideUtterance(utterance) {
+async function decideUtterance(utterance, ctxSec = 0) {
     const t0 = performance.now();
     const transcript = dialog.slice(-8);
     const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ transcript, user_audio_b64: arrayBufferToBase64(utterance.buffer), language: 'en', fsm: hud.fsm }) });
+        body: JSON.stringify({ transcript, user_audio_b64: arrayBufferToBase64(utterance.buffer), language: 'en', fsm: hud.fsm, context_s: ctxSec }) });
     const d = await r.json();
     return { ok: r.ok, status: r.status, d, dt: ((performance.now() - t0) / 1000).toFixed(2), fsmSeq: hud.fsm.seq || 0 };
 }
 
 // decisione anticipata: parte alla prima pausa di 300 ms, si usa a fine turno se nel frattempo non hai ripreso a parlare
 let speculative = null;
-function onUserPause(audio, speechMs) {
+function onUserPause(audio, speechMs, ctxSec) {
     if ($('trigMode').value !== 'tool' || toolBusy) return;
     const t0 = performance.now();
-    speculative = { speechMs, stale: false, t0, promise: decideUtterance(audio).catch(e => ({ ok: false, status: 0, d: { error: e.message }, dt: '?' })) };
+    speculative = { speechMs, stale: false, t0, promise: decideUtterance(audio, ctxSec).catch(e => ({ ok: false, status: 0, d: { error: e.message }, dt: '?' })) };
 }
 
 /** Fine del tuo turno: ASR della sola battuta (GPU) + estrazione + evento alla FSM. */
-async function onUserTurnEnd(utterance, speechMs) {
-    const secs = (utterance.length / SR_IN).toFixed(1);
-    hudLog('sys', `TURNO UTENTE finito (${secs} s di voce)`);
+async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
+    const secs = (utterance.length / SR_IN - ctxSec).toFixed(1);
+    hudLog('sys', `TURNO UTENTE finito (${secs} s di voce + ${ctxSec.toFixed(1)} s di contesto)`);
     if ($('trigMode').value !== 'tool') return;
     if (toolBusy) { pendingTurns.push(utterance); if (pendingTurns.length > 2) pendingTurns.shift(); hudLog('sys', `estrattore occupato: battuta in coda (${pendingTurns.length})`); return; }
     toolBusy = true;
@@ -481,7 +485,7 @@ async function onUserTurnEnd(utterance, speechMs) {
             hudLog('sys', `decisione anticipata alla pausa: usata (partita ${((performance.now() - spec.t0) / 1000).toFixed(1)} s fa, calcolo ${res.dt} s)`);
         } else {
             if (spec) hudLog('sys', 'decisione anticipata scartata (hai ripreso a parlare)');
-            res = await decideUtterance(utterance);
+            res = await decideUtterance(utterance, ctxSec);
         }
         const { ok, status, d, dt } = res;
         if (!ok) { hudLog('warn', `estrattore: ${d.error || status}`); return; }

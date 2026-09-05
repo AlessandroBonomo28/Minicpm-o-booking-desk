@@ -43,7 +43,8 @@ const hud = {
         // un valore respinto e' un evento: entra nell'impronta con il numero di sequenza, cosi' produce un frame anche se
         // lo schermo e' uguale a prima (il frame e' il clock: "April" due volte -> due frame)
         const rej = Object.keys(f.rejected || {}).length ? `|rej${f.seq || 0}:${JSON.stringify(f.rejected)}` : '';
-        return JSON.stringify(themeForSeq()) + rej;   // il colore alternato entra nell'impronta: ogni cambio di stato = un frame
+        const act = ($('screenMode') && $('screenMode').value === 'act') ? actFor() : '';
+        return JSON.stringify(themeForSeq()) + '|' + act + rej;   // il colore alternato entra nell'impronta: ogni cambio di stato = un frame
     },
 };
 const canvas = $('hud'), ctx = canvas.getContext('2d');
@@ -104,14 +105,40 @@ function themeForSeq() {
     return theme;
 }
 
+/** L'ATTO (meta' sopra dello schermo a due meta'): verbo + oggetto, dalla tabella stato -> atto. Mai "wait". */
+function actFor() {
+    const f = hud.fsm, s = f.status;
+    switch (hud.screen) {
+        case 'COLLECTING': { const miss = (f.missing || [])[0] || ''; return miss ? `ASK: ${miss.toUpperCase()}` : ''; }
+        case 'CHECKING': return 'SAY: CHECKING';
+        case 'CONFIRM': return f.intent === 'book' ? 'ASK: CONFIRM BOOKING' : 'SAY: AVAILABLE';
+        case 'DONE':
+            if (s === 'error') return 'SAY: ERROR';
+            if (f.intent === 'book') return s === 'confirmed' ? 'SAY: BOOKED' : 'SAY: SLOT TAKEN';
+            return s === 'available' ? 'SAY: AVAILABLE' : (s === 'partial' ? 'SAY: PARTLY FREE' : 'SAY: ALREADY BOOKED');
+        default: return f.note ? 'SAY: CANCELLED' : '';
+    }
+}
+
 function drawHud() {
     const W = canvas.width, H = canvas.height, theme = themeForSeq();
     ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = theme.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = (theme.title.length > 16 ? 'bold 28px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);
-    ctx.font = (theme.line1.length > 18 ? 'bold 30px' : 'bold 44px') + ' system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.50);
-    ctx.font = (theme.line2.length > 12 ? 'bold 40px' : 'bold 56px') + ' system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.68);
-    if (theme.line3) { ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(String(theme.line3).slice(0, 40), W / 2, H * 0.82); }
+    const act = ($('screenMode') && $('screenMode').value === 'act') ? actFor() : '';
+    if (act) {
+        // schermo a due meta': sopra l'atto, sotto lo stato (linea di separazione)
+        ctx.font = 'bold 40px system-ui, sans-serif'; ctx.fillText(act, W / 2, H * 0.22);
+        ctx.globalAlpha = 0.75; ctx.fillRect(W * 0.08, H * 0.40, W * 0.84, 3); ctx.globalAlpha = 1;
+        ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.50);
+        ctx.font = (theme.line1.length > 18 ? 'bold 26px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.63);
+        ctx.font = (theme.line2.length > 12 ? 'bold 26px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.76);
+        if (theme.line3) { ctx.font = 'bold 18px system-ui, sans-serif'; ctx.fillText(String(theme.line3).slice(0, 40), W / 2, H * 0.86); }
+    } else {
+        ctx.font = (theme.title.length > 16 ? 'bold 28px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);
+        ctx.font = (theme.line1.length > 18 ? 'bold 30px' : 'bold 44px') + ' system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.50);
+        ctx.font = (theme.line2.length > 12 ? 'bold 40px' : 'bold 56px') + ' system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.68);
+        if (theme.line3) { ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(String(theme.line3).slice(0, 40), W / 2, H * 0.82); }
+    }
     ctx.font = '18px system-ui, sans-serif'; ctx.globalAlpha = 0.7; ctx.fillText('operator screen', W / 2, H * 0.92); ctx.globalAlpha = 1;
     $('hudState').textContent = hud.screen + (hud.fsm.status ? ' ' + hud.fsm.status.toUpperCase() : '') + ((hud.fsm.missing || []).length ? ' (missing ' + hud.fsm.missing.join(',') + ')' : '');
 }
@@ -190,8 +217,14 @@ function manualRequest() {
 // ------------------------------------------------------------------ microfono + VAD
 /** VAD a energia, risoluzione 100 ms: parli -> accumula; taci per `silenceMs` -> fine turno (callback con l'audio della battuta). */
 class TurnDetector {
-    constructor(onTurnEnd) {
-        this.onTurnEnd = onTurnEnd; this.speaking = false; this.speechMs = 0; this.silenceMs = 0; this.frames = []; this.preroll = [];
+    constructor(onTurnEnd, onPause, onResume) {
+        this.onTurnEnd = onTurnEnd; this.onPause = onPause || (() => {}); this.onResume = onResume || (() => {});
+        this.speaking = false; this.speechMs = 0; this.silenceMs = 0; this.frames = []; this.preroll = []; this.pausedFired = false;
+    }
+    audioSoFar() {
+        const n = this.frames.reduce((a, f) => a + f.length, 0); const out = new Float32Array(n); let o = 0;
+        for (const f of this.frames) { out.set(f, o); o += f.length; }
+        return out;
     }
     params() {
         return { thr: parseFloat($('vadThr').value) || 0.02, silence: parseInt($('vadSilence').value, 10) || 600, minSpeech: parseInt($('vadMin').value, 10) || 300 };
@@ -206,16 +239,17 @@ class TurnDetector {
             return;
         }
         this.frames.push(frame);
-        if (rms > thr) { this.speechMs += 100; this.silenceMs = 0; }
-        else { this.silenceMs += 100; }
+        if (rms > thr) {
+            this.speechMs += 100; this.silenceMs = 0;
+            if (this.pausedFired) { this.pausedFired = false; this.onResume(); }   // ha ripreso: la decisione anticipata e' stale
+        } else { this.silenceMs += 100; }
+        // pausa di 300 ms: si parte SUBITO con ASR + estrattore sull'audio detto finora (decisione anticipata);
+        // il risultato si applica solo se il turno finisce senza altra voce (nessun evento da frasi a meta')
+        if (this.silenceMs === 300 && this.speechMs >= minSpeech && !this.pausedFired) { this.pausedFired = true; this.onPause(this.audioSoFar(), this.speechMs); }
         if (this.silenceMs >= silence) {
-            const spoke = this.speechMs >= minSpeech; const frames = this.frames;
-            this.speaking = false; this.frames = []; this.preroll = []; this.speechMs = 0; this.silenceMs = 0;
-            if (spoke) {
-                const n = frames.reduce((a, f) => a + f.length, 0); const out = new Float32Array(n); let o = 0;
-                for (const f of frames) { out.set(f, o); o += f.length; }
-                this.onTurnEnd(out);
-            }
+            const spoke = this.speechMs >= minSpeech; const speechMs = this.speechMs; const out = this.audioSoFar();
+            this.speaking = false; this.frames = []; this.preroll = []; this.speechMs = 0; this.silenceMs = 0; this.pausedFired = false;
+            if (spoke) this.onTurnEnd(out, speechMs);
         }
     }
 }
@@ -356,7 +390,8 @@ async function startSessionInner() {
     try {
         await sess.start($('systemPrompt').value, preparePayload, async () => {
             if ($('sendInitial').checked) hudSync(true);
-            const turns = new TurnDetector((utterance) => onUserTurnEnd(utterance));
+            const turns = new TurnDetector((utterance, speechMs) => onUserTurnEnd(utterance, speechMs),
+                                           (audio, speechMs) => onUserPause(audio, speechMs), () => { if (speculative) speculative.stale = true; });
             mic = new MicCapture((audioF32) => {
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
                 if (hud.pendingFrame) {
@@ -403,21 +438,44 @@ const dialog = [];              // ultime righe del dialogo (operatore + utente)
 let toolBusy = false;
 const pendingTurns = [];        // battute arrivate mentre l'estrattore era occupato: si accodano, non si scartano
 
+/** Chiama ASR + estrattore su una battuta (non applica nulla). */
+async function decideUtterance(utterance) {
+    const t0 = performance.now();
+    const transcript = dialog.slice(-8);
+    const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ transcript, user_audio_b64: arrayBufferToBase64(utterance.buffer), language: 'en', fsm: hud.fsm }) });
+    const d = await r.json();
+    return { ok: r.ok, status: r.status, d, dt: ((performance.now() - t0) / 1000).toFixed(2), fsmSeq: hud.fsm.seq || 0 };
+}
+
+// decisione anticipata: parte alla prima pausa di 300 ms, si usa a fine turno se nel frattempo non hai ripreso a parlare
+let speculative = null;
+function onUserPause(audio, speechMs) {
+    if ($('trigMode').value !== 'tool' || toolBusy) return;
+    const t0 = performance.now();
+    speculative = { speechMs, stale: false, t0, promise: decideUtterance(audio).catch(e => ({ ok: false, status: 0, d: { error: e.message }, dt: '?' })) };
+}
+
 /** Fine del tuo turno: ASR della sola battuta (GPU) + estrazione + evento alla FSM. */
-async function onUserTurnEnd(utterance) {
+async function onUserTurnEnd(utterance, speechMs) {
     const secs = (utterance.length / SR_IN).toFixed(1);
     hudLog('sys', `TURNO UTENTE finito (${secs} s di voce)`);
     if ($('trigMode').value !== 'tool') return;
     if (toolBusy) { pendingTurns.push(utterance); if (pendingTurns.length > 2) pendingTurns.shift(); hudLog('sys', `estrattore occupato: battuta in coda (${pendingTurns.length})`); return; }
     toolBusy = true;
     try {
-        const t0 = performance.now();
-        const transcript = dialog.slice(-8);
-        const r = await fetch('/api/tool_agent/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ transcript, user_audio_b64: arrayBufferToBase64(utterance.buffer), language: 'en', fsm: hud.fsm }) });
-        const d = await r.json();
-        const dt = ((performance.now() - t0) / 1000).toFixed(2);
-        if (!r.ok) { hudLog('warn', `estrattore: ${d.error || r.status}`); return; }
+        let res;
+        const spec = speculative; speculative = null;
+        if (spec && !spec.stale && spec.speechMs === speechMs) {
+            // stessa voce della pausa: il risultato anticipato vale per tutto il turno
+            res = await spec.promise;
+            hudLog('sys', `decisione anticipata alla pausa: usata (partita ${((performance.now() - spec.t0) / 1000).toFixed(1)} s fa, calcolo ${res.dt} s)`);
+        } else {
+            if (spec) hudLog('sys', 'decisione anticipata scartata (hai ripreso a parlare)');
+            res = await decideUtterance(utterance);
+        }
+        const { ok, status, d, dt } = res;
+        if (!ok) { hudLog('warn', `estrattore: ${d.error || status}`); return; }
         if (d.user_text) { conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 12) dialog.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;

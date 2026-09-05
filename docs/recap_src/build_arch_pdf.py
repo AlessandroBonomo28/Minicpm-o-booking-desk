@@ -220,6 +220,47 @@ for b in ["<b>Ora, senza toccare l'omni</b>: ASR in streaming con eventi increme
           "<b>Poi, toccando l'omni</b>: stadio-ruolo con i token evento, gate in doppio contesto (training e deploy), giudice il test dal vivo. Se passa, ε diventa interno e il sistema resta identico per il resto.",
           "<b>Cosa non fare</b>: strumenti di fuga per il modello (wait, none quando è attraente), istruzioni discorsive sul frame, un secondo turn-taking sopra quello nativo, valori copiabili nello stato dove non sono azionabili. Tutte cose già misurate."]:
     E.append(Paragraph(b, BUL, bulletText="•"))
+E += [PageBreak(), Paragraph("7. Implementato il 05/09 senza toccare l'omni: cosa ha dato", H1),
+      Paragraph("Tre interventi della tabella 5.1, ognuno misurato a variabile singola dove possibile. Nessuna modifica al modello vocale, al backend o al training.", P)]
+E.append(table([["Intervento", "Come", "Misura", "Esito"],
+                ["<b>Decisione anticipata alla pausa</b> (primo passo verso lo streaming)", "alla prima pausa di 300 ms il browser manda l'audio detto finora ad ASR + estrattore; a turno confermato (600 ms) il risultato si applica solo se non hai ripreso a parlare, altrimenti si scarta e si rifà. Nessun evento da frasi a metà.", "attesa: fine frase → frame da ~1,8 s a ~1,2 s (la decisione parte 300 ms dopo la pausa invece che 600 ms + calcolo)", "da confermare dal vivo con le righe STATO ("decisione anticipata: usata / scartata")"],
+                ["<b>Decodifica vincolata per il locale</b> (lm-format-enforcer)", "grammatica JSON imposta ai token: solo chiamate valide (book / check / cancel / none, campi stringa o null)", "regressione: <b>44/55</b> contro 47 libera; dialogo 18/24 contro 17/20", "<b>scartata</b> come default: sparisce il formato rotto ma il 1,7B, costretto a riempire il JSON, inventa ("Nine" → September 9; "15" → April 15). Resta attivabile (TA_CONSTRAINED=1)"],
+                ["<b>Schermo a due metà</b>: atto sopra (ASK: DAY, ASK: CONFIRM BOOKING, SAY: BOOKED…), stato sotto", "tabella stato → atto nel codice; selettore nel pannello (solo stato / due metà) per il confronto nella stessa sessione; riga di prompt da aggiungere", "da misurare: reazioni ai frame più uniformi? letture letterali ("ask day")?", "esperimento pronto, non ancora giudicato"],
+                ["Contratto pulito (Set / Answer / Abort), imbuto con conteggi, VAD 800 ms", "—", "—", "non fatti: il contratto a tre strumenti è una scelta esplicita di oggi (cloud 24/24); imbuto e VAD restano in lista"]], [3.6, 5.6, 3.9, 3.7]))
+E += [Spacer(1, 6),
+      Paragraph("Lezione della decodifica vincolata: togliere al modello la possibilità di sbagliare il formato non lo rende più preciso; lo obbliga a riempire campi che non ha. "
+                "Per un modello piccolo, la libertà di non rispondere (nessuna chiamata) vale più della garanzia sintattica. È coerente con tutto il resto: ogni "
+                "\"obbligo\" dato al 1,7B è finito in un'invenzione.", P)]
+
+E += [Paragraph("8. Il percorso che tocca l'omni: piano su un ramo separato (solo scritto, non implementato)", H1),
+      Paragraph("Obiettivo: l'omni emette gli eventi E da solo, nel suo flusso di testo, con token non parlati. Tutto il lato macchina e HUD resta identico. "
+                "Il lavoro va su un ramo di sviluppo separato, con il modello principale (base e v1.3) intoccato e sempre avviabile.", P),
+      Paragraph("8.1 Isolamento", H2)]
+for b in ["<b>Ramo git</b> <font face='DVM'>omni-eventi</font> in un <b>worktree</b> separato (<font face='DVM'>../MiniCPM-o-Demo-omni-eventi</font>), come già fatto per il ramo puro: stesso .git, cartella diversa, nessun revert per passare dall'uno all'altro. Le modifiche a MiniCPMO45/ restano in commit separati.",
+          "<b>Pesi</b>: nessun file esistente viene toccato. Le nuove LoRA vanno in <font face='DVM'>training/releases/omni_eventi_v0_x/</font>; il launcher del ramo (<font face='DVM'>tools/run_demo_eventi.sh</font>) le carica con <font face='DVM'>--pt-path</font>; <font face='DVM'>run_demo_hud.sh</font> e <font face='DVM'>run_demo_v13.sh</font> continuano a caricare base e v1.3. Regola: mai cancellare una release.",
+          "<b>Interruttore nel gateway</b>: la sorgente degli eventi è una scelta (<font face='DVM'>events_from = extractor | omni</font>); con <font face='DVM'>omni</font> l'estrattore e l'ASR laterale non partono. Sulla stessa pagina HUD si confrontano le due sorgenti con le stesse regressioni e le stesse righe STATO.",
+          "<b>Una GPU</b>: training, valutazione e demo si escludono; corse lunghe con setsid e monitor, come da CLAUDE.md."]:
+    E.append(Paragraph(b, BUL, bulletText="•"))
+E += [Paragraph("8.2 Il formato degli eventi nel flusso dell'omni", H2),
+      Paragraph("Token speciali aggiunti al tokenizer (già estensibile: ci sono i token di controllo listen/speak, fine chunk, fine turno): "
+                "<font face='DVM'>⟨ev⟩ … ⟨/ev⟩</font> con dentro un evento dell'algebra in forma compatta, per esempio "
+                "<font face='DVM'>⟨ev⟩set day=20⟨/ev⟩</font>, <font face='DVM'>⟨ev⟩answer yes⟨/ev⟩</font>, <font face='DVM'>⟨ev⟩set intent=book⟨/ev⟩</font>, "
+                "<font face='DVM'>⟨ev⟩abort⟨/ev⟩</font>. Posizione: all'inizio del turno di risposta dell'omni, prima del testo parlato, nell'unità in cui decide di parlare "
+                "(o in un'unità di ascolto, se vogliamo l'evento anche quando non risponde). Il decoder vocale ignora tutto ciò che sta tra ⟨ev⟩ e ⟨/ev⟩ "
+                "(filtro nel taglio dei chunk, dove già si escludono i token di controllo dalla storia della penalità). Il backend intercetta gli eventi dal flusso di testo "
+                "e li manda alla stessa <font face='DVM'>/api/hud_fsm/event</font> di oggi.", P),
+      Paragraph("8.3 I dati", H2)]
+for b in ["<b>Sorgente</b>: le sessioni già registrate (<font face='DVM'>data/sessions/</font>: audio dell'utente per unità, testo dell'omni, frame) più dialoghi di sportello generati: scenari D1-D11 e varianti, in inglese prima (distribuzione nativa del base), poi in italiano.",
+          "<b>Annotazione</b>: per ogni turno dell'utente, l'evento E corretto, prodotto dalla stessa FSM di oggi (che è deterministica) a partire dalla trascrizione: il set di regressione diventa il set di training. Le unità omni-flow si costruiscono con la pipeline esistente (<font face='DVM'>training/</font>), con il blocco visivo presente (frame dell'HUD) perché il frame resta l'ingresso.",
+          "<b>Volume</b>: qualche centinaio di dialoghi (2-4 mila unità) bastano per il formato; la generalità semantica la porta il modello. Le predizioni vanno scritte prima: precisione degli eventi ≥ quella dell'estrattore cloud sul set (51/55, 24/24), latenza dell'evento = latenza del primo token."]:
+    E.append(Paragraph(b, BUL, bulletText="•"))
+E += [Paragraph("8.4 Training e gate", H2)]
+for b in ["<b>Stadio-ruolo</b> sulla LoRA del backbone (come per l'italiano v1.x), poche centinaia di passi, partendo dal base per l'inglese; i pesi del vocale e dell'encoder non si toccano. Contratto di distribuzione compilato prima della corsa (<font face='DVM'>plan/contratto-distribuzione.md</font>): stesso prompt, stessa voce di riferimento, stessi frame del deploy.",
+          "<b>Gate in doppia condizione</b>: (1) replay delle sessioni registrate con il backend del ramo, leggendo gli eventi dal flusso di testo e confrontandoli con le attese delle regressioni; (2) test dal vivo di Alessandro sulla pagina HUD con <font face='DVM'>events_from=omni</font>. Si promuove solo chi passa entrambi.",
+          "<b>Rischi da misurare</b>: token evento pronunciati o omessi; turn-taking rallentato dai token in più (~0,1 s ciascuno); sessioni lunghe (finestra KV) con i token evento; regressione della voce inglese/italiana. Se fallisce, il ramo resta un ramo e il principale non se ne accorge.",
+          "<b>Cosa non cambia</b>: R, δ, ρ, il linguaggio del frame, db.html, le regressioni, il launcher del ramo principale."]:
+    E.append(Paragraph(b, BUL, bulletText="•"))
+
 E += [Spacer(1, 10), Paragraph("Fonti interne: plan/ramo-hud.md (specifica, test dal vivo 1-9, misure), analisi-toolcalling.md (§1-8: errori di copia, prompt, cloud, operazioni, semplificazione), tools/tool_agent_eval*.py (75 casi). "
                                 "Esterne: doc Qwen function calling; Rasa LLM command generators; benchmark tool-calling dei modelli piccoli; confronto on-device 2026 (BFCL).", PS)]
 doc.build(E)

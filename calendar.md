@@ -341,3 +341,7 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 05/09 — **Stati CONFIRM/DONE**: l'estrattore risolve "yes"/"that day" leggendo l'offerta dallo STATO (15/20 sul
   set di dialogo, contro 13/20 con le righe di dialogo che riportano le copie). Il silenzio a fine sessione non è
   KV/timeout: l'omni parla solo dopo un frame, e sempre meno (test basic vs off da fare). Regressioni 55/55 e 15/20.
+- 05/09 — **Architettura teorica scritta** (`docs/architettura-hud-algebra.pdf`): HUD come linguaggio, eventi come
+  algebra; piano del ramo `omni-eventi` (solo scritto). Senza toccare l'omni: decisione anticipata alla pausa,
+  schermo a due metà (da giudicare dal vivo); decodifica vincolata misurata e scartata (44 vs 47). Estrattore:
+  tre strumenti fissi + stato di conferma per le prenotazioni, cloud flash-lite 51/55 e 24/24.

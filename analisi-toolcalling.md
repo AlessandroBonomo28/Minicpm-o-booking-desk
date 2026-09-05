@@ -134,3 +134,17 @@ Ogni prenotazione completa passa da CONFIRM ("WAIT FOR USER CONFIRMATION / BOOKI
 Aritmetica ("the next day"): non c'è più `shift_day`; il cloud la fa da solo leggendo il dialogo (March 31, April 5), il
 locale no (nessuna azione). Misure flash-lite: base 51/55 (mancati: "I need an appointment on May 5th" → check; "book
 for May" → check; "tomorrow at 9"; "I don't need you anymore" → cancel in DONE, innocuo), dialogo 24/24.
+
+## 9. Architettura teorica e interventi senza toccare l'omni (05/09)
+PDF: `docs/architettura-hud-algebra.pdf` (algebra R/E/A, funzioni ε/δ/ρ, linguaggio dell'HUD, mappa del sistema, cosa
+cambierebbe con e senza toccare l'omni, piano del ramo `omni-eventi`). Implementato oggi senza toccare l'omni:
+- **Decisione anticipata alla pausa**: alla prima pausa di 300 ms parte ASR + estrattore sull'audio detto finora; a turno
+  confermato si applica solo se non si è ripreso a parlare (registro: "decisione anticipata: usata / scartata"). Attesa:
+  fine frase → frame da ~1,8 a ~1,2 s. Da confermare dal vivo.
+- **Decodifica vincolata (lm-format-enforcer) per il locale**: misurata 44/55 contro 47 libera, dialogo 18/24: il 1,7B
+  costretto a riempire il JSON inventa ("Nine" → September 9, "15" → April 15). Spenta di default (TA_CONSTRAINED=1 per
+  provarla). Lezione: ogni obbligo dato al piccolo finisce in un'invenzione; la libertà di non chiamare vale più della
+  garanzia sintattica.
+- **Schermo a due metà** (atto sopra: ASK: DAY / ASK: CONFIRM BOOKING / SAY: BOOKED…, stato sotto), selettore nel pannello
+  per il confronto; riga di prompt da aggiungere a mano. Non ancora giudicato.
+Non fatti: contratto Set/Answer/Abort (scelta esplicita: tre strumenti), imbuto con conteggi, VAD 800 ms.

@@ -114,6 +114,24 @@ CONTEXT_RULES = ("\nThe lines before NOW are the conversation so far (OPERATOR =
 # ---- backend cloud (05/09): endpoint OpenAI-compatible del provider Cline (https://api.cline.bot/api/v1), stesso schema.
 #      Chiave/modello da ~/.config/tool_agent.env (TA_API_KEY, TA_BASE_URL, TA_MODEL); il locale resta come fallback.
 BACKEND = "local"
+CONSTRAINED = False
+_constrained_cache = {}
+
+
+def _constrained_prefix_fn(tools):
+    """Grammatica JSON per lm-format-enforcer: {"name": <uno degli strumenti o none>, "arguments": {month, day, time | null}}."""
+    from lmformatenforcer import JsonSchemaParser
+    from lmformatenforcer.integrations.transformers import build_transformers_prefix_allowed_tokens_fn
+    names = tuple(sorted(x["function"]["name"] for x in tools)) + ("none",)
+    if names not in _constrained_cache:
+        schema = {"type": "object",
+                  "properties": {"name": {"type": "string", "enum": list(names)},
+                                 "arguments": {"type": "object", "properties": {
+                                     "month": {"type": ["string", "null"]}, "day": {"type": ["string", "null"]}, "time": {"type": ["string", "null"]}},
+                                     "additionalProperties": False}},
+                  "required": ["name", "arguments"], "additionalProperties": False}
+        _constrained_cache[names] = build_transformers_prefix_allowed_tokens_fn(tok, JsonSchemaParser(schema))
+    return _constrained_cache[names]
 CLOUD = {"base_url": "https://api.cline.bot/api/v1", "model": "google/gemini-3.5-flash-lite", "key": "", "timeout": 4.0, "context": 6}
 
 
@@ -180,9 +198,19 @@ def decide(transcript, _tools_unused, fsm=None, context=0):
     if not raw and tok is not None:
         prompt = tok.apply_chat_template(messages, tools=tools, add_generation_prompt=True, tokenize=False, enable_thinking=False)
         with lock:
-            ids = tok(prompt, return_tensors="pt").to(model.device)
-            out = model.generate(**ids, max_new_tokens=120, do_sample=False)
-            raw = tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=False)
+            if CONSTRAINED:
+                # decodifica VINCOLATA: solo JSON valido per gli strumenti disponibili (niente formato rotto, niente 'day': 'of');
+                # si forza il prefisso <tool_call> e si lascia al modello solo la scelta dentro la grammatica
+                prompt2 = prompt + "<tool_call>\n"
+                ids = tok(prompt2, return_tensors="pt").to(model.device)
+                fn = _constrained_prefix_fn(tools)
+                out = model.generate(**ids, max_new_tokens=80, do_sample=False, prefix_allowed_tokens_fn=fn)
+                body = tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=True)
+                raw = "<tool_call>\n" + body.strip() + "\n</tool_call>"
+            else:
+                ids = tok(prompt, return_tensors="pt").to(model.device)
+                out = model.generate(**ids, max_new_tokens=120, do_sample=False)
+                raw = tok.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=False)
     calls = []
     allowed = {x["function"]["name"] for x in tools}
     for m in TOOL_CALL_RE.finditer(raw):
@@ -274,9 +302,15 @@ def main() -> int:
     ap.add_argument("--cloud-model", default=None, help="id modello sul provider (default: TA_MODEL o google/gemini-3.5-flash-lite)")
     ap.add_argument("--no-local", action="store_true", help="con --backend cline: non caricare il modello locale (niente fallback, libera la VRAM)")
     args = ap.parse_args()
-    global tok, model, BACKEND
+    global tok, model, BACKEND, CONSTRAINED
     load_env_file("~/.config/tool_agent.env")
     BACKEND = args.backend
+    try:
+        import lmformatenforcer  # noqa: F401
+        CONSTRAINED = os.environ.get("TA_CONSTRAINED", "0") == "1"   # misurato 05/09: vincolata 44/55 contro 47 libera (inventa valori per riempire il JSON)
+    except ImportError:
+        CONSTRAINED = False
+    print(f"decodifica vincolata (locale): {'ON' if CONSTRAINED else 'OFF'}", flush=True)
     if BACKEND == "cline":
         CLOUD["key"] = os.environ.get("TA_API_KEY", ""); CLOUD["base_url"] = os.environ.get("TA_BASE_URL", CLOUD["base_url"])
         CLOUD["model"] = args.cloud_model or os.environ.get("TA_MODEL", CLOUD["model"])

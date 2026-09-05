@@ -73,6 +73,9 @@
         <span class="small">livello <b id="vadMeter">0.000</b> · <b id="vadState">silenzio</b></span></div>
       <div class="row"><label>Modello separato</label>
         <span class="small">alla FINE DEL TUO TURNO (VAD): ASR della sola battuta (GPU) → l'estrattore vede SOLO le tue parole + lo stato della FSM e risponde <code>book / check / cancel / none</code> con data/ora dette → la FSM (gateway) fa il merge, decide cosa manca (<b>MISSING</b>), esegue sul DB e lo schermo mostra il nuovo stato. Specifica: <code>plan/ramo-hud.md</code>.</span></div>
+      <div class="row"><label>Schermo</label>
+        <select id="screenMode"><option value="state" selected>solo stato (come finora)</option><option value="act">due metà: atto sopra (ASK: DAY / SAY: BOOKED), stato sotto</option></select>
+        <span class="small">con "due metà" aggiungi al prompt: "The top of the screen tells you what to do next; the bottom shows the booking system."</span></div>
       <div class="row"><label>Frame iniziale</label>
         <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
       <div class="row"><label>Frame manuale</label><button id="btnFrame" disabled>Invia il frame corrente ora</button></div>

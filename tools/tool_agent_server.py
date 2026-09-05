@@ -51,9 +51,10 @@ DEFAULT_TOOLS = [
 # ---- 05/09 sera (Alessandro): l'algebra senza scorciatoie. Quattro eventi con un significato solo:
 #      set = valori detti (mai scrive nel DB); yes / no = risposta alla domanda aperta (yes e' l'UNICO evento che scrive);
 #      cancel = abbandono. Nessuna chiamata = nulla. "yes, at 3 pm" = set(time) + nuova conferma (yes non porta valori).
-_FIELDS = {"month": {"type": ["string", "null"], "description": "month NAME as the customer said it ('April'); null if not said"},
-           "day": {"type": ["string", "null"], "description": "day of the month as said ('2nd', 'the second', '30'); null if not said"},
-           "time": {"type": ["string", "null"], "description": "time as said ('3 pm', 'half past ten', '15'); null if not said"}}
+# Formato CANONICO in uscita dal modello (ramo hud-semaforo-fixrules): il modello normalizza il linguaggio, il gateway verifica.
+_FIELDS = {"month": {"type": ["string", "null"], "description": "month as an English month name in lowercase ('april'); null if not said"},
+           "day": {"type": ["string", "null"], "description": "day of the month as a plain number 1-31 ('2', '30'): convert 'the second' -> '2', '28th' -> '28'; null if not said"},
+           "time": {"type": ["string", "null"], "description": "time in 24h HH:MM ('15:00', '09:30'): convert '3 p.m.' -> '15:00', 'half past ten' -> '10:30', 'nine' -> '09:00' (1-7 without am/pm = afternoon); null if not said"}}
 def _fn(name, desc, props=None, required=None):
     return {"type": "function", "function": {"name": name, "description": desc,
             "parameters": {"type": "object", "properties": props or {}, "required": required or []}}}
@@ -69,7 +70,11 @@ def tools_for_state(fsm):
 
 # ---- heard (05/09 sera): secondo orecchio = le RIPETIZIONI dell'operatore. L'omni sente meglio di Whisper; quando ripete un
 #      valore ("Got it, April 20th") lo si legge come valore TENTATIVO (solo campi mancanti, conferma a livello di campo).
-HEARD_TOOL = _fn("heard", "The OPERATOR (the desk) states a month, a day or a time as something the customer said (a readback: 'Got it, April 20th', 'April 20th at 15, what time?', 'so, the 2nd of May'). Pass only values the operator repeats as the customer's. NOT questions ('what day?'), NOT proposals ('how about 16:00?', 'we have 9 or 11'), NOT examples.", dict(_FIELDS))
+HEARD_TOOL = _fn("heard", "What the OPERATOR (the desk) just said. Fields month/day/time: ONLY values the operator repeats as the customer's (a readback: 'Got it, April 20th'); NOT questions, NOT proposals, NOT examples. Field claim: what the operator asserts about the booking system, if anything.",
+                 {**_FIELDS,
+                  "claim": {"type": ["string", "null"], "enum": ["slot_taken", "slot_free", "slot_invalid", "booking_confirmed", None],
+                            "description": "slot_taken = says a time/day is taken or unavailable; slot_free = says a time/day is free or proposes it ('how about 16:00?', '6 pm is available'); slot_invalid = says a time/day is not valid; booking_confirmed = says the booking is done/confirmed/booked; null otherwise"},
+                  "claim_time": {"type": ["string", "null"], "description": "the time the claim is about, 24h HH:MM; null if none"}})
 HEARD_PROMPT = ("You read what the OPERATOR of a voice booking desk just said to the customer. Call `heard` with the month / day / time "
                 "the operator repeats as understood from the customer; if the sentence repeats nothing (a question, a proposal, a greeting, "
                 "a confirmation without values), call no function and answer NONE.")
@@ -86,7 +91,7 @@ def decide_heard(operator_text, fsm):
             a = json.loads(args_json or "{}")
         except Exception:
             a = {}
-        args = {k: str(v).strip() for k, v in a.items() if k in ("month", "day", "time") and isinstance(v, (str, int, float)) and str(v).strip().lower() not in _EMPTY}
+        args = {k: str(v).strip() for k, v in a.items() if k in ("month", "day", "time", "claim", "claim_time") and isinstance(v, (str, int, float)) and str(v).strip().lower() not in _EMPTY}
         if args:
             calls.append({"name": "heard", "arguments": args})
     return {"tool_calls": calls, "backend": f"cline:{used_model} {ms:.0f}ms"}
@@ -97,8 +102,8 @@ LOCAL_PROMPT = ("You are the request extractor of a booking desk. Read STATE and
 PROMPT_API = ("You are the request extractor of a voice booking desk (OPERATOR = the desk, USER = the customer, transcribed by an ASR "
               "with small errors). Read STATE, the last lines of the conversation and the customer's NOW line, then call at most ONE "
               "function about the NOW line.\n"
-              "set = what the customer states: intent (book / check) and/or month, day, time, copied as said (spoken times may be "
-              "converted to HH:MM). Never guess or compute values; a bare number answers what the desk just asked.\n"
+              "set = what the customer states: intent (book / check) and/or month, day, time, NORMALIZED: month name in lowercase, "
+              "day as a number, time as 24h HH:MM. Never guess or compute values; a bare number answers what the desk just asked.\n"
               "yes / no = a plain answer to the desk's open yes/no question (STATE says if there is one). If the customer answers yes "
               "but also changes a value ('yes, at 3 pm'), call set with the value, not yes. A yes/no when STATE has no open question "
               "is still yes/no (the desk will ignore it).\n"

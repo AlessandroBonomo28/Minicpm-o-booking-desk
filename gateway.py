@@ -839,7 +839,10 @@ def _hud_parse_clock(t: str):
     """Orario parlato -> minuti dalla mezzanotte (None se non e' un orario). Accetta cifre e parole:
     '3 pm', '15', '3:00', '10.30', 'nine', 'nine thirty', 'half past ten', 'quarter past nine', 'quarter to six',
     'three in the afternoon', '8 in the evening', 'noon', 'ten o'clock'. Sportello: 1-7 senza am/pm = pomeriggio."""
-    t = t.strip().lower().replace(".", ":").replace("o'clock", "").replace("oclock", "")
+    t = t.strip().lower()
+    t = re.sub(r"\b([ap])\.\s*m\.?", r"\1m", t)             # 'p.m.' -> 'pm' prima di toccare i punti
+    t = re.sub(r"(\d)\.(\d)", r"\1:\2", t)                    # '10.30' -> '10:30' solo tra cifre
+    t = t.replace("o'clock", "").replace("oclock", "").rstrip(".").strip()
     t = re.sub(r"^(at|alle|ore)\s+", "", t).strip()
     if t in ("noon", "midday"): return 12 * 60
     if t == "midnight": return 0
@@ -871,10 +874,17 @@ def _hud_parse_clock(t: str):
 
 def _hud_norm_time(x: str) -> str:
     """Normalizza il campo ora (libero): '' / 'all day' -> 'all-day'; '3 pm' -> '15:00';
-    '3-17' / '15:00-17:00' / '3 pm - 5 pm' -> '15:00-17:00'. Altro testo: com'e', minuscolo."""
+    '3-17' / '15:00-17:00' / '3 pm - 5 pm' -> '15:00-17:00'. Altro testo: com'e', minuscolo.
+    Ordine (ramo fixrules): 1) forma CANONICA (HH:MM, H) accettata subito; 2) a.m./p.m./o'clock normalizzati PRIMA dei punti;
+    3) parser a regole (locale verbatim e form manuale)."""
     t = str(x or "").strip().lower()
     if t in _ALL_DAY:
         return "all-day"
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", t)            # canonico dal modello cloud
+    if m and int(m.group(1)) <= 24 and int(m.group(2)) <= 59:
+        return f"{int(m.group(1)) % 24:02d}:{m.group(2)}"
+    t = re.sub(r"\b([ap])\.\s*m\.?", r"\1m", t)            # '3 p.m.' -> '3 pm' (prima che i punti diventino ':')
+    t = re.sub(r"\bo'?clock\b", "", t).strip()
     t = re.sub(r"^(at|alle|ore)\s+", "", t)
     parts = re.split(r"\s*(?:-|–|to|a|alle)\s*", t)
     if len(parts) == 2:
@@ -1134,8 +1144,9 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         name = "set"   # "yes, at 3 pm" = correzione + nuova conferma: yes non porta valori
     tentative = dict(fsm.get("tentative") or {})
     if name == "heard":
-        # secondo orecchio: solo in raccolta, solo campi MANCANTI, mai sopra un valore del cliente; il campo diventa TENTATIVO
-        if state != "COLLECTING":
+        # secondo orecchio: solo in raccolta, solo campi MANCANTI, mai sopra un valore del cliente; il campo diventa TENTATIVO.
+        # Se il turno e' un CLAIM ("19:00 is taken", "confirmed"), i valori sono il soggetto dell'affermazione, non una ripetizione: non entrano.
+        if state != "COLLECTING" or clean(args.get("claim")):
             _hud_db_save(); return fsm, False
         slots = dict(_HUD_EMPTY_SLOTS, **ref); filled = []
         if said["month"] and not slots.get("month"):
@@ -1280,32 +1291,28 @@ _PROPOSE_TIME = re.compile(r"(?:\b(?:how about|what about|we have|available at|t
 
 
 def _hud_supervise(fsm, omni_text: str, heard_args: dict):
-    """Ritorna (level, hint). Regole: l'omni ha ragione salvo incoerenza con se stesso/il record solido o con il DB."""
+    """Ritorna (level, hint). Il modello cloud (heard) traduce il turno dell'omni in un CLAIM canonico; qui si verifica il claim
+    contro record e DB. Nessuna regex sul linguaggio: le forme le copre il modello, i fatti li controlla il codice."""
     st = fsm.get("state"); sl = fsm.get("slots") or {}; tent = fsm.get("tentative") or {}
-    txt = omni_text or ""
-    # ROSSO: afferma una prenotazione fatta mentre non e' scritta
-    if _CLAIM_BOOKED.search(txt) and not (st == "DONE" and fsm.get("status") == "confirmed") and fsm.get("intent") == "book":
+    h = heard_args or {}
+    claim = (h.get("claim") or "").lower(); ct = _hud_norm_time(h.get("claim_time") or "")
+    booked_now = (st == "DONE" and fsm.get("status") == "confirmed")
+    if claim == "booking_confirmed" and not booked_now:
         return "red", "NOTHING BOOKED YET"
-    # ROSSO: propone un orario che il DB dice occupato
-    m = _PROPOSE_TIME.search(txt)
-    if m and sl.get("date"):
-        h, mi, ap = (m.group(1), m.group(2), m.group(3)) if m.group(1) else (m.group(4), m.group(5), m.group(6))
-        hh = f"{h}{':' + mi if mi else ''} {ap or ''}".strip()
-        tm = _hud_norm_time(hh)
-        if _hud_time_valid(tm, "book") and _hud_lookup(sl["date"], tm)[0] != "available":
-            return "red", f"{_hud_time_label(tm)} IS TAKEN"
-    # GIALLO: ripete un valore che contraddice un valore SOLIDO del cliente
+    if claim in ("slot_taken", "slot_invalid", "slot_free") and sl.get("date") and _hud_time_valid(ct, "book"):
+        free = _hud_lookup(sl["date"], ct)[0] == "available"
+        if claim in ("slot_taken", "slot_invalid") and free:
+            return "red", f"{_hud_time_label(ct)} IS FREE"
+        if claim == "slot_free" and not free:
+            return "red", f"{_hud_time_label(ct)} IS TAKEN"
+    # GIALLO: ripete un valore che contraddice un valore SOLIDO del cliente (valori canonici: confronto diretto)
     for k in ("month", "day", "time"):
-        v = (heard_args or {}).get(k)
+        v = h.get(k)
         if v and sl.get(k) and not tent.get(k):
-            # normalizzazione tollerante ("28 th" dell'ASR, "6:00 PM"): un falso giallo costa un'autocorrezione a vuoto
-            norm = _hud_norm_date(v) if k == "month" else (_hud_words_to_digits(re.sub(r"(\d+)\s*(st|nd|rd|th)\b", r"\1", str(v).lower())).replace("the ", "").strip() if k == "day" else _hud_norm_time(v))
-            cur = sl[k] if k != "time" else _hud_norm_time(sl[k])
+            norm = _hud_norm_date(v) if k == "month" else (str(v).strip().lstrip("0") if k == "day" else _hud_norm_time(v))
+            cur = (sl[k] if k == "month" else (str(sl[k]).lstrip("0") if k == "day" else _hud_norm_time(sl[k])))
             if norm != cur:
                 return "yellow", "CHECK THE SCREEN"
-    # GIALLO: parla di conferma quando manca ancora qualcosa
-    if st == "COLLECTING" and re.search(r"\b(confirm|book it now)\b", txt, re.I):
-        return "yellow", "CHECK THE SCREEN"
     return "green", ""
 
 

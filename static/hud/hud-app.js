@@ -550,7 +550,7 @@ refreshAsrProfile();
 async function onOperatorTurnEnd(text) {
     let calls = [];
     try {
-        if ($('heardOn').checked && hud.fsm.state === 'COLLECTING') {
+        if ($('heardOn').checked) {
             const t0 = performance.now();
             const r = await fetch('/api/tool_agent/heard', { method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ operator_text: text, fsm: hud.fsm }) });

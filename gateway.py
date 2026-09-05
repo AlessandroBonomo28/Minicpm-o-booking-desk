@@ -1246,8 +1246,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
     if "time" in rejected and "time" not in missing:
         missing.append("time")
-    if missing or tentative:
-        # con un tentativo ancora da confermare non si esegue: prima CONFIRM del campo (yes/no a livello di campo)
+    if missing:
+        # ramo hud-semaforo: i tentativi (heard) NON bloccano; la conferma finale (con i valori) li copre
         return bump(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, tentative=tentative, status=None, detail="", note="", free=None)
     date = slots["date"]; tm = _hud_norm_time(slots.get("time"))
     if intent == "check":
@@ -1271,12 +1271,66 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     return bump(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative={}, status=res["status"], detail=res.get("detail") or "", note="", free=free)
 
 
+# ---- ramo hud-semaforo: il supervisore e' DETERMINISTICO sul record R̂ e su incoerenze verificabili dell'omni.
+#      verde = l'omni guida (schermo = stato); giallo = lo schermo torna a dettare l'atto; rosso = correzione fissa.
+_CLAIM_BOOKED = re.compile(r"\b(is|are|now|been|already)?\s*(confirmed|booked|reserved|all set|scheduled)\b", re.I)
+_PROPOSE_TIME = re.compile(r"\b(how about|what about|we have|available at|try)\b[^.?!]*?\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|o'clock)?", re.I)
+
+
+def _hud_supervise(fsm, omni_text: str, heard_args: dict):
+    """Ritorna (level, hint). Regole: l'omni ha ragione salvo incoerenza con se stesso/il record solido o con il DB."""
+    st = fsm.get("state"); sl = fsm.get("slots") or {}; tent = fsm.get("tentative") or {}
+    txt = omni_text or ""
+    # ROSSO: afferma una prenotazione fatta mentre non e' scritta
+    if _CLAIM_BOOKED.search(txt) and not (st == "DONE" and fsm.get("status") == "confirmed") and fsm.get("intent") == "book":
+        return "red", "NOTHING BOOKED YET"
+    # ROSSO: propone un orario che il DB dice occupato
+    m = _PROPOSE_TIME.search(txt)
+    if m and sl.get("date"):
+        hh = f"{m.group(2)}{':' + m.group(3) if m.group(3) else ''} {m.group(4) or ''}".strip()
+        tm = _hud_norm_time(hh)
+        if _hud_time_valid(tm, "book") and _hud_lookup(sl["date"], tm)[0] != "available":
+            return "red", f"{_hud_time_label(tm)} IS TAKEN"
+    # GIALLO: ripete un valore che contraddice un valore SOLIDO del cliente
+    for k in ("month", "day", "time"):
+        v = (heard_args or {}).get(k)
+        if v and sl.get(k) and not tent.get(k):
+            norm = _hud_norm_date(v) if k == "month" else (_hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", str(v).lower())).replace("the ", "").strip() if k == "day" else _hud_norm_time(v))
+            cur = sl[k] if k != "time" else _hud_norm_time(sl[k])
+            if norm != cur:
+                return "yellow", "CHECK THE SCREEN"
+    # GIALLO: parla di conferma quando manca ancora qualcosa
+    if st == "COLLECTING" and re.search(r"\b(confirm|book it now)\b", txt, re.I):
+        return "yellow", "CHECK THE SCREEN"
+    return "green", ""
+
+
+@app.post("/api/hud_fsm/omni_turn")
+async def hud_fsm_omni_turn(request: Request):
+    """Fine turno dell'omni: applica heard (se c'e') e giudica il turno (semaforo)."""
+    body = await request.json()
+    calls = body.get("tool_calls") or []
+    heard_args = next((c.get("arguments") or {} for c in calls if c.get("name") == "heard"), {})
+    changed = False
+    if calls:
+        _, changed = _hud_fsm_apply(calls, "", body.get("outcome") or "auto", body.get("source") or "heard", body.get("delay_s"))
+    fsm = _HUD_DB.get("fsm") or _hud_fsm_reset()
+    level, hint = _hud_supervise(fsm, body.get("text") or "", heard_args)
+    if (fsm.get("level") or "green") != level or (fsm.get("hint") or "") != hint:
+        fsm["level"] = level; fsm["hint"] = hint; fsm["seq"] = int(fsm.get("seq") or 0) + 1; fsm["updated"] = datetime.now().isoformat(timespec="seconds")
+        changed = True
+    _hud_db_save()
+    return JSONResponse(content={"fsm": fsm, "changed": changed, "level": level, "hint": hint})
+
+
 @app.post("/api/hud_fsm/event")
 async def hud_fsm_event(request: Request):
     """Un turno dell'utente: {tool_calls:[{name, arguments}], user_text, outcome, source, delay_s} -> {fsm, changed}."""
     body = await request.json()
     fsm, changed = _hud_fsm_apply(body.get("tool_calls") or [], body.get("user_text") or "", body.get("outcome") or "auto",
                                   body.get("source") or "?", body.get("delay_s"))
+    if changed and fsm.get("level") not in (None, "green"):
+        fsm["level"] = "green"; fsm["hint"] = ""; _hud_db_save()   # un evento del cliente rimette in carreggiata: si riparte verde
     return JSONResponse(content={"fsm": fsm, "changed": changed})
 
 

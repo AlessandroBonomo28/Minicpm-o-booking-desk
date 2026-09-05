@@ -43,8 +43,8 @@ const hud = {
         // un valore respinto e' un evento: entra nell'impronta con il numero di sequenza, cosi' produce un frame anche se
         // lo schermo e' uguale a prima (il frame e' il clock: "April" due volte -> due frame)
         const rej = Object.keys(f.rejected || {}).length ? `|rej${f.seq || 0}:${JSON.stringify(f.rejected)}` : '';
-        const act = ($('screenMode') && $('screenMode').value === 'act') ? actFor() : '';
-        return JSON.stringify(themeForSeq()) + '|' + act + rej;   // il colore alternato entra nell'impronta: ogni cambio di stato = un frame
+        const act = (f.level && f.level !== 'green') ? actFor() : '';
+        return JSON.stringify(themeForSeq()) + '|' + act + '|' + (f.level || '') + (f.hint || '') + '|b' + (blinkLeft > 0 ? blinkPhase : '') + rej;
     },
 };
 const canvas = $('hud'), ctx = canvas.getContext('2d');
@@ -134,14 +134,26 @@ function actFor() {
     }
 }
 
+// ramo hud-semaforo: verde = l'omni guida (solo stato); giallo = atto dettato; rosso = correzione fissa. Il banner
+// lampeggia (3 frame alternati) a ogni cambio di livello per richiamare l'attenzione.
+const LIGHT = { green: '#2e7d32', yellow: '#f9a825', red: '#c62828' };
+let blinkLeft = 0, blinkPhase = 0, lastLevelSeen = 'green';
 function drawHud() {
     const W = canvas.width, H = canvas.height, theme = themeForSeq();
+    const level = hud.fsm.level || 'green', hint = hud.fsm.hint || '';
     ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = theme.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const act = ($('screenMode') && $('screenMode').value === 'act') ? actFor() : '';
+    // banner del semaforo in alto (lampeggia: colore pieno / bianco a fasi alterne)
+    const on = blinkLeft > 0 ? (blinkPhase % 2 === 0) : true;
+    ctx.fillStyle = on ? LIGHT[level] : '#ffffff'; ctx.fillRect(0, 0, W, H * 0.16);
+    ctx.fillStyle = on ? '#ffffff' : LIGHT[level]; ctx.font = 'bold 30px system-ui, sans-serif';
+    const bannerText = level === 'green' ? 'OK' : (level === 'yellow' ? `⚠ ${hint || 'CHECK THE SCREEN'}` : `■ ${hint || 'STOP'}`);
+    ctx.fillText(bannerText, W / 2, H * 0.08);
+    ctx.fillStyle = theme.fg;
+    const act = level !== 'green' ? actFor() : '';   // in verde l'omni guida: niente atto dettato
     if (act) {
         // schermo a due meta': sopra l'atto, sotto lo stato (linea di separazione)
-        ctx.font = 'bold 40px system-ui, sans-serif'; ctx.fillText(act, W / 2, H * 0.22);
+        ctx.font = 'bold 40px system-ui, sans-serif'; ctx.fillText(act, W / 2, H * 0.29);
         ctx.globalAlpha = 0.75; ctx.fillRect(W * 0.08, H * 0.40, W * 0.84, 3); ctx.globalAlpha = 1;
         ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.50);
         ctx.font = (theme.line1.length > 18 ? 'bold 26px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.63);
@@ -189,6 +201,7 @@ function applyFsm(fsm, delay = 0) {
     clearTimeout(queryTimer);
     fsm = Object.assign(IDLE_FSM(), fsm || {}); fsm.slots = Object.assign({ month: '', day: '', time: '', date: '' }, fsm.slots || {});
     const changed = JSON.stringify(fsm) !== JSON.stringify(hud.fsm);
+    if ((fsm.level || 'green') !== lastLevelSeen) { lastLevelSeen = fsm.level || 'green'; blinkLeft = 4; blinkPhase = 0; }   // lampeggio: 4 frame alternati
     hud.fsm = fsm;
     if ((fsm.state === 'CONFIRM' || fsm.state === 'DONE') && delay > 0 && changed && hud.screen !== 'CONFIRM' && hud.screen !== 'DONE') {
         hud.screen = 'CHECKING'; syncScreen();
@@ -312,7 +325,7 @@ function stateLine(tag) {
     const win = w.mode ? `${w.mode} ${w.high}/${w.low} scorr ${w.events ?? 0} scartati ${w.dropped_tokens ?? 0}` : '?';
     const fsm = `${f.state}${f.intent ? ' ' + f.intent : ''}${(f.slots.month || f.slots.day) ? ' ' + (f.slots.month || '?') + ' ' + (f.slots.day || '?') : ''}${f.slots.time ? ' ' + f.slots.time : ''}` +
         ((f.missing || []).length ? ' manca ' + f.missing.join(',') : '') + (f.status ? ' ' + f.status : '') + (f.note ? ' ' + f.note : '');
-    return `STATO [${tag}] KV ${m.kvCacheLength ?? '?'} · finestra ${win} · FSM ${fsm} · lp ${$('lengthPenalty').value} trp ${$('textRepPenalty').value}`;
+    return `STATO [${tag}] KV ${m.kvCacheLength ?? '?'} · finestra ${win} · FSM ${fsm} · semaforo ${f.level || 'green'}${f.hint ? ' ' + f.hint : ''} · lp ${$('lengthPenalty').value} trp ${$('textRepPenalty').value}`;
 }
 
 async function loadRefAudio() {
@@ -414,6 +427,7 @@ async function startSessionInner() {
                                            (audio, speechMs, ctxSec) => onUserPause(audio, speechMs, ctxSec), () => { if (speculative) speculative.stale = true; });
             mic = new MicCapture((audioF32) => {
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
+                if (!hud.pendingFrame && blinkLeft > 0) { blinkPhase++; blinkLeft--; hudSync(true); }   // fasi del lampeggio: un frame per chunk
                 if (hud.pendingFrame) {
                     msg.frame_base64_list = [hud.pendingFrame];
                     hud.pendingFrame = null; hud.framesSent++; hud.lastFrameAt = now(); awaitingReaction = true;
@@ -529,22 +543,30 @@ $('btnAsrProfile').onclick = async () => {
 };
 refreshAsrProfile();
 
-/** Secondo orecchio: a fine turno dell'omni, le sue ripetizioni diventano valori tentativi (solo in raccolta). */
+/** Fine turno dell'omni (ramo hud-semaforo): heard (se attivo e in raccolta) + giudizio deterministico del turno. */
 async function onOperatorTurnEnd(text) {
-    if (!$('heardOn').checked || hud.fsm.state !== 'COLLECTING') return;
+    let calls = [];
     try {
-        const t0 = performance.now();
-        const r = await fetch('/api/tool_agent/heard', { method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ operator_text: text, fsm: hud.fsm }) });
-        const d = await r.json();
-        const dt = ((performance.now() - t0) / 1000).toFixed(2);
-        if (!r.ok) { hudLog('warn', `heard: ${d.error || r.status}`); return; }
-        const calls = d.tool_calls || [];
-        if (!calls.length) { hudLog('sys', `heard (${dt} s): l'omni non ripete valori — "${text.slice(0, 50)}"`); return; }
-        hudLog('hud', `HEARD (${dt} s · ${d.backend || ''}): ${JSON.stringify(calls[0].arguments)} da "${text.slice(0, 50)}"`);
-        await fsmEvent(calls, '', 'heard (turno omni)');
-        conv('sys', stateLine(`heard dall'omni: ${JSON.stringify(calls[0].arguments)}`));
-    } catch (e) { hudLog('warn', 'heard errore: ' + e.message); }
+        if ($('heardOn').checked && hud.fsm.state === 'COLLECTING') {
+            const t0 = performance.now();
+            const r = await fetch('/api/tool_agent/heard', { method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ operator_text: text, fsm: hud.fsm }) });
+            const d = await r.json();
+            const dt = ((performance.now() - t0) / 1000).toFixed(2);
+            if (r.ok) {
+                calls = d.tool_calls || [];
+                if (calls.length) hudLog('hud', `HEARD (${dt} s): ${JSON.stringify(calls[0].arguments)} da "${text.slice(0, 50)}"`);
+                else hudLog('sys', `heard (${dt} s): l'omni non ripete valori`);
+            } else hudLog('warn', `heard: ${d.error || r.status}`);
+        }
+        const r2 = await fetch('/api/hud_fsm/omni_turn', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text, tool_calls: calls, outcome: $('qOutcome').value, source: 'heard (turno omni)' }) });
+        const d2 = await r2.json();
+        if (!r2.ok) { hudLog('warn', `semaforo: ${d2.error || r2.status}`); return; }
+        hudLog(d2.level === 'green' ? 'sys' : 'warn', `SEMAFORO ${d2.level.toUpperCase()}${d2.hint ? ' · ' + d2.hint : ''} — "${text.slice(0, 60)}"`);
+        applyFsm(d2.fsm, 0);
+        conv('sys', stateLine(`turno omni giudicato: ${d2.level}${d2.hint ? ' ' + d2.hint : ''}`));
+    } catch (e) { hudLog('warn', 'turno omni errore: ' + e.message); }
 }
 
 async function checkToolAgent() {

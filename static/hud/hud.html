@@ -74,7 +74,7 @@
       <div class="row"><label>Modello separato</label>
         <span class="small">alla FINE DEL TUO TURNO (VAD): ASR della sola battuta (GPU) → l'estrattore vede SOLO le tue parole + lo stato della FSM e risponde <code>book / check / cancel / none</code> con data/ora dette → la FSM (gateway) fa il merge, decide cosa manca (<b>MISSING</b>), esegue sul DB e lo schermo mostra il nuovo stato. Specifica: <code>plan/ramo-hud.md</code>.</span></div>
       <div class="row"><label>Schermo</label>
-        <select id="screenMode"><option value="act" selected>due metà: atto sopra (ASK: DAY / SAY: BOOKED), stato sotto</option><option value="state">solo stato</option></select>
+        <select id="screenMode"><option value="act" selected>semaforo: verde = solo stato, giallo/rosso = atto dettato (ramo hud-semaforo)</option><option value="state">solo stato</option></select>
         <span class="small">con "due metà" aggiungi al prompt: "The top of the screen tells you what to do next; the bottom shows the booking system."</span></div>
       <div class="row"><label>Orecchio laterale</label>
         <select id="asrProfile"><option value="turbo">Whisper large-v3-turbo · estrattore cloud senza fallback locale</option><option value="small">Whisper small · estrattore cloud con fallback locale (Qwen3-1.7B)</option></select>
@@ -92,7 +92,7 @@
     <div class="card">
       <h2>Sessione</h2>
       <div class="row"><label>Prompt di sistema</label></div>
-      <textarea id="systemPrompt">You are in duplex mode, where you can listen and speak at the same time. You are the operator of a booking desk, talking with a customer. The screen in front of you is the booking system: say out loud what's there. Always ask for missing informations and clarifications. Always say something, don't stay silent after the customer talked.</textarea>
+      <textarea id="systemPrompt">You are in duplex mode, where you can listen and speak at the same time. You are the operator of a booking desk. The screen is your guide: green = you are doing fine, keep going; yellow = check the screen and do what it says; red = stop and do what it says. Always answer the customer.</textarea>
       <div class="row">
         <label>Voce di riferimento</label>
         <select id="refChoice"><option value="english_call">inglese (preset English Call)</option><option value="italiano">italiano (preset italiano)</option><option value="none">nessuna (default backend)</option></select>

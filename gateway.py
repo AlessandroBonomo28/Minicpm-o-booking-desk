@@ -1100,9 +1100,9 @@ def _hud_free_hours(month: str, day: str):
 
 def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=None):
     """Applica UNA operazione dell'estrattore allo stato (05/09: il modello sceglie l'operazione, il codice calcola).
-    Strumenti: book(month, day, time) | check_availability(month, day, time) | cancel; nessuna chiamata = nulla.
-    Il significato lo da' lo stato: in CONFIRM book senza campi = conferma/accetta; campi senza mese = correzione;
-    in COLLECTING l'intento in corso non cambia."""
+    Eventi (05/09 sera, l'algebra senza scorciatoie): set(intent?, month?, day?, time?) = valori detti, mai scrive;
+    yes / no = risposta alla domanda aperta (yes e' l'UNICO evento che scrive, e non porta valori); cancel = abbandono;
+    nessuna chiamata = nulla. Compat: book/check_availability = set con intento."""
     fsm = _HUD_DB.get("fsm") or _hud_fsm_reset()
     fsm["last_user_text"] = user_text or ""
     now_s = datetime.now().isoformat(timespec="seconds")
@@ -1124,35 +1124,44 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     if name == "cancel":
         note = "REQUEST CANCELLED" if state == "COLLECTING" else ("BOOKING NOT CONFIRMED" if (state == "CONFIRM" and fsm.get("intent") == "book") else "")
         return _hud_fsm_reset(note=note), True
-    if name == "check":
-        name = "check_availability"
-    if name not in ("book", "check_availability"):
-        _hud_db_save(); return fsm, False
-    kind = "book" if name == "book" else "check"
     said = {k: clean(args.get(k)) for k in ("date", "month", "day", "time")}
     any_said = any(said.values())
-    if state == "CONFIRM":
-        if kind == "book" and not any_said:
-            # "yes": conferma la prenotazione in sospeso o accetta l'offerta (se manca l'ora la si chiede)
-            intent = "book"; confirmed = True
+    said_intent = clean(args.get("intent")).lower()
+    if name in ("book", "check", "check_availability"):   # compat
+        said_intent = "book" if name == "book" else "check"; name = "set"
+    if name == "yes" and any_said:
+        name = "set"   # "yes, at 3 pm" = correzione + nuova conferma: yes non porta valori
+    if name == "no":
+        if state == "CONFIRM" and fsm.get("intent") == "book":
+            return _hud_fsm_reset(note="BOOKING NOT CONFIRMED"), True
+        if state == "CONFIRM":
+            return bump(state="DONE")
+        _hud_db_save(); return fsm, False
+    if name == "yes":
+        if state != "CONFIRM":
+            _hud_db_save(); return fsm, False   # nessuna domanda si'/no aperta: il si' non lega a niente
+        # l'UNICO evento che scrive: conferma la prenotazione in sospeso o accetta l'offerta (se manca l'ora la si chiede)
+        intent = "book"; confirmed = True
+        slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
+        if ref.get("time") and ref.get("time") != "all-day":
+            slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
+    elif name == "set":
+        if not any_said and said_intent not in ("book", "check"):
+            _hud_db_save(); return fsm, False   # set senza campi = evento nullo
+        if state == "COLLECTING":
+            intent = said_intent if said_intent in ("book", "check") else fsm["intent"]   # merge sempre; l'intento detto e' una correzione
+            slots = dict(_HUD_EMPTY_SLOTS, **ref)
+        elif state == "CONFIRM":
+            # correzione sull'offerta / sulla prenotazione in sospeso: eredita, applica, si torna in conferma (mai si scrive)
+            intent = said_intent if said_intent in ("book", "check") else (fsm.get("intent") or "check")
             slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
             if ref.get("time") and ref.get("time") != "all-day":
                 slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
-        elif not said["month"] and not said["date"]:
-            # correzione/aggiunta sull'offerta o sulla prenotazione in sospeso: eredita e applica; torna in conferma
-            intent = kind; slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
-            if ref.get("time") and ref.get("time") != "all-day":
-                slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
         else:
-            intent = kind; slots = dict(_HUD_EMPTY_SLOTS)   # mese nuovo: richiesta nuova
-        if not any_said and kind == "check":
-            _hud_db_save(); return fsm, False
-    elif state == "COLLECTING" and fsm.get("intent") in ("book", "check"):
-        # in raccolta si fa SEMPRE merge (un mese detto sovrascrive, non azzera: "April" quando manca il mese e' la risposta);
-        # una richiesta nuova esiste solo da IDLE/DONE o dopo un annulla (Alessandro, 05/09)
-        intent = fsm["intent"]; slots = dict(_HUD_EMPTY_SLOTS, **ref)
+            intent = said_intent if said_intent in ("book", "check") else "check"   # richiesta nuova; un valore senza intento = verifica
+            slots = dict(_HUD_EMPTY_SLOTS)
     else:
-        intent = kind; slots = dict(_HUD_EMPTY_SLOTS)
+        _hud_db_save(); return fsm, False
 
     rejected = {}
     # un solo numero nella battuta non puo' essere insieme giorno E ora ("the 2nd" -> day='the 2nd', time='2')

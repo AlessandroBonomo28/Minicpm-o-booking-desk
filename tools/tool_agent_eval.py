@@ -115,29 +115,33 @@ def canon(st, got):
     if got is None:
         return None
     name, a = got[0], dict(got[1]); state = st.get("state"); ref = st.get("slots") or {}
-    if name == "check": name = "check_availability"
+    a = {k: v for k, v in a.items() if v}
+    if name in ("book", "check", "check_availability"):
+        a["intent"] = "book" if name == "book" else "check"; name = "set"
     if name == "cancel":
         return None if (state == "CONFIRM" and st.get("intent") == "check") else ("cancel", {})
-    if name not in ("book", "check_availability"):
+    if name == "no":
+        return ("cancel", {}) if (state == "CONFIRM" and st.get("intent") == "book") else None
+    if name == "yes" and any(a.get(k) for k in ("month", "day", "time")):
+        name = "set"
+    if name == "yes":
+        if state != "CONFIRM": return None
+        f = {"month": ref.get("month"), "day": ref.get("day")}
+        if ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
+        return ("book", f)
+    if name != "set":
         return None
-    kind = "book" if name == "book" else "check"
-    a = {k: v for k, v in a.items() if v}
-    if state == "CONFIRM":
-        if kind == "book" and not a:
-            f = {"month": ref.get("month"), "day": ref.get("day")}
-            if ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
-            return ("book", f)
-        if kind == "check" and not a:
-            return None
-        if not a.get("month"):
-            # come la FSM: senza un mese nuovo si eredita l'offerta
-            f = {"month": ref.get("month"), "day": ref.get("day")}
-            if ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
-            f.update(a)
-            return (kind, f)
+    intent = a.pop("intent", None)
+    if not a and intent not in ("book", "check"):
+        return None
     if state == "COLLECTING":
-        return (st.get("intent") or kind, a) if not a.get("month") else (kind, a)
-    return (kind, a)
+        return (intent if intent in ("book", "check") else st.get("intent"), a)
+    if state == "CONFIRM":
+        f = {"month": ref.get("month"), "day": ref.get("day")}
+        if ref.get("time") and ref.get("time") != "all-day": f["time"] = ref["time"]
+        f.update(a)
+        return (intent if intent in ("book", "check") else (st.get("intent") or "check"), f)
+    return (intent if intent in ("book", "check") else "check", a)
 
 
 def run(url, verbose):

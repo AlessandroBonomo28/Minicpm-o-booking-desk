@@ -164,3 +164,28 @@ tenuti → check() vuoto → invariato → "16" → conferma. Merge: check() →
 UI: schermo a due metà di default; prompt di default aggiornato ("the top of the screen tells you what to do next").
 Decisione anticipata alla pausa: usata in tutti i turni della sessione (frame a 0,3-0,6 s dalla fine della frase).
 Regressioni invariate: cloud 51/55, 24/24.
+
+## 11. L'algebra senza scorciatoie: set / yes / no / cancel (05/09 sera)
+Undicesimo test dal vivo (sess_1f532b987f40): dopo "15:00 TAKEN / ASK: TIME" l'omni ha proposto le 16 da solo, l'utente ha
+detto "yeah, let's try" (un sì a una domanda che la macchina non aveva fatto), l'omni ha "confermato" senza nessun frame
+BOOKED, e più tardi "No, time is…" → `book({})` → in conferma valeva "sì" → prenotazione scritta contro un no.
+Due violazioni dell'architettura teorica: (1) E schiacciato: "sì" e "prenota" erano lo stesso gesto (`book` vuoto);
+(2) un atto creato dall'attore e non dalla macchina (OFFER 16:00 inventato). La (2) è dell'omni (limite 4 del PDF); la (1)
+era nostra ed è chiusa così:
+| evento | significato | effetto |
+|---|---|---|
+| `set(intent?, month?, day?, time?)` | valori detti, copiati | scrive CAMPI, mai nel DB: merge in raccolta, correzione in conferma (si torna in conferma), richiesta nuova da IDLE/DONE (senza intento = verifica); vuoto = nullo |
+| `yes()` | sì alla domanda aperta | l'**unico** evento che scrive; fuori da CONFIRM non fa nulla |
+| `no()` | no alla domanda aperta | chiude senza scrivere (prenotazione → IDLE "BOOKING NOT CONFIRMED"; offerta → DONE) |
+| `cancel()` | abbandono | IDLE |
+"yes, at 3 pm" = `set(time)` + nuova conferma (decisione di Alessandro: yes non porta mai valori). Riga di stato senza
+valori: dice solo se c'è una domanda sì/no aperta e cosa manca. Lo stato intermedio "occupato → ASK: TIME" è stato tolto
+(invitava l'omni a proporre): uno slot occupato chiude la richiesta, come prima. Resta il merge sempre in raccolta.
+Verifica curl della sessione: 15 occupato → DONE; `yes` → nulla; set(April 20, 16) → conferma; `no` → chiuso, nulla
+scritto; yes(time=17) → set → nuova conferma → `yes` → scritto.
+| backend | base 55 | dialogo 24 | latenza |
+|---|---|---|---|
+| gemini-3.5-flash-lite + dialogo | **53** | **23** | 0,9-1,0 s |
+| Qwen3-1.7B locale (fallback) | vedi calendar | | 0,5 s |
+Mancati cloud: "tomorrow at 9" (giorno respinto, chiede la data), "I don't need you anymore" → cancel a richiesta chiusa
+(innocuo), "the next day" → set(day=31) senza mese → chiede il mese (niente aritmetica, per contratto).

@@ -371,22 +371,21 @@ async function startSessionInner() {
         return el;
     };
     session.onSpeakUpdate = (el, text) => { if (el) { el.textContent = ''; el.innerHTML = `<span class="t">${now().toFixed(1)}s</span>`; el.appendChild(document.createTextNode('AI: ' + text)); } onModelText(text || ''); };
-    session.onSpeakEnd = () => {};
+    // fine del turno dell'omni: la libreria chiama onSpeakEnd (il modelState 'end_of_turn' delle metriche non arriva mai)
+    session.onSpeakEnd = () => {
+        conv('sys', stateLine('fine turno AI'));
+        if (currentAiText) {
+            const said = currentAiText; currentAiText = '';
+            dialog.push({ role: 'assistant', text: said }); if (dialog.length > 12) dialog.shift();
+            onOperatorTurnEnd(said);
+        }
+    };
     session.onListenResult = (r) => { if (r && r.text) conv('sys', 'utente: ' + r.text); };
     session.onMetrics = (d) => {
         if (!d) return;
         if (d.sessionState) $('stateText').textContent = d.sessionState;
         if (d.kvCacheLength !== undefined) lastMetrics = d;
-        if (d.modelState && d.modelState !== lastModelState) {
-            if (d.modelState === 'end_of_turn') {
-                conv('sys', stateLine('fine turno AI'));
-                if (currentAiText) {
-                    dialog.push({ role: 'assistant', text: currentAiText }); if (dialog.length > 12) dialog.shift();
-                    onOperatorTurnEnd(currentAiText); currentAiText = '';
-                }
-            }
-            lastModelState = d.modelState;
-        }
+        if (d.modelState) lastModelState = d.modelState;
         if (d.kvCacheLength !== undefined) {
             const w = d.windowStats || {};
             const win = w.mode ? `${w.mode}${w.enabled ? '' : ' (spenta)'} ${w.high}/${w.low} · scorrimenti ${w.events ?? 0} · scartati ${w.dropped_tokens ?? 0} tok (${w.dropped_units ?? 0} unità)` : '?';

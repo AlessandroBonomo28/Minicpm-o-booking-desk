@@ -31,10 +31,11 @@ done
 curl -sf http://127.0.0.1:22500/health >/dev/null || { echo "BACKEND NON RISPONDE"; exit 1; }
 
 echo "=== ASR di servizio (whisper small, env cosyvoice2) — $(date '+%H:%M')"
-setsid /home/alex/miniconda3/envs/cosyvoice2/bin/python tools/asr_server.py --port 22710 --model small --device cuda > "$LOGS/asr_server.log" 2>&1 < /dev/null &
+# orecchio laterale: profilo HUD_ASR=turbo (default: large-v3-turbo, estrattore cloud senza fallback) | small (small + fallback Qwen3-1.7B)
+bash tools/switch_asr_profile.sh "${HUD_ASR:-turbo}" > "$LOGS/asr_profile.log" 2>&1
+: # (asr avviato dallo script del profilo)
 echo "=== tool agent (Qwen3-1.7B, modello separato per il tool calling) — $(date '+%H:%M')"
-# estrattore: backend cloud (provider Cline, modello/prompt da ~/.config/tool_agent.env), locale Qwen3-1.7B come fallback
-setsid "$PY" tools/tool_agent_server.py --port 22700 --backend cline > "$LOGS/tool_agent.log" 2>&1 < /dev/null &
+: # (tool agent avviato dallo script del profilo)
 echo "=== worker + gateway — $(date '+%H:%M')"
 setsid "$PY" worker.py --host 0.0.0.0 --port 22400 --gpu-id 0 \
     --backend-server-url http://127.0.0.1:22500 \

@@ -351,3 +351,6 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 05/09 (sera) — **Contratto set / yes / no / cancel** (l'algebra senza scorciatoie): yes è l'unico evento che
   scrive e non porta valori; set fa merge e non dimentica; slot occupato chiude la richiesta (stato intermedio
   tolto). Cloud 53/55 e 23/24; locale 48/55 e 18/24. Undicesimo test: "No, time is…" scritto come sì → chiuso.
+- 05/09 (sera) — **Whisper large-v3-turbo** al posto di small, fallback locale tolto (profilo scelto dalla UI, script
+  `tools/switch_asr_profile.sh`). Contratto set/yes/no/cancel in produzione. Prossimo: confidenza ASR come terzo
+  esito del validatore.

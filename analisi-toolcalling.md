@@ -189,3 +189,15 @@ scritto; yes(time=17) → set → nuova conferma → `yes` → scritto.
 | Qwen3-1.7B locale (fallback) | 48 | 18 | 0,5 s |
 Mancati cloud: "tomorrow at 9" (giorno respinto, chiede la data), "I don't need you anymore" → cancel a richiesta chiusa
 (innocuo), "the next day" → set(day=31) senza mese → chiede il mese (niente aritmetica, per contratto).
+
+## 12. Orecchio laterale: Whisper large-v3-turbo, fallback locale opzionale (05/09 sera)
+L'ASR è l'anello debole ("20 at 16" → "April 2016", "book at 9" → "book 49"); la macchina lo filtra con la validazione
+(2016 respinto) e con la conferma prima di scrivere, ma i valori plausibili e sbagliati costano un giro. Decisione di
+Alessandro: Whisper **large-v3-turbo** (1,5 GB) al posto di small, e via il fallback locale Qwen3-1.7B (3,5 GB liberati).
+Profilo scelto dalla UI ("Orecchio laterale": turbo senza fallback | small con fallback) → `POST /api/hud/asr_profile`
+→ `tools/switch_asr_profile.sh` riavvia solo ASR ed estrattore (~1 min); il launcher usa `HUD_ASR` (default turbo).
+Misura sulle clip della sessione: sulla clip lunga (10 s) entrambi trascrivono bene "April 20 at 16"; turbo 0,22 s contro
+0,78 s di small, logprob migliore (-0,56 contro -0,70). L'errore "2016" dal vivo era sulla battuta corta tagliata dal VAD:
+Whisper peggiora sulle clip brevi. Da valutare dopo: confidenza (avg_logprob) come terzo esito del validatore ("dubbio" →
+CONFIRM del valore), `initial_prompt` con il lessico dello sportello, audio diretto al modello cloud.
+VRAM con il profilo turbo: ~29,3 GB (omni + turbo, senza Qwen).

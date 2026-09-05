@@ -267,13 +267,13 @@ class H(BaseHTTPRequestHandler):
         try:
             req = json.loads(self.rfile.read(n) or b"{}")
             transcript = list(req.get("transcript") or [])
-            user_text = ""; asr_s = None; t_all = time.time()
+            user_text = ""; asr_s = None; asr_model = None; t_all = time.time()
             if req.get("user_audio_b64"):
                 # ASR degli ultimi secondi del microfono (servizio separato, env cosyvoice2)
                 try:
                     body = json.dumps({"audio_b64": req["user_audio_b64"], "language": req.get("language") or "en"}).encode()
                     r = urllib.request.urlopen(urllib.request.Request(ASR_URL, data=body, headers={"content-type": "application/json"}), timeout=20)
-                    rj = json.loads(r.read()); user_text = (rj.get("text") or "").strip(); asr_s = rj.get("asr_s")
+                    rj = json.loads(r.read()); user_text = (rj.get("text") or "").strip(); asr_s = rj.get("asr_s"); asr_model = rj.get("model")
                 except Exception as e:
                     user_text = ""; sys.stderr.write(f"[tool-agent] ASR non disponibile: {e}\n")
                 if user_text:
@@ -296,7 +296,7 @@ class H(BaseHTTPRequestHandler):
                     f = req.get("fsm") or {}
                     ctxmode = 3 if f.get("state") == "CONFIRM" else 0
                 res = decide(transcript, None, req.get("fsm"), ctxmode if ctxmode == "state" else int(ctxmode))
-            res["user_text"] = user_text; res["asr_s"] = asr_s; res["llm_s"] = round(time.time() - t_llm, 2); res["total_s"] = round(time.time() - t_all, 2)
+            res["user_text"] = user_text; res["asr_s"] = asr_s; res["asr_model"] = asr_model; res["fallback_local"] = tok is not None; res["llm_s"] = round(time.time() - t_llm, 2); res["total_s"] = round(time.time() - t_all, 2)
             self._send(200, json.dumps(res, ensure_ascii=False).encode())
         except Exception as e:
             self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}).encode())

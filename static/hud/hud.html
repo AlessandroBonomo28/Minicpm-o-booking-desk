@@ -76,6 +76,10 @@
       <div class="row"><label>Schermo</label>
         <select id="screenMode"><option value="act" selected>due metà: atto sopra (ASK: DAY / SAY: BOOKED), stato sotto</option><option value="state">solo stato</option></select>
         <span class="small">con "due metà" aggiungi al prompt: "The top of the screen tells you what to do next; the bottom shows the booking system."</span></div>
+      <div class="row"><label>Orecchio laterale</label>
+        <select id="asrProfile"><option value="turbo">Whisper large-v3-turbo · estrattore cloud senza fallback locale</option><option value="small">Whisper small · estrattore cloud con fallback locale (Qwen3-1.7B)</option></select>
+        <button id="btnAsrProfile">Applica (riavvia ASR ed estrattore, ~1 min)</button>
+        <span class="small" id="asrProfileState">—</span></div>
       <div class="row"><label>Frame iniziale</label>
         <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
       <div class="row"><label>Frame manuale</label><button id="btnFrame" disabled>Invia il frame corrente ora</button></div>

@@ -19,6 +19,7 @@ import asyncio
 import argparse
 import logging
 import time
+import threading
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -1261,6 +1262,47 @@ async def hud_db_hud_state(request: Request):
 async def hud_db_reset():
     _HUD_DB["slots"].clear(); _HUD_DB["log"].clear(); _hud_fsm_reset()
     return JSONResponse(content={"ok": True})
+
+
+_ASR_PROFILE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs_demo", "asr_profile")
+_asr_switch_lock = threading.Lock()
+
+
+@app.get("/api/hud/asr_profile")
+async def hud_asr_profile_get():
+    """Profilo dell'orecchio laterale: 'turbo' (large-v3-turbo, senza fallback locale) o 'small' (small + fallback Qwen3-1.7B)."""
+    try:
+        prof = open(_ASR_PROFILE_FILE).read().strip()
+    except Exception:
+        prof = "?"
+    import httpx
+    asr = tool = "down"
+    try:
+        async with httpx.AsyncClient(timeout=2) as c:
+            r = await c.get("http://127.0.0.1:22710/health"); asr = r.text.strip()
+            r = await c.get("http://127.0.0.1:22700/health"); tool = r.text.strip()
+    except Exception:
+        pass
+    return JSONResponse(content={"profile": prof, "asr": asr, "tool_agent": tool, "switching": _asr_switch_lock.locked()})
+
+
+@app.post("/api/hud/asr_profile")
+async def hud_asr_profile_set(request: Request):
+    """Cambia profilo: riavvia solo ASR e tool agent (30-60 s); backend, worker e gateway restano."""
+    body = await request.json()
+    prof = body.get("profile")
+    if prof not in ("turbo", "small"):
+        return JSONResponse(status_code=400, content={"error": "profile: turbo | small"})
+    if _asr_switch_lock.locked():
+        return JSONResponse(status_code=409, content={"error": "cambio gia' in corso"})
+    import subprocess
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "switch_asr_profile.sh")
+
+    def _run():
+        with _asr_switch_lock:
+            subprocess.run(["bash", script, prof], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse(content={"ok": True, "profile": prof})
 
 
 @app.post("/api/tool_agent/decide")

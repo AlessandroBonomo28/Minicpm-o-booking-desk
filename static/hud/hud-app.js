@@ -487,7 +487,7 @@ async function onUserTurnEnd(utterance, speechMs) {
         if (!ok) { hudLog('warn', `estrattore: ${d.error || status}`); return; }
         if (d.user_text) { conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 12) dialog.shift(); }
         const calls = d.tool_calls || [];
-        const tim = `ASR ${d.asr_s ?? '?'} s + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
+        const tim = `ASR ${d.asr_s ?? '?'} s${d.asr_model ? ' (' + d.asr_model + ')' : ''} + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
         for (const c of calls) hudLog('hud', `ESTRATTORE (${tim}): ${c.name}(${JSON.stringify(c.arguments)})`);
         await fsmEvent(calls, d.user_text, 'estrattore (turno utente)');
@@ -495,6 +495,28 @@ async function onUserTurnEnd(utterance, speechMs) {
     } catch (e) { hudLog('warn', 'estrattore errore: ' + e.message); }
     finally { toolBusy = false; if (pendingTurns.length) onUserTurnEnd(pendingTurns.shift()); }
 }
+
+async function refreshAsrProfile() {
+    try {
+        const d = await (await fetch('/api/hud/asr_profile', { cache: 'no-store' })).json();
+        if (d.profile === 'turbo' || d.profile === 'small') $('asrProfile').value = d.profile;
+        $('asrProfileState').textContent = d.switching ? 'cambio in corso…' : `attivo: ASR ${d.asr} · estrattore ${d.tool_agent}`;
+        return d;
+    } catch (e) { $('asrProfileState').textContent = 'stato non leggibile'; return null; }
+}
+$('btnAsrProfile').onclick = async () => {
+    const profile = $('asrProfile').value;
+    $('asrProfileState').textContent = 'riavvio ASR ed estrattore…';
+    const r = await fetch('/api/hud/asr_profile', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ profile }) });
+    if (!r.ok) { $('asrProfileState').textContent = 'errore: ' + ((await r.json()).error || r.status); return; }
+    const t0 = Date.now();
+    const poll = setInterval(async () => {
+        const d = await refreshAsrProfile();
+        if (d && !d.switching && d.asr !== 'down' && d.tool_agent !== 'down') { clearInterval(poll); checkToolAgent(); }
+        if (Date.now() - t0 > 180000) clearInterval(poll);
+    }, 3000);
+};
+refreshAsrProfile();
 
 async function checkToolAgent() {
     try {

@@ -1274,7 +1274,9 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
 # ---- ramo hud-semaforo: il supervisore e' DETERMINISTICO sul record R̂ e su incoerenze verificabili dell'omni.
 #      verde = l'omni guida (schermo = stato); giallo = lo schermo torna a dettare l'atto; rosso = correzione fissa.
 _CLAIM_BOOKED = re.compile(r"\b(is|are|now|been|already)?\s*(confirmed|booked|reserved|all set|scheduled)\b", re.I)
-_PROPOSE_TIME = re.compile(r"\b(how about|what about|we have|available at|try)\b[^.?!]*?\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|o'clock)?", re.I)
+# orario proposto/dichiarato libero dall'omni: "how about 16:00", "6:00 PM is available", "we have 9", "you could come at 3 pm"
+_PROPOSE_TIME = re.compile(r"(?:\b(?:how about|what about|we have|available at|try|come at|free at)\b[^.?!]*?\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|o'clock)?"
+                           r"|\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|o'clock)?\s+(?:is|are|looks|would be)\s+(?:still\s+)?(?:available|free|open))", re.I)
 
 
 def _hud_supervise(fsm, omni_text: str, heard_args: dict):
@@ -1287,7 +1289,8 @@ def _hud_supervise(fsm, omni_text: str, heard_args: dict):
     # ROSSO: propone un orario che il DB dice occupato
     m = _PROPOSE_TIME.search(txt)
     if m and sl.get("date"):
-        hh = f"{m.group(2)}{':' + m.group(3) if m.group(3) else ''} {m.group(4) or ''}".strip()
+        h, mi, ap = (m.group(1), m.group(2), m.group(3)) if m.group(1) else (m.group(4), m.group(5), m.group(6))
+        hh = f"{h}{':' + mi if mi else ''} {ap or ''}".strip()
         tm = _hud_norm_time(hh)
         if _hud_time_valid(tm, "book") and _hud_lookup(sl["date"], tm)[0] != "available":
             return "red", f"{_hud_time_label(tm)} IS TAKEN"
@@ -1295,7 +1298,8 @@ def _hud_supervise(fsm, omni_text: str, heard_args: dict):
     for k in ("month", "day", "time"):
         v = (heard_args or {}).get(k)
         if v and sl.get(k) and not tent.get(k):
-            norm = _hud_norm_date(v) if k == "month" else (_hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", str(v).lower())).replace("the ", "").strip() if k == "day" else _hud_norm_time(v))
+            # normalizzazione tollerante ("28 th" dell'ASR, "6:00 PM"): un falso giallo costa un'autocorrezione a vuoto
+            norm = _hud_norm_date(v) if k == "month" else (_hud_words_to_digits(re.sub(r"(\d+)\s*(st|nd|rd|th)\b", r"\1", str(v).lower())).replace("the ", "").strip() if k == "day" else _hud_norm_time(v))
             cur = sl[k] if k != "time" else _hud_norm_time(sl[k])
             if norm != cur:
                 return "yellow", "CHECK THE SCREEN"

@@ -88,12 +88,14 @@ function themeFor() {
             }
             if (hud.screen === 'CONFIRM') {
                 // offerta / prenotazione in sospeso: lo schermo dice esplicitamente che si aspetta il si' del cliente
-                const avail = s === 'partial' ? 'PARTLY BOOKED' : (s === 'pending' ? 'SAY YES TO BOOK' : 'AVAILABLE');
+                // PARTIAL: "BOOKED 18:00" sotto "PARTLY BOOKED" veniva letto come "libero alle 18": si dice cosa e' OCCUPATO e che il resto e' libero
+                const taken = d.replace(/^BOOKED\s*/, '');
+                const avail = s === 'partial' ? `${taken} TAKEN` : (s === 'pending' ? 'SAY YES TO BOOK' : 'AVAILABLE');
                 return { bg: s === 'partial' ? '#ef6c00' : '#2e7d32', fg: '#ffffff', title: 'WAIT FOR USER CONFIRMATION',
-                         line1: `BOOKING FOR ${slotLine(f)}?`, line2: avail, line3: d };
+                         line1: `BOOKING FOR ${slotLine(f)}?`, line2: avail, line3: s === 'partial' ? 'OTHER HOURS FREE' : d };
             }
             if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
-            if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'PARTLY BOOKED', line3: d };
+            if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: `${d.replace(/^BOOKED\s*/, '')} TAKEN`, line3: 'OTHER HOURS FREE' };
             return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: d };
         }
         default:

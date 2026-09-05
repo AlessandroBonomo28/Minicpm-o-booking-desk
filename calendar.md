@@ -345,3 +345,6 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   algebra; piano del ramo `omni-eventi` (solo scritto). Senza toccare l'omni: decisione anticipata alla pausa,
   schermo a due metà (da giudicare dal vivo); decodifica vincolata misurata e scartata (44 vs 47). Estrattore:
   tre strumenti fissi + stato di conferma per le prenotazioni, cloud flash-lite 51/55 e 24/24.
+- 05/09 (pom.) — Decimo test: ping-pong mese/giorno → due correzioni nell'algebra (merge sempre in raccolta; slot
+  occupato = campo respinto, ore libere nello stato). Schermo a due metà di default. Decisione anticipata alla
+  pausa confermata dal vivo (frame a 0,3-0,6 s dalla fine della frase).

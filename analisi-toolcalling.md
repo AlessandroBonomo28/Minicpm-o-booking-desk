@@ -148,3 +148,19 @@ cambierebbe con e senza toccare l'omni, piano del ramo `omni-eventi`). Implement
 - **Schermo a due metà** (atto sopra: ASK: DAY / ASK: CONFIRM BOOKING / SAY: BOOKED…, stato sotto), selettore nel pannello
   per il confronto; riga di prompt da aggiungere a mano. Non ancora giudicato.
 Non fatti: contratto Set/Answer/Abort (scelta esplicita: tre strumenti), imbuto con conteggi, VAD 800 ms.
+
+## 10. Decimo test dal vivo (05/09): merge sempre in raccolta; lo slot occupato non chiude la richiesta
+Sessione sess_8eebe657a3fa: book April 20 15 → occupato → "check when it's available" → la macchina era ripartita da zero
+(DONE senza valori) e poi, al "April" detto quando mancava il mese, aveva azzerato il 20 (regola "mese = richiesta
+nuova", sbagliata): quattro turni di ping-pong mentre l'omni ricordava tutto. Due correzioni, entrambe dentro l'algebra:
+1. **In COLLECTING si fa sempre merge** (un mese detto sovrascrive, non azzera); una richiesta nuova esiste solo da
+   IDLE/DONE o dopo un annulla.
+2. **Ora occupata = valore respinto dalla validazione contro il DB**, come un "tomorrow" respinto dalla sintassi: la
+   richiesta resta in raccolta con mese e giorno tenuti, `ASK: ANOTHER TIME`, e le **ore libere del giorno** nello stato
+   (`FREE: 9 10 11 12 14 16 · 15:00 TAKEN`), calcolate dal gestionale: l'imbuto con i conteggi. Giorno tutto pieno →
+   si richiede il giorno. DONE resta per: prenotazione scritta, offerta rifiutata, errore, annulla.
+Verifica curl della sessione incriminata: book() → April → 20 (FREE: 9…17) → 15 → `ASK: ANOTHER TIME`, 20 e aprile
+tenuti → check() vuoto → invariato → "16" → conferma. Merge: check() → 20 → April → CONFIRM April 20.
+UI: schermo a due metà di default; prompt di default aggiornato ("the top of the screen tells you what to do next").
+Decisione anticipata alla pausa: usata in tutti i turni della sessione (frame a 0,3-0,6 s dalla fine della frase).
+Regressioni invariate: cloud 51/55, 24/24.

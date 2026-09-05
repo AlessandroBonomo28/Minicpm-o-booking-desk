@@ -74,7 +74,7 @@
       <div class="row"><label>Modello separato</label>
         <span class="small">alla FINE DEL TUO TURNO (VAD): ASR della sola battuta (GPU) → l'estrattore vede SOLO le tue parole + lo stato della FSM e risponde <code>book / check / cancel / none</code> con data/ora dette → la FSM (gateway) fa il merge, decide cosa manca (<b>MISSING</b>), esegue sul DB e lo schermo mostra il nuovo stato. Specifica: <code>plan/ramo-hud.md</code>.</span></div>
       <div class="row"><label>Schermo</label>
-        <select id="screenMode"><option value="state" selected>solo stato (come finora)</option><option value="act">due metà: atto sopra (ASK: DAY / SAY: BOOKED), stato sotto</option></select>
+        <select id="screenMode"><option value="act" selected>due metà: atto sopra (ASK: DAY / SAY: BOOKED), stato sotto</option><option value="state">solo stato</option></select>
         <span class="small">con "due metà" aggiungi al prompt: "The top of the screen tells you what to do next; the bottom shows the booking system."</span></div>
       <div class="row"><label>Frame iniziale</label>
         <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
@@ -86,7 +86,7 @@
     <div class="card">
       <h2>Sessione</h2>
       <div class="row"><label>Prompt di sistema</label></div>
-      <textarea id="systemPrompt">You are in duplex mode, where you can listen and speak at the same time. You work at a booking desk. The screen shows the booking system. When the screen shows MISSING, ask the customer for that item. When the screen shows a result, tell the customer. Otherwise just talk.</textarea>
+      <textarea id="systemPrompt">You are in duplex mode, where you can listen and speak at the same time. You work at a booking desk. The top of the screen tells you what to do next (ASK: ... = ask the customer for it; SAY: ... = tell the customer); the bottom shows the booking system. Otherwise just talk.</textarea>
       <div class="row">
         <label>Voce di riferimento</label>
         <select id="refChoice"><option value="english_call">inglese (preset English Call)</option><option value="italiano">italiano (preset italiano)</option><option value="none">nessuna (default backend)</option></select>

@@ -64,6 +64,8 @@ function themeFor() {
             const dateLine = (month || day) ? `DATE: ${month || '?'} ${day || '?'}` : 'DATE: ?';
             let line3 = (f.slots.time && miss !== 'time') ? `TIME: ${timeLabel(f.slots.time)}` : '';
             if (rejKeys.length) line3 = `"${String(f.rejected[rejKeys[0]]).toUpperCase()}" NOT VALID`;
+            // ore libere del giorno (dal DB): stato, cosi' l'omni puo' proporle invece di chiedere a vuoto
+            if (Array.isArray(f.free) && miss === 'time') line3 = (f.free.length ? `FREE: ${f.free.join(' ')}` : 'NO FREE HOURS') + (rejKeys.length ? ` · ${String(f.rejected[rejKeys[0]]).toUpperCase()}` : '');
             return { bg: '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'AVAILABILITY CHECK' : 'NEW BOOKING',
                      line1: dateLine, line2: `MISSING: ${miss.toUpperCase()}`, line3 };
         }
@@ -85,7 +87,7 @@ function themeFor() {
             }
             if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
             if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'PARTLY BOOKED', line3: d };
-            return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: d };
+            return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: Array.isArray(f.free) ? (f.free.length ? `FREE: ${f.free.join(' ')}` : 'NO FREE HOURS') : d };
         }
         default:
             return { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: 'waiting for a request', line2: f.note || '', line3: '' };
@@ -109,7 +111,12 @@ function themeForSeq() {
 function actFor() {
     const f = hud.fsm, s = f.status;
     switch (hud.screen) {
-        case 'COLLECTING': { const miss = (f.missing || [])[0] || ''; return miss ? `ASK: ${miss.toUpperCase()}` : ''; }
+        case 'COLLECTING': {
+            const miss = (f.missing || [])[0] || '';
+            if (miss === 'time' && f.rejected && f.rejected.time) return 'ASK: ANOTHER TIME';
+            if (miss === 'day' && f.rejected && f.rejected.day) return 'ASK: ANOTHER DAY';
+            return miss ? `ASK: ${miss.toUpperCase()}` : '';
+        }
         case 'CHECKING': return 'SAY: CHECKING';
         case 'CONFIRM': return f.intent === 'book' ? 'ASK: CONFIRM BOOKING' : 'SAY: AVAILABLE';
         case 'DONE':

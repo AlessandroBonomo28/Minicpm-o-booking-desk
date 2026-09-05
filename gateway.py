@@ -1220,7 +1220,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         free = _hud_free_hours(slots["month"], slots["day"])
         kept = dict(_HUD_EMPTY_SLOTS, month=slots["month"], day=slots["day"] if free else "")
         kept["date"] = f"{kept['month']} {kept['day']}" if kept["day"] else ""
-        rej = {"time": f"{_hud_time_label(tm)} taken"} if free else {"day": f"{date} full"}
+        rej = {"time": f"{_hud_time_label(tm)} taken"} if free else {"day": f"{date} full"}   # 'free' resta nello stato per db.html, non sullo schermo
         return bump(state="COLLECTING", intent="book", slots=kept, missing=(["time"] if free else ["day", "time"]), rejected=rej,
                     status=None, detail=res.get("detail") or "", note="", free=free)
     free = _hud_free_hours(slots["month"], slots["day"]) if (intent == "check" and res["status"] == "booked") else None

@@ -62,12 +62,16 @@ function themeFor() {
             const month = (f.slots.month || '').toUpperCase(), day = f.slots.day || '';
             const rejKeys = Object.keys(f.rejected || {});
             const dateLine = (month || day) ? `DATE: ${month || '?'} ${day || '?'}` : 'DATE: ?';
-            let line3 = (f.slots.time && miss !== 'time') ? `TIME: ${timeLabel(f.slots.time)}` : '';
-            if (rejKeys.length) line3 = `"${String(f.rejected[rejKeys[0]]).toUpperCase()}" NOT VALID`;
-            // ore libere del giorno (dal DB): stato, cosi' l'omni puo' proporle invece di chiedere a vuoto
-            if (Array.isArray(f.free) && miss === 'time') line3 = (f.free.length ? `FREE: ${f.free.join(' ')}` : 'NO FREE HOURS') + (rejKeys.length ? ` · ${String(f.rejected[rejKeys[0]]).toUpperCase()}` : '');
-            return { bg: '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'AVAILABILITY CHECK' : 'NEW BOOKING',
-                     line1: dateLine, line2: `MISSING: ${miss.toUpperCase()}`, line3 };
+            const line3 = (f.slots.time && miss !== 'time') ? `TIME: ${timeLabel(f.slots.time)}` : '';
+            // un valore respinto (sintassi o DB) e' il fatto nuovo: va nella riga grande, da solo ("15:00 TAKEN", "TOMORROW NOT VALID");
+            // niente elenco delle ore libere: sarebbe un OFFER non richiesto (05/09, Alessandro)
+            let line2 = `MISSING: ${miss.toUpperCase()}`;
+            if (rejKeys.length) {
+                const v = String(f.rejected[rejKeys[0]]).toUpperCase();
+                line2 = / TAKEN$| FULL$/.test(v) ? v : `${v} NOT VALID`;
+            }
+            return { bg: rejKeys.length ? '#c62828' : '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'AVAILABILITY CHECK' : 'NEW BOOKING',
+                     line1: dateLine, line2, line3 };
         }
         case 'CHECKING':
             return { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: slotLine(f), line2: 'please wait', line3: '' };
@@ -87,7 +91,7 @@ function themeFor() {
             }
             if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
             if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'PARTLY BOOKED', line3: d };
-            return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: Array.isArray(f.free) ? (f.free.length ? `FREE: ${f.free.join(' ')}` : 'NO FREE HOURS') : d };
+            return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: d };
         }
         default:
             return { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: 'waiting for a request', line2: f.note || '', line3: '' };
@@ -113,9 +117,7 @@ function actFor() {
     switch (hud.screen) {
         case 'COLLECTING': {
             const miss = (f.missing || [])[0] || '';
-            if (miss === 'time' && f.rejected && f.rejected.time) return 'ASK: ANOTHER TIME';
-            if (miss === 'day' && f.rejected && f.rejected.day) return 'ASK: ANOTHER DAY';
-            return miss ? `ASK: ${miss.toUpperCase()}` : '';
+            return miss ? `ASK: ${miss.toUpperCase()}` : '';   // il perche' (15:00 TAKEN) sta nello stato, non nell'atto
         }
         case 'CHECKING': return 'SAY: CHECKING';
         case 'CONFIRM': return f.intent === 'book' ? 'ASK: CONFIRM BOOKING' : 'SAY: AVAILABLE';
@@ -139,7 +141,7 @@ function drawHud() {
         ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.50);
         ctx.font = (theme.line1.length > 18 ? 'bold 26px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.63);
         ctx.font = (theme.line2.length > 12 ? 'bold 26px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.76);
-        if (theme.line3) { ctx.font = 'bold 18px system-ui, sans-serif'; ctx.fillText(String(theme.line3).slice(0, 40), W / 2, H * 0.86); }
+        if (theme.line3) { ctx.font = (theme.line3.length > 28 ? 'bold 14px' : 'bold 18px') + ' system-ui, sans-serif'; ctx.fillText(theme.line3, W / 2, H * 0.86); }
     } else {
         ctx.font = (theme.title.length > 16 ? 'bold 28px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);
         ctx.font = (theme.line1.length > 18 ? 'bold 30px' : 'bold 44px') + ' system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.50);

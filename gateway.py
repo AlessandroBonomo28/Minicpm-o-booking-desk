@@ -1113,6 +1113,25 @@ def _hud_free_hours(month: str, day: str):
     return [h for h in _HUD_HOURS if _hud_lookup(f"{month} {day}", f"{h:02d}:00")[0] == "available"]
 
 
+def _hud_same_record(cur: dict, new: dict) -> bool:
+    """Idempotenza (06/09): un evento che riproduce il record corrente e' NULLO: niente seq, niente frame nuovo, il semaforo
+    resta com'e' (una battuta-eco dell'estrattore, "But you told me it was free" -> set(book, 15:00), spegneva il rosso).
+    Un valore respinto, prima o dopo, e' sempre un fatto nuovo."""
+    if new.get("rejected") or cur.get("rejected"):
+        return False
+    for k in ("state", "intent", "status", "detail"):
+        if (cur.get(k) or "") != (new.get(k) or ""):
+            return False
+    if sorted(cur.get("missing") or []) != sorted(new.get("missing") or []):
+        return False
+    if {k for k, v in (cur.get("tentative") or {}).items() if v} != {k for k, v in (new.get("tentative") or {}).items() if v}:
+        return False
+    a, b = cur.get("slots") or {}, new.get("slots") or {}
+    if any((a.get(k) or "") != (b.get(k) or "") for k in ("month", "day")):
+        return False
+    return _hud_norm_time(a.get("time") or "") == _hud_norm_time(b.get("time") or "")
+
+
 def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=None):
     """Applica UNA operazione dell'estrattore allo stato (05/09: il modello sceglie l'operazione, il codice calcola).
     Eventi (05/09 sera, l'algebra senza scorciatoie): set(intent?, month?, day?, time?) = valori detti, mai scrive;
@@ -1263,7 +1282,10 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         missing.append("time")
     if missing:
         # ramo hud-semaforo: i tentativi (heard) NON bloccano; la conferma finale (con i valori) li copre
-        return bump(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, tentative=tentative, status=None, detail="", note="", free=None)
+        new = dict(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, tentative=tentative, status=None, detail="", note="", free=None)
+        if _hud_same_record(fsm, new):
+            _hud_db_save(); return fsm, False   # idempotenza: stesso record = evento nullo
+        return bump(**new)
     date = slots["date"]; tm = _hud_norm_time(slots.get("time"))
     if intent == "check":
         res = _hud_exec_check(date, tm, outcome or "auto", source, delay_s)
@@ -1283,7 +1305,10 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     # riparte da zero e passa dalla conferma.
     free = None
     new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] == "pending" else "DONE"
-    return bump(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative={}, status=res["status"], detail=res.get("detail") or "", note="", free=free)
+    new = dict(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative={}, status=res["status"], detail=res.get("detail") or "", note="", free=free)
+    if _hud_same_record(fsm, new):
+        _hud_db_save(); return fsm, False   # idempotenza: stesso record = evento nullo (il rosso resta)
+    return bump(**new)
 
 
 # ---- ramo hud-semaforo: il supervisore e' DETERMINISTICO sul record R̂ e su incoerenze verificabili dell'omni.

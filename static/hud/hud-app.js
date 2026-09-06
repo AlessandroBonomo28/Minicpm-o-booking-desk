@@ -99,17 +99,18 @@ function themeFor() {
         case 'DONE': {
             const s = f.status, d = (f.detail || '').toUpperCase();
             if (s === 'error') return { bg: '#b71c1c', fg: '#ffffff', title: 'ERROR / TIMEOUT', line1: slotLine(f), line2: f.intent === 'book' ? 'request failed' : 'check failed', line3: '' };
-            if (f.intent === 'book') {
-                if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: 'BOOKING DONE', line1: slotLine(f), line2: 'CONFIRMED', line3: '' };
-                return { bg: '#c62828', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'SLOT TAKEN', line3: d ? 'BOOKED ' + d : '' };
-            }
             if (hud.screen === 'CONFIRM') {
+                // (06/09) questo ramo DEVE precedere quello 'book': una prenotazione in attesa del si' veniva resa 'SLOT TAKEN'
                 // offerta / prenotazione in sospeso: lo schermo dice esplicitamente che si aspetta il si' del cliente
                 // PARTIAL: "BOOKED 18:00" sotto "PARTLY BOOKED" veniva letto come "libero alle 18": si dice cosa e' OCCUPATO e che il resto e' libero
                 const taken = d.replace(/^BOOKED\s*/, '');
                 const avail = s === 'partial' ? `${taken} TAKEN` : (s === 'pending' ? 'SAY YES TO BOOK' : 'AVAILABLE');
                 return { bg: s === 'partial' ? '#ef6c00' : '#2e7d32', fg: '#ffffff', title: 'WAIT FOR USER CONFIRMATION',
                          line1: `BOOKING FOR ${slotLine(f)}?`, line2: avail, line3: s === 'partial' ? 'OTHER HOURS FREE' : d };
+            }
+            if (f.intent === 'book') {
+                if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: 'BOOKING DONE', line1: slotLine(f), line2: 'CONFIRMED', line3: '' };
+                return { bg: '#c62828', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'SLOT TAKEN', line3: d ? 'BOOKED ' + d : '' };
             }
             if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
             if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: `${d.replace(/^BOOKED\s*/, '')} TAKEN`, line3: 'OTHER HOURS FREE' };
@@ -435,6 +436,7 @@ async function startSessionInner() {
                                        text_repetition_penalty: parseFloat($('textRepPenalty').value) || 1.0,
                                        sliding_window_mode: $('slidingWindow').value, sliding_window_high_tokens: 4000, sliding_window_low_tokens: 3500 },
                              use_tts: true, max_slice_nums: 1 };
+    conv('sys', `CONFIG · prompt: "${$('systemPrompt').value}" · heard ${$('heardOn').checked ? 'on' : 'off'} · blink ${($('blinkAlways') && $('blinkAlways').checked) ? 'on' : 'off'}` + ` · asr ${$('asrProfile') ? $('asrProfile').value : '?'} · finestra ${$('slidingWindow').value} · trp ${$('textRepPenalty').value}`);   // nel registro della run
     lastWindowEvents = 0; lastMetrics = {}; lastModelState = ''; $('kvInfo').textContent = 'KV: — · finestra: ' + $('slidingWindow').value;
     const ref = await loadRefAudio();
     if (ref) preparePayload.ref_audio_base64 = ref;

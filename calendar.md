@@ -357,3 +357,11 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 05/09 (notte) — **Secondo orecchio `heard`**: le ripetizioni dell'omni riempiono i campi mancanti come tentativi,
   conferma a livello di campo, scrittura solo con valori solidi; attivabile dalla UI per il confronto. Lessico e
   contesto per Whisper misurati e spenti (allucina su audio povero; il mic in silenzio manda zeri).
+- 05/09-06/09 (notte) — **Rami semaforo** (`hud-semaforo`, `-2`, `-fixrules`): banner verde/giallo/rosso lampeggiante a
+  ogni chunk (reazioni ai frame 0-1 s per tutta la sessione), supervisore sui claim canonici di `heard` verificati sul DB,
+  normalizzazione canonica dal modello cloud + verificatore nel gateway (`tools/test_norm.py` 40/40). Registro delle run
+  lato server (`logs_demo/hud_runs/`, `tools/hud_run_log.py`): niente più log incollati. Trovato con il registro:
+  **bug di resa dal 04/09** (prenotazione in attesa del sì mostrata come SLOT TAKEN: su main la copriva l'atto in alto,
+  in verde no) e **idempotenza violata** (un set-eco spegneva il rosso). Entrambi corretti; prompt di default ridotto a
+  "ALWAYS SPEAK, read the screen". Aperti: slot occupato che chiude la richiesta (la data si perde), nessun evento di
+  rimozione, silenzio dopo il sì all'offerta (tre occorrenze: proposta di mostrare l'atto anche in verde).

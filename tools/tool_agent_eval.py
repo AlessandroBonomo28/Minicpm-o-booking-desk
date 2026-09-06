@@ -19,6 +19,7 @@ def COLL(intent, month="", day="", time_="", missing=None):
         missing = [k for k in req if not slots[k]]
     return {"state": "COLLECTING", "intent": intent, "slots": slots, "missing": missing}
 RES = {"state": "DONE", "intent": "book", "status": "confirmed", "slots": {"month": "may", "day": "25", "time": "15:00"}}
+TAKEN = {"state": "DONE", "intent": "book", "status": "taken", "slots": {"month": "march", "day": "28", "time": "15:00"}}
 
 # (stato, frase, atteso, vietati)
 CASES = [
@@ -82,6 +83,10 @@ CASES = [
     # annulla
     (COLL("book"), "Actually, never mind, cancel that.", ("cancel", {}), ()),
     (COLL("book", month="may", day="25"), "Never mind, cancel that.", ("cancel", {}), ()),
+    # dopo uno slot occupato (run del 06/09): "next free slot" e' una verifica, mai un'ora inventata; "at 16" e' solo l'ora
+    (TAKEN, "What's the next free slot?", ("check", {}), ("month", "day", "time", "!none")),
+    (TAKEN, "When is free?", ("check", {}), ("month", "day", "time", "!none")),
+    (TAKEN, "at 16", ("check", {"time": "16:00|16"}), ("month", "day")),
     # rumore
     (IDLE, "Mm-hmm.", None, ()),
     (IDLE, "pizza", None, ()),
@@ -175,7 +180,7 @@ def run(url, verbose):
         if exp is None:
             passed = got is None
         elif exp == ("check", {}) and got is None:
-            passed = True   # "is it free?" senza riferimento: nessuna chiamata e' accettabile quanto un check vuoto
+            passed = "!none" not in forbidden   # "is it free?" senza riferimento: nessuna chiamata vale quanto un check vuoto; "!none" la esige
         elif got is not None and (got[0] == exp[0] or (st.get("state") == "COLLECTING" and exp[0] in ("book", "check") and got[0] in ("book", "check"))):
             # in COLLECTING l'intento e' bloccato dalla FSM: book/check sono equivalenti per contratto
             passed = True
@@ -184,7 +189,7 @@ def run(url, verbose):
                 if gv is None or norm(k, gv) not in [norm(k, x) for x in str(v).split("|")]:
                     passed = False
             for k in forbidden:
-                if got[1].get(k):
+                if k != "!none" and got[1].get(k):
                     passed = False
         tag = "PASS" if passed else "FAIL"
         if passed: ok += 1

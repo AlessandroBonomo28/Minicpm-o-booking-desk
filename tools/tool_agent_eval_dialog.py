@@ -61,6 +61,12 @@ CASES = [
     (RES_BOOK("march", "20", "18:00"), [A("Your booking is confirmed for March 20th at 18:00."), U("I want to check for April.")],
      ("check", {"month": "april"}), ("day", "time")),
     (RES_BOOK("march", "20", "18:00"), [A("Your booking is confirmed for March 20th at 18:00. Anything else?"), U("Yes.")], None, ()),
+    # --- run del 06/09 (sess_e8460bed9d48): una domanda non e' un si'; "Which one?" non porta valori; "next free slot" e' una verifica
+    (RES_CHECK("april", "1"), [A("Yeah, I can check for that day."), U("yeah so did you check")], None, ()),
+    (RES_CHECK("april", "1"), [A("April 1st is available all day. Would you like to book?"), U("Yes, but did you actually check?")], None, ()),
+    (IDLE, [A("Yeah, I think there are many free days in April."), U("Which one?")], None, ()),
+    ({"state": "DONE", "intent": "book", "status": "taken", "slots": {"month": "march", "day": "28", "time": "15:00"}},
+     [A("I am sorry, that slot is already taken."), U("What's the next free slot?")], ("check", {}), ("month", "day", "time", "!none")),
 ]
 
 
@@ -78,7 +84,7 @@ def run(url, context, verbose):
         if exp is None:
             passed = got is None
         elif exp == ("check", {}) and got is None:
-            passed = True
+            passed = "!none" not in forbidden
         elif got is None and exp[0] == "check" and tr[-1]["text"] in ("Yeah, how about the next day?", "And the day after?"):
             passed = True   # aritmetica: nessuna azione e' accettabile (il locale non calcola)
         else:
@@ -89,7 +95,7 @@ def run(url, context, verbose):
                     if gv is None or norm(k, gv) not in [norm(k, x) for x in str(v).split("|")]:
                         passed = False
                 for k in forbidden:
-                    if got[1].get(k):
+                    if k != "!none" and got[1].get(k):
                         passed = False
         ok += passed
         if verbose or not passed:

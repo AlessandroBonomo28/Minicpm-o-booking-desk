@@ -172,7 +172,24 @@ def _constrained_prefix_fn(tools):
                   "required": ["name", "arguments"], "additionalProperties": False}
         _constrained_cache[names] = build_transformers_prefix_allowed_tokens_fn(tok, JsonSchemaParser(schema))
     return _constrained_cache[names]
-CLOUD = {"base_url": "https://api.cline.bot/api/v1", "model": "google/gemini-3.5-flash-lite", "key": "", "timeout": 4.0, "context": 6}
+CLOUD = {"base_url": "https://api.cline.bot/api/v1", "model": "google/gemini-3.5-flash-lite", "key": "", "timeout": 4.0, "context": 6, "extra": {}}
+CLOUD_BACKENDS = ("cline", "openai")   # ramo phonellm (06/09): "openai" = qualunque endpoint OpenAI-compatible (Modal/vLLM, Featherless, ...)
+_TAG_CALL_RE = re.compile(r"<(?:TOOLCALL|tool_call)>\s*(.*?)\s*</(?:TOOLCALL|tool_call)>", re.S)
+
+
+def _parse_text_tool_call(content):
+    """Provider senza tool parser nativo: la chiamata arriva nel testo (Nemotron <TOOLCALL>[{...}]</TOOLCALL>, Hermes <tool_call>{...}</tool_call>)."""
+    for m in _TAG_CALL_RE.finditer(content or ""):
+        try:
+            obj = json.loads(m.group(1))
+        except Exception:
+            continue
+        if isinstance(obj, list):
+            obj = obj[0] if obj else None
+        if isinstance(obj, dict) and obj.get("name"):
+            args = obj.get("arguments") if obj.get("arguments") is not None else (obj.get("parameters") or {})
+            return str(obj["name"]), (args if isinstance(args, str) else json.dumps(args))
+    return None
 
 
 def load_env_file(path):
@@ -186,19 +203,34 @@ def load_env_file(path):
 
 
 def decide_cloud(messages, tools):
-    """Una chiamata chat/completions con tool_choice forzato su `request`. Ritorna (raw_arguments_json, model, ms) o solleva."""
-    body = json.dumps({"model": CLOUD["model"], "messages": messages, "tools": tools, "temperature": 0, "max_tokens": 200,
-                       "tool_choice": "auto"}).encode()
-    req = urllib.request.Request(CLOUD["base_url"].rstrip("/") + "/chat/completions", data=body,
-                                 headers={"Authorization": f"Bearer {CLOUD['key']}", "content-type": "application/json"})
+    """Una chiamata chat/completions (tools + tool_choice auto, temperatura 0). Ritorna (name, arguments_json, model, ms) o solleva.
+    CLOUD["extra"] viene aggiunto al corpo (es. chat_template_kwargs.enable_thinking=false per Nemotron/Qwen3 su vLLM);
+    se il provider lo rifiuta (HTTP 400) si ritenta senza. Se il provider non ha il tool parser, la chiamata si legge dal testo."""
+    payload = {"model": CLOUD["model"], "messages": messages, "tools": tools, "temperature": 0, "max_tokens": 200, "tool_choice": "auto"}
+    payload.update(CLOUD.get("extra") or {})
+    headers = {"content-type": "application/json"}
+    if CLOUD.get("key"):
+        headers["Authorization"] = f"Bearer {CLOUD['key']}"
+    url = CLOUD["base_url"].rstrip("/") + "/chat/completions"
     t0 = time.time()
-    d = json.loads(urllib.request.urlopen(req, timeout=CLOUD["timeout"]).read())
+    try:
+        d = json.loads(urllib.request.urlopen(urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers), timeout=CLOUD["timeout"]).read())
+    except urllib.error.HTTPError as e:
+        if e.code != 400 or not CLOUD.get("extra"):
+            raise
+        for k in CLOUD["extra"]:
+            payload.pop(k, None)
+        d = json.loads(urllib.request.urlopen(urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers), timeout=CLOUD["timeout"]).read())
     d = d.get("data", d)
     ch = d["choices"][0]["message"]
     tc = ch.get("tool_calls") or []
-    if not tc:
-        return "", "", d.get("model"), (time.time() - t0) * 1000
-    return tc[0]["function"]["name"], tc[0]["function"]["arguments"], d.get("model"), (time.time() - t0) * 1000
+    ms = (time.time() - t0) * 1000
+    if tc:
+        return tc[0]["function"]["name"], tc[0]["function"]["arguments"], d.get("model"), ms
+    parsed = _parse_text_tool_call(ch.get("content") or "")
+    if parsed:
+        return parsed[0], parsed[1], d.get("model"), ms
+    return "", "", d.get("model"), ms
 
 
 def decide(transcript, _tools_unused, fsm=None, context=0):
@@ -214,10 +246,10 @@ def decide(transcript, _tools_unused, fsm=None, context=0):
     convo = f"NOW USER: {lines[last_user_idx][1]}"
     tools = tools_for_state(fsm)
     # cloud: PROMPT_API + ultime righe del dialogo; locale: LOCAL_PROMPT e SOLO la battuta corrente
-    system = PROMPT_API if BACKEND == "cline" else LOCAL_PROMPT
+    system = PROMPT_API if BACKEND in CLOUD_BACKENDS else LOCAL_PROMPT
     if context == "state":
         context = 0
-    if BACKEND == "cline" and not context:
+    if BACKEND in CLOUD_BACKENDS and not context:
         context = CLOUD.get("context", 6)
     if context and last_user_idx > 0:
         prev = lines[max(0, last_user_idx - int(context)):last_user_idx]
@@ -227,11 +259,11 @@ def decide(transcript, _tools_unused, fsm=None, context=0):
                 {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall one function about the NOW line."}]
     backend_used = BACKEND
     raw = ""
-    if BACKEND == "cline":
+    if BACKEND in CLOUD_BACKENDS:
         try:
             fname, args_json, used_model, ms = decide_cloud(messages, tools)
             raw = f'<tool_call>{{"name": "{fname or "none"}", "arguments": {args_json or "{}"}}}</tool_call>'
-            backend_used = f"cline:{used_model} {ms:.0f}ms"
+            backend_used = f"{BACKEND}:{used_model or CLOUD['model']} {ms:.0f}ms"
         except Exception as e:
             sys.stderr.write(f"[tool-agent] cloud non disponibile ({type(e).__name__}: {str(e)[:80]}): fallback locale\n")
             backend_used = "local (fallback)"
@@ -352,8 +384,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", type=int, default=22700)
     ap.add_argument("--model-dir", default=MODEL_DIR)
-    ap.add_argument("--backend", choices=["local", "cline"], default="local", help="cline = API cloud (chiave in ~/.config/tool_agent.env), locale come fallback")
-    ap.add_argument("--cloud-model", default=None, help="id modello sul provider (default: TA_MODEL o google/gemini-3.5-flash-lite)")
+    ap.add_argument("--backend", choices=["local", "cline", "openai"], default="local",
+                    help="cline = API Cline (TA_API_KEY); openai = endpoint OpenAI-compatible generico (TA_OPENAI_BASE_URL, TA_OPENAI_API_KEY, TA_OPENAI_MODEL); locale come fallback")
+    ap.add_argument("--cloud-model", default=None, help="id modello sul provider (default: TA_MODEL / TA_OPENAI_MODEL)")
+    ap.add_argument("--extra-body", default=None, help='JSON aggiunto a ogni richiesta, es. {"chat_template_kwargs":{"enable_thinking":false}}')
+    ap.add_argument("--no-think", action="store_true", help="chat_template_kwargs.enable_thinking=false (Nemotron 3 / Qwen3 su vLLM o SGLang: PhoneLLM va usato cosi')")
     ap.add_argument("--no-local", action="store_true", help="con --backend cline: non caricare il modello locale (niente fallback, libera la VRAM)")
     args = ap.parse_args()
     global tok, model, BACKEND, CONSTRAINED
@@ -365,13 +400,24 @@ def main() -> int:
     except ImportError:
         CONSTRAINED = False
     print(f"decodifica vincolata (locale): {'ON' if CONSTRAINED else 'OFF'}", flush=True)
-    if BACKEND == "cline":
-        CLOUD["key"] = os.environ.get("TA_API_KEY", ""); CLOUD["base_url"] = os.environ.get("TA_BASE_URL", CLOUD["base_url"])
-        CLOUD["model"] = args.cloud_model or os.environ.get("TA_MODEL", CLOUD["model"])
+    if BACKEND in CLOUD_BACKENDS:
+        if BACKEND == "openai":
+            CLOUD["base_url"] = os.environ.get("TA_OPENAI_BASE_URL", ""); CLOUD["key"] = os.environ.get("TA_OPENAI_API_KEY", "")
+            CLOUD["model"] = args.cloud_model or os.environ.get("TA_OPENAI_MODEL", "")
+            CLOUD["timeout"] = float(os.environ.get("TA_OPENAI_TIMEOUT", "8"))
+            if not CLOUD["base_url"] or not CLOUD["model"]:
+                raise SystemExit("TA_OPENAI_BASE_URL / TA_OPENAI_MODEL mancanti (~/.config/tool_agent.env)")
+        else:
+            CLOUD["key"] = os.environ.get("TA_API_KEY", ""); CLOUD["base_url"] = os.environ.get("TA_BASE_URL", CLOUD["base_url"])
+            CLOUD["model"] = args.cloud_model or os.environ.get("TA_MODEL", CLOUD["model"])
+            if not CLOUD["key"]:
+                raise SystemExit("TA_API_KEY mancante (~/.config/tool_agent.env)")
         CLOUD["context"] = int(os.environ.get("TA_CONTEXT", CLOUD["context"]))
-        if not CLOUD["key"]:
-            raise SystemExit("TA_API_KEY mancante (~/.config/tool_agent.env)")
-        print(f"backend cloud: {CLOUD['base_url']} modello {CLOUD['model']} (timeout {CLOUD['timeout']} s)", flush=True)
+        extra = json.loads(args.extra_body) if args.extra_body else {}
+        if args.no_think:
+            extra.setdefault("chat_template_kwargs", {})["enable_thinking"] = False
+        CLOUD["extra"] = extra
+        print(f"backend cloud ({BACKEND}): {CLOUD['base_url']} modello {CLOUD['model']} (timeout {CLOUD['timeout']} s, extra {extra or 'nessuno'})", flush=True)
     if BACKEND == "local" or not args.no_local:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer

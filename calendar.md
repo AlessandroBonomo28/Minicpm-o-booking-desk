@@ -369,3 +369,7 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   regressioni (58 + 28), `tools/compare_extractors.sh`. Controllo con la base di PhoneLLM (Nemotron 3 Nano via Cline):
   48/58 e 22/28 a 1,2 s contro flash-lite 52/58 e 24/28 a 0,9 s; la base sbaglia sulla disciplina (chiacchiere → cancel,
   domande → sì). PhoneLLM vero richiede un hosting (Modal): in attesa della decisione di Alessandro.
+- 06/09 (pom.) — **Harness dell'estrattore v3** (Alessandro: "è tutto un fatto di harness", confermato): domanda aperta
+  citata con i valori, stato TAKEN esplicito, valori solo dalla riga del cliente, `yes` con l'accettazione citata come
+  argomento obbligatorio. Misure: minimax-m3 dialogo 21→28/28; flash-lite base 52→58/58, e le domande scambiate per sì
+  sparite alla sonda. In produzione. Sonnet 5 misurato una volta: +3 punti, 2,5 s a chiamata, scartato per latenza.

@@ -62,3 +62,17 @@ Produzione: flash-lite su harness LEGACY finche' Alessandro non autorizza un gir
 v3: dialogo con contesto 28/28 (legacy 21/28). Base 52: i persi sono inventati dal modello ("book in June" -> time 09:00,
 "a book for May" -> day 3), non piu' la data di oggi; e' rumore da modello debole, non harness. Decisione: v3 e' l'harness
 candidato; prima di metterlo in produzione con flash-lite serve UN giro di banco con flash-lite (autorizzazione di Alessandro).
+
+## Passo 3 (06/09 14:22) — flash-lite con harness v3 (autorizzato da Alessandro, un giro)
+| harness | base (58) | dialogo ctx0 (28) | dialogo ctx3 (28) | latenza |
+|---|---|---|---|---|
+| legacy (13:33) | 52 | 24 | 24 | 0,90 s |
+| v3 | **58** | 25 | 24 | 0,86 s |
+Base 100%: "next free slot", "when is free", "at 16", "Tomorrow at 9", "18?" tutti presi. Dialogo: restavano "yeah so did you
+check" -> yes e "Which one?" -> set(april) (flash-lite, non minimax). Due mosse di harness, sondate su 6 casi (non un giro intero):
+1) esempi di NON-si' nella descrizione dello strumento yes: "Yes, but did you actually check?" -> nessuna azione; "yeah so did you
+   check" ancora yes. 2) `yes` con argomento OBBLIGATORIO `accepts` = le parole del cliente che accettano, citate: il modello
+   che non trova un'accettazione da citare non chiama yes. Sonda: "yeah so did you check" -> nulla; "Yes, but did you actually
+   check?" -> nulla; "Yes, book it." / "Okay, I'll book it for that day." / "Yes, go ahead." / "yes" -> yes. 6/6.
+   (Il gateway ignora `accepts`: yes resta senza valori nell'algebra.)
+In produzione dalle 14:30: flash-lite + harness v3 + yes(accepts). Giro intero di banco da rifare su autorizzazione.

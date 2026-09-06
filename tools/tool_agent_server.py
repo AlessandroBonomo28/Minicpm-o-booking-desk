@@ -61,7 +61,8 @@ def _fn(name, desc, props=None, required=None):
 TOOL_DEFS = {
     "set": _fn("set", "The customer states or changes something about a request: what they want (intent: book = reserve / make an appointment; check = ask whether a date or time is free) and/or a month, a day, a time, exactly as said. Use it for new requests, for answers to the desk's questions ('the 20th', 'at 3 pm', 'April') and for corrections ('no, the 3rd', 'at 5 pm instead'). Pass only what was said.",
                 {"intent": {"type": ["string", "null"], "enum": ["book", "check", None], "description": "book or check if the customer expressed it in this sentence; null otherwise"}, **_FIELDS}),
-    "yes": _fn("yes", "The customer answers YES to the desk's open yes/no question (confirming a booking or accepting an offered slot): 'yes', 'ok', 'sure', 'go ahead', 'book it', 'that's fine'. Only when the sentence is a plain acceptance; if it also changes a value, use set instead."),
+    "yes": _fn("yes", "The customer answers YES to the desk's open yes/no question (confirming a booking or accepting an offered slot): 'yes', 'ok', 'sure', 'go ahead', 'book it', 'that's fine'. Only when the sentence is a plain acceptance. NOT yes: a sentence that asks something back ('yeah, so did you check?', 'yes, but is it really free?', 'which one?') or that starts with yes and then changes a value (use set).",
+               {"accepts": {"type": "string", "description": "the customer's own words that accept the offer, quoted (e.g. 'book it'); if the sentence contains no acceptance, do not call yes"}}, ["accepts"]),
     "no": _fn("no", "The customer answers NO to the desk's open yes/no question: 'no', 'no thanks', 'not that one', 'I'll think about it'."),
     "cancel": _fn("cancel", "The customer gives up the request in progress: 'never mind', 'forget it', 'cancel', 'stop'."),
 }

@@ -26,3 +26,12 @@ Dove cade la base: disciplina, non normalizzazione. "Hello, how are you?" / "Tha
 giusto, niente "fatto" senza fare). Quindi PhoneLLM parte da 48/22 e deve guadagnare >4 e >2 per pareggiare flash-lite.
 Passo 2: serve un endpoint (Modal ufficiale, o Featherless con tool call nel testo). Criterio invariato: dal vivo solo se
 batte flash-lite su entrambi i set a <= 1,2 s.
+
+## Passo 1b (06/09): "un LLM piu' forte risolve?" — predizioni PRIMA di misurare
+- claude-sonnet-5: base 55-57/58, dialogo 26-27/28 (le domande "did you check" e "Which one?" le prende; "Tomorrow at 9" e
+  "next free slot" forse no), latenza 1,5-2,5 s a chiamata (troppo per la decisione alla pausa: +1 s percepito).
+- gemini-3.5-flash: base 54/58, dialogo 25/28, ~1,1 s.
+Cosa NON puo' cambiare un modello piu' forte: slot occupato che chiude la richiesta, atto nascosto/silenzio, ore storpiate dall'omni.
+Esito sonnet-5 (13:41): base 55/58, dialogo 27/28 e 27/28, latenza 2,35-2,8 s, 7 chiamate fallite lato provider su 114.
+Predizione rispettata su accuratezza e latenza. Prende "did you check", "Which one?", "thank you"; perde "next free slot" e
+tre numeri secchi ("15", "The 2nd.", "Tomorrow at 9" -> set vuoto). gemini-3.5-flash NON misurato (Alessandro: gia' noto).

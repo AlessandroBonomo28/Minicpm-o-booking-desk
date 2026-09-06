@@ -56,3 +56,4 @@ dev_tools/
 
 benchmark.json
 .run-logs/
+logs_demo/hud_runs/

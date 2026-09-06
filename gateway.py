@@ -236,7 +236,11 @@ async def hide_admin_routes(request: Request, call_next):
             or path in _BLOCKED_ADMIN_STATIC_PATHS
         ):
             return JSONResponse({"detail": "Not found"}, status_code=404)
-    return await call_next(request)
+    resp = await call_next(request)
+    # pagine e script della demo: mai in cache (si cambia ramo git e la pagina deve girare con il codice del ramo)
+    if request.url.path.startswith("/static/") or request.url.path.endswith(".html"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # ============ 健康检查 ============
@@ -1314,6 +1318,31 @@ def _hud_supervise(fsm, omni_text: str, heard_args: dict):
             if norm != cur:
                 return "yellow", "CHECK THE SCREEN"
     return "green", ""
+
+
+# ---- registro delle run HUD lato server: la pagina manda ogni riga dei suoi due log (conversazione + HUD) e il gateway
+#      la accoda a logs_demo/hud_runs/<sessione>.log; 'latest.log' punta all'ultima. Si legge con tools/hud_run_log.py
+_HUD_RUNS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs_demo", "hud_runs")
+
+
+@app.post("/api/hud/log")
+async def hud_log(request: Request):
+    body = await request.json()
+    sid = re.sub(r"[^A-Za-z0-9_-]", "", str(body.get("session") or "nosession"))[:40] or "nosession"
+    lines = body.get("lines") or []
+    os.makedirs(_HUD_RUNS_DIR, exist_ok=True)
+    path = os.path.join(_HUD_RUNS_DIR, f"{sid}.log")
+    with open(path, "a") as f:
+        for ln in lines[:500]:
+            f.write(f"{float(ln.get('t') or 0):7.1f}s [{ln.get('log') or '?'}:{ln.get('cls') or ''}] {str(ln.get('text') or '')[:2000]}\n")
+    latest = os.path.join(_HUD_RUNS_DIR, "latest.log")
+    try:
+        if os.path.islink(latest) or os.path.exists(latest):
+            os.remove(latest)
+        os.symlink(os.path.basename(path), latest)
+    except OSError:
+        pass
+    return JSONResponse(content={"ok": True, "path": path})
 
 
 @app.post("/api/hud_fsm/omni_turn")

@@ -19,11 +19,28 @@ const $ = (id) => document.getElementById(id);
 // ------------------------------------------------------------------ log
 const t0ms = { v: 0 };
 const now = () => t0ms.v ? ((performance.now() - t0ms.v) / 1000) : 0;
+// ogni riga dei due log va anche al gateway (logs_demo/hud_runs/<sessione>.log): la run si rilegge senza incollarla
+const runLog = { session: 'nosession', queue: [], timer: null };
+function runLogPush(el, cls, text) {
+    const m = /Session created: (sess_[0-9a-f]+)/.exec(text);
+    if (m) runLog.session = m[1];
+    runLog.queue.push({ t: now(), log: el.id === 'conv' ? 'conv' : 'hud', cls, text });
+    if (!runLog.timer) runLog.timer = setTimeout(runLogFlush, 1000);
+}
+function runLogFlush() {
+    runLog.timer = null;
+    if (!runLog.queue.length) return;
+    const lines = runLog.queue.splice(0);
+    fetch('/api/hud/log', { method: 'POST', headers: { 'content-type': 'application/json' }, keepalive: true,
+        body: JSON.stringify({ session: runLog.session, lines }) }).catch(() => {});
+}
 function logTo(el, cls, text) {
     const d = document.createElement('div'); d.className = cls;
     d.innerHTML = `<span class="t">${now().toFixed(1)}s</span>`;
     d.appendChild(document.createTextNode(text));
-    el.appendChild(d); el.scrollTop = el.scrollHeight; return d;
+    el.appendChild(d); el.scrollTop = el.scrollHeight;
+    runLogPush(el, cls, text);
+    return d;
 }
 const conv = (cls, t) => logTo($('conv'), cls, t);
 const hudLog = (cls, t) => logTo($('hudLog'), cls, t);
@@ -153,6 +170,7 @@ function drawHud() {
     ctx.fillText(bannerText, W / 2, H * 0.08);
     ctx.fillStyle = theme.fg;
     const act = level !== 'green' ? actFor() : '';   // in verde l'omni guida: niente atto dettato
+    hud.lastText = [bannerText, act, theme.title, theme.line1, theme.line2, theme.line3 || ''].filter(Boolean).join(' | ');
     if (act) {
         // schermo a due meta': sopra l'atto, sotto lo stato (linea di separazione)
         ctx.font = 'bold 40px system-ui, sans-serif'; ctx.fillText(act, W / 2, H * 0.29);
@@ -178,7 +196,7 @@ function hudSync(force = false) {
     if (!force && h === hud.lastHash) return;
     hud.lastHash = h;
     hud.pendingFrame = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-    hudLog('hud', `frame pronto (${$('hudState').textContent}) → allegato al prossimo chunk audio`);
+    hudLog('hud', `frame pronto (${$('hudState').textContent}) → allegato al prossimo chunk audio · schermo: ${hud.lastText || ''}`);
 }
 
 /** Etichetta per db.html (pill): IDLE / COLLECTING / CHECKING / OK / PARTIAL / NO / ERR. */

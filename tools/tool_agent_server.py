@@ -122,8 +122,7 @@ PROMPT_API_V2 = ("You are the request extractor of a voice booking desk (OPERATO
                  "set = what the customer states in the NOW line: intent (book / check) and/or month, day, time, NORMALIZED: month name in "
                  "lowercase, day as a number, time as 24h HH:MM. Values come ONLY from the customer's NOW line: never copy a value from the "
                  "desk's lines or from STATE (they are context to understand the NOW line, not values to pass). A bare number answers what "
-                 "STATE says is being asked. Relative dates ('tomorrow', 'the next day', 'the day after') are resolved only from an explicit "
-                 "reference (TODAY in STATE, or a date said in the conversation); otherwise pass nothing for the date.\n"
+                 "STATE says is being asked. Relative dates ('the next day', 'the day after') are resolved only from a date said in the conversation; 'tomorrow' or 'next week' without a reference: pass nothing for the date.\n"
                  "Asking what is free ('when is it free?', 'what's the next free slot?', 'anything else that day?') = set with intent check "
                  "and no values (the desk keeps the date it already has).\n"
                  "yes / no = a plain answer to the desk's open yes/no question quoted in STATE. yes ONLY if the customer accepts exactly "
@@ -141,8 +140,8 @@ def _hl_date(sl):
 
 def fsm_line_v2(fsm):
     """Riga di stato v2: la domanda aperta e' citata con i valori; dopo un occupato si dice cosa fare; oggi e' dichiarato."""
-    import datetime as _dt
-    today = f"TODAY: {_dt.date.today().strftime('%A %d %B %Y').lower()}. "
+    # TODAY tolto (misurato 06/09 con minimax-m3: la data di oggi finiva copiata nei valori, "book a desk" -> september 6)
+    today = ""
     st = (fsm or {}).get("state") if isinstance(fsm, dict) else None
     sl = (fsm or {}).get("slots") or {} if isinstance(fsm, dict) else {}
     tm = sl.get("time") or ""

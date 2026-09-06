@@ -48,7 +48,7 @@ CASES = [
     (COLL("book"), "The twenty-first of May, please.", ("book", {"month": "may", "day": "21"}), ("time",)),
     (COLL("book"), "June 1st.", ("book", {"month": "june", "day": "1"}), ("time",)),
     (COLL("book"), "December 1st", ("book", {"month": "december", "day": "1"}), ("time",)),
-    (COLL("book"), "Tomorrow at 9.", ("book", {"time": "09:00|9"}), ()),   # harness v2 dichiara TODAY: la data calcolata e' legittima
+    (COLL("book"), "Tomorrow at 9.", ("book", {"time": "09:00|9"}), ("month", "day")),
     # giorno da solo: con e SENZA mese nello stato (mai inventare il mese)
     (COLL("book", month="april"), "The 2nd.", ("book", {"day": "2"}), ("time",)),
     (COLL("book", month="april"), "The second.", ("book", {"day": "2"}), ("time",)),

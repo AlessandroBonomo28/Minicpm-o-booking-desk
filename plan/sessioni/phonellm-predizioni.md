@@ -51,10 +51,14 @@ Nota: minimax-m3:free e' a tetto giornaliero (429/500 via OpenRouter); usato min
 |---|---|---|---|---|
 | legacy | 53 | 23 | 21 | 1,4 s |
 | v2 (domanda citata, TAKEN esplicito, TODAY, regole valori) | 54 | 25 | 27 | 1,4 s |
-| v3 = v2 senza TODAY | 54 | 24 | 25 | 1,4-2,4 s (provider lento, 3 errori) |
+| v2, secondo giro (la patch 'senza TODAY' non era entrata) | 54 | 24 | 25 | 1,4-2,4 s (provider lento, 3 errori) |
 Predizione: rispettata in direzione (dialogo +2/+6), sotto sulla base (+1 invece di +4): TODAY faceva copiare la data di oggi
-("book a desk" -> september 6), tolto. Rumore tra giri uguali: +-2 casi (temperatura 0 ma provider non deterministico).
+("book a desk" -> september 6): tolto in v3, misurato sotto. Rumore tra giri uguali: +-2 casi (temperatura 0 ma provider non deterministico).
 Cosa ha sciolto l'harness (legacy -> v2/v3, con contesto): "yeah so did you check" e "Yes, but did you actually check?" non
 sono piu' un si'; "Which one?" non porta piu' aprile; "next free slot" diventa check (a volte con la data del record: innocuo
 per idempotenza). Resta: "Tomorrow at 9" (data inventata), "next day" senza mese.
 Produzione: flash-lite su harness LEGACY finche' Alessandro non autorizza un giro di banco di flash-lite con v3.
+| v3 = v2 senza TODAY (14:10) | 52 | 26 | **28** | 1,4 s |
+v3: dialogo con contesto 28/28 (legacy 21/28). Base 52: i persi sono inventati dal modello ("book in June" -> time 09:00,
+"a book for May" -> day 3), non piu' la data di oggi; e' rumore da modello debole, non harness. Decisione: v3 e' l'harness
+candidato; prima di metterlo in produzione con flash-lite serve UN giro di banco con flash-lite (autorizzazione di Alessandro).

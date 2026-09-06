@@ -4000,6 +4000,7 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
         text_repetition_window_size: Optional[int] = None,
         length_penalty: float = 1.1,
         force_listen_override: bool = False,
+        force_speak_override: bool = False,
     ):
         """生成响应（透传到 self.duplex.streaming_generate）
         
@@ -4031,6 +4032,7 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
             text_repetition_window_size=text_repetition_window_size,
             length_penalty=length_penalty,
             force_listen_override=force_listen_override,
+            force_speak_override=force_speak_override,
         )
     
     def duplex_finalize(self):
@@ -5029,6 +5031,7 @@ class DuplexCapability:
         """构造 streaming_generate 的标准返回 dict"""
         return {
             "is_listen": is_listen,
+            "forced_speak": bool(getattr(self, "_forced_speak", False)),
             "text": text,
             "audio_waveform": audio_waveform if audio_waveform is not None else self._generate_silence_waveform(),
             "end_of_turn": end_of_turn,
@@ -5066,8 +5069,12 @@ class DuplexCapability:
         text_repetition_window_size=512,
         length_penalty=1.1,
         force_listen_override: bool = False,
+        force_speak_override: bool = False,
     ):
         """生成响应。返回后必须调用 finalize_unit()（除非 needs_finalize 为 False）。
+        force_speak_override (ramo beta-gamma, 06/09): specchio di force_listen_override. Se a j=0 il modello campiona
+        <|listen|> con il turno chiuso, si sostituisce con <|speak|> (la stessa sequenza di ogni onset naturale): il
+        controllore decide QUANDO parlare, il modello decide COSA. Ha la precedenza force_listen.
 
         调用方可以选择调度策略：
         - 模式 A（异步）: generate → 返回结果 → finalize（与网络传输重叠）
@@ -5090,6 +5097,9 @@ class DuplexCapability:
 
         # Force listen: initial N calls OR per-chunk force_listen_override from frontend
         force_listen = self._streaming_generate_count < self.force_listen_count or force_listen_override
+        self._forced_speak = False
+        if force_speak_override and force_listen:
+            force_speak_override = False   # precedenza: force_listen (avvio protetto o override del client)
         self._streaming_generate_count += 1
         if force_listen:
             _reason = "force_listen_override" if force_listen_override else f"call #{self._streaming_generate_count}"
@@ -5174,6 +5184,11 @@ class DuplexCapability:
                 # if current turn not ended, not allowed to listen (only check when not force_listen)
                 if last_id.item() == self.listen_token_id and (not self.current_turn_ended):
                     last_id = torch.tensor([self.tts_bos_token_id], dtype=torch.long, device=self.device)
+                # force_speak (beta-gamma): turno chiuso + campione <|listen|> a j=0 -> <|speak|>, poi decodifica normale
+                if force_speak_override and j == 0 and self.current_turn_ended and last_id.item() == self.listen_token_id:
+                    last_id = torch.tensor([self.speak_token_id], dtype=torch.long, device=self.device)
+                    self._forced_speak = True
+                    logger.info("[Duplex] FORCE_SPEAK: <|listen|> -> <|speak|> at j=0 (unit %s)", self.audio_chunk_idx)
 
             self.total_ids.append(last_id.item())
 

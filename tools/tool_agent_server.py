@@ -412,6 +412,7 @@ def main() -> int:
             CLOUD["model"] = args.cloud_model or os.environ.get("TA_MODEL", CLOUD["model"])
             if not CLOUD["key"]:
                 raise SystemExit("TA_API_KEY mancante (~/.config/tool_agent.env)")
+            CLOUD["timeout"] = float(os.environ.get("TA_TIMEOUT", CLOUD["timeout"]))
         CLOUD["context"] = int(os.environ.get("TA_CONTEXT", CLOUD["context"]))
         extra = json.loads(args.extra_body) if args.extra_body else {}
         if args.no_think:

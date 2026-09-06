@@ -365,3 +365,7 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   in verde no) e **idempotenza violata** (un set-eco spegneva il rosso). Entrambi corretti; prompt di default ridotto a
   "ALWAYS SPEAK, read the screen". Aperti: slot occupato che chiude la richiesta (la data si perde), nessun evento di
   rimozione, silenzio dopo il sì all'offerta (tre occorrenze: proposta di mostrare l'atto anche in verde).
+- 06/09 (pom.) — **Ramo `phonellm`** (estrattore alternativo): backend OpenAI-compatible generico, 7 casi nuovi nelle
+  regressioni (58 + 28), `tools/compare_extractors.sh`. Controllo con la base di PhoneLLM (Nemotron 3 Nano via Cline):
+  48/58 e 22/28 a 1,2 s contro flash-lite 52/58 e 24/28 a 0,9 s; la base sbaglia sulla disciplina (chiacchiere → cancel,
+  domande → sì). PhoneLLM vero richiede un hosting (Modal): in attesa della decisione di Alessandro.

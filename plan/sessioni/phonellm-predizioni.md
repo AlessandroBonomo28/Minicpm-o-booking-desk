@@ -13,3 +13,16 @@ Predizioni:
 - PhoneLLM (se lo misureremo): sopra la base di 5-10 punti sulla disciplina (domande non sono si', niente valori dal contesto),
   non necessariamente sopra flash-lite sulla normalizzazione (mesi/ordinali/ore) perche' allenato su altri strumenti.
 Criterio: si prosegue con PhoneLLM dal vivo solo se batte flash-lite su ENTRAMBI i set, a latenza <= 1,2 s.
+
+## Esiti passo 1 (06/09 13:35) — rapporti in logs_demo/extractor_eval/
+| estrattore | base (58) | dialogo ctx0 (28) | dialogo ctx3 (28) | latenza |
+|---|---|---|---|---|
+| flash-lite (produzione) | 52 | 24 | 24 | 0,90 s |
+| Nemotron 3 Nano base (via Cline, extra reasoning off) | 48 | 22 | 19 | 1,20 s |
+Predizione: rispettata (base 42-48 previsti, 48 misurati; dialogo 15-20 previsti, 19-22 misurati).
+Dove cade la base: disciplina, non normalizzazione. "Hello, how are you?" / "Thank you, bye!" / "pizza" -> cancel;
+"Hmm, let me think" -> copia i valori dalla riga dell'operatore; "Which one?" -> set(april); "yeah so did you check" -> yes;
+"15" -> giorno invece di ora. Sono ESATTAMENTE i difetti che la SFT di PhoneLLM dichiara di curare (tool call al momento
+giusto, niente "fatto" senza fare). Quindi PhoneLLM parte da 48/22 e deve guadagnare >4 e >2 per pareggiare flash-lite.
+Passo 2: serve un endpoint (Modal ufficiale, o Featherless con tool call nel testo). Criterio invariato: dal vivo solo se
+batte flash-lite su entrambi i set a <= 1,2 s.

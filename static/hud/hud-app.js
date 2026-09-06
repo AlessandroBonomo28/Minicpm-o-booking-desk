@@ -24,12 +24,15 @@ const runLog = { session: 'nosession', queue: [], timer: null };
 function runLogPush(el, cls, text) {
     const m = /Session created: (sess_[0-9a-f]+)/.exec(text);
     if (m) runLog.session = m[1];
+    if (!runLog.queue.length) runLog.firstAt = performance.now();
     runLog.queue.push({ t: now(), log: el.id === 'conv' ? 'conv' : 'hud', cls, text });
     if (!runLog.timer) runLog.timer = setTimeout(runLogFlush, 1000);
 }
 function runLogFlush() {
     runLog.timer = null;
     if (!runLog.queue.length) return;
+    // prima dell'id di sessione le righe aspettano (max 60 s): CONFIG e i primi frame devono finire nel file della sessione
+    if (runLog.session === 'nosession' && performance.now() - runLog.firstAt < 60000) { runLog.timer = setTimeout(runLogFlush, 1000); return; }
     const lines = runLog.queue.splice(0);
     fetch('/api/hud/log', { method: 'POST', headers: { 'content-type': 'application/json' }, keepalive: true,
         body: JSON.stringify({ session: runLog.session, lines }) }).catch(() => {});

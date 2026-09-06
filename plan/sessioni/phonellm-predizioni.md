@@ -35,3 +35,26 @@ Cosa NON puo' cambiare un modello piu' forte: slot occupato che chiude la richie
 Esito sonnet-5 (13:41): base 55/58, dialogo 27/28 e 27/28, latenza 2,35-2,8 s, 7 chiamate fallite lato provider su 114.
 Predizione rispettata su accuratezza e latenza. Prende "did you check", "Which one?", "thank you"; perde "next free slot" e
 tre numeri secchi ("15", "The 2nd.", "Tomorrow at 9" -> set vuoto). gemini-3.5-flash NON misurato (Alessandro: gia' noto).
+
+## Passo 2 (06/09 pom.) — HARNESS, non modello (Alessandro: "tutto sta nel dare il giusto contesto")
+Sonda: minimax/minimax-m3:free (gratis; batterie con Sonnet/flash solo con autorizzazione).
+Harness v2: domanda aperta citata parola per parola con i valori; stato TAKEN esplicito ("what's free" = set check);
+TODAY dichiarato; regola "i valori solo dalla riga NOW del cliente"; "domanda/dubbio non e' un si'".
+Predizioni PRIMA: minimax legacy base ~46/58, dialogo ~20/28; minimax v2 base +4 (50), dialogo +5 (25): prende "did you check",
+"Which one?", "next free slot", "when is free"; rischio: copie dei valori citati (innocue in CONFIRM per idempotenza, ma
+misurate come FAIL se compaiono in casi che li vietano).
+Nota: minimax-m3:free e' a tetto giornaliero (429/500 via OpenRouter); usato minimax/minimax-m3 a pagamento: ~0,00014 $ a chiamata,
+~2 centesimi per giro di banco.
+
+## Esiti passo 2 (06/09 13:45-14:05), minimax-m3, tre giri
+| harness | base (58) | dialogo ctx0 (28) | dialogo ctx3 (28) | latenza |
+|---|---|---|---|---|
+| legacy | 53 | 23 | 21 | 1,4 s |
+| v2 (domanda citata, TAKEN esplicito, TODAY, regole valori) | 54 | 25 | 27 | 1,4 s |
+| v3 = v2 senza TODAY | 54 | 24 | 25 | 1,4-2,4 s (provider lento, 3 errori) |
+Predizione: rispettata in direzione (dialogo +2/+6), sotto sulla base (+1 invece di +4): TODAY faceva copiare la data di oggi
+("book a desk" -> september 6), tolto. Rumore tra giri uguali: +-2 casi (temperatura 0 ma provider non deterministico).
+Cosa ha sciolto l'harness (legacy -> v2/v3, con contesto): "yeah so did you check" e "Yes, but did you actually check?" non
+sono piu' un si'; "Which one?" non porta piu' aprile; "next free slot" diventa check (a volte con la data del record: innocuo
+per idempotenza). Resta: "Tomorrow at 9" (data inventata), "next day" senza mese.
+Produzione: flash-lite su harness LEGACY finche' Alessandro non autorizza un giro di banco di flash-lite con v3.

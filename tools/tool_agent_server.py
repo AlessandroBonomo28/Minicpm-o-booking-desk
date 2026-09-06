@@ -110,6 +110,63 @@ PROMPT_API = ("You are the request extractor of a voice booking desk (OPERATOR =
               "cancel = the customer gives up. Greeting, thanks, hesitation, off-topic, questions about the booking system: no function, "
               "answer NO ACTION.")
 SYSTEM = LOCAL_PROMPT
+
+# ---- HARNESS v2 (06/09, Alessandro: "e' tutto un fatto di harness"): il contesto giusto per sciogliere le ambiguita'.
+#      1) la domanda aperta del banco e' riportata PAROLA PER PAROLA, con i valori (l'idempotenza della FSM rende innocua una copia);
+#      2) dopo uno slot occupato lo stato dice cosa fare ("what's free?" = set intent check);
+#      3) i valori vengono SOLO dalla riga NOW del cliente; le date relative si risolvono solo con un riferimento esplicito (oggi, o una
+#      data nel dialogo); 4) una domanda / un dubbio non e' mai un si'.
+PROMPT_API_V2 = ("You are the request extractor of a voice booking desk (OPERATOR = the desk, USER = the customer, transcribed by an ASR "
+                 "with small errors). Read STATE, the last lines of the conversation and the customer's NOW line, then call at most ONE "
+                 "function about the NOW line.\n"
+                 "set = what the customer states in the NOW line: intent (book / check) and/or month, day, time, NORMALIZED: month name in "
+                 "lowercase, day as a number, time as 24h HH:MM. Values come ONLY from the customer's NOW line: never copy a value from the "
+                 "desk's lines or from STATE (they are context to understand the NOW line, not values to pass). A bare number answers what "
+                 "STATE says is being asked. Relative dates ('tomorrow', 'the next day', 'the day after') are resolved only from an explicit "
+                 "reference (TODAY in STATE, or a date said in the conversation); otherwise pass nothing for the date.\n"
+                 "Asking what is free ('when is it free?', 'what's the next free slot?', 'anything else that day?') = set with intent check "
+                 "and no values (the desk keeps the date it already has).\n"
+                 "yes / no = a plain answer to the desk's open yes/no question quoted in STATE. yes ONLY if the customer accepts exactly "
+                 "what the question offers; a question, a doubt, a request to verify ('did you check?', 'is it really free?', 'which one?') "
+                 "or a comment is NOT a yes and NOT a value: no function. If the customer answers yes but also changes a value ('yes, at 3 pm'), "
+                 "call set with the value.\n"
+                 "cancel = the customer gives up the request. Greeting, thanks, hesitation, off-topic: no function, answer NO ACTION.")
+HARNESS = "v2"   # v2 | legacy (--harness)
+
+
+def _hl_date(sl):
+    d = (sl.get("date") or "").strip()
+    return d if d else " ".join(x for x in (sl.get("month", ""), sl.get("day", "")) if x)
+
+
+def fsm_line_v2(fsm):
+    """Riga di stato v2: la domanda aperta e' citata con i valori; dopo un occupato si dice cosa fare; oggi e' dichiarato."""
+    import datetime as _dt
+    today = f"TODAY: {_dt.date.today().strftime('%A %d %B %Y').lower()}. "
+    st = (fsm or {}).get("state") if isinstance(fsm, dict) else None
+    sl = (fsm or {}).get("slots") or {} if isinstance(fsm, dict) else {}
+    tm = sl.get("time") or ""
+    when = _hl_date(sl) + (f" at {tm}" if tm and tm != "all-day" else "")
+    if st == "CONFIRM" and fsm.get("intent") == "book":
+        return today + f'STATE: the desk asked the customer: "Shall I book {when}?" Open yes/no question (yes = book exactly that; no = do not; a corrected value = set).'
+    if st == "CONFIRM":
+        return today + f'STATE: the desk said "{when} is free" and asked: "Would you like to book it?" Open yes/no question (yes = book that slot; no = decline; another date/time = set).'
+    if st == "COLLECTING" and (fsm.get("tentative") or {}):
+        tk = [f"{k}={sl.get(k)}" for k in ("month", "day", "time") if (fsm.get("tentative") or {}).get(k)]
+        return today + (f"STATE: a {fsm.get('intent')} request is in progress; the desk asked the customer to confirm what it understood: {', '.join(tk)}. "
+                        "Open yes/no question (yes = correct; no = wrong; a corrected value = set).")
+    if st == "COLLECTING":
+        got = [k for k in ("month", "day", "time") if sl.get(k)]
+        miss = [k for k in (fsm.get("missing") or []) if k in ("month", "day", "time")]
+        ask = miss[0] if miss else "nothing"
+        return today + (f"STATE: a {fsm.get('intent')} request is in progress; collected: {', '.join(got) or 'nothing'}; "
+                        f"missing: {', '.join(miss) or 'nothing'}. The desk is asking for the {ask.upper()}: a bare number is the {ask}. No yes/no question is open.")
+    if st == "DONE" and fsm.get("status") == "taken":
+        return today + (f"STATE: the desk just told the customer that {when} is TAKEN. If the customer asks what is free or for another slot, "
+                        "call set with intent check and no values; a new time = set with the time; thanks or goodbye = no function.")
+    if st == "DONE":
+        return today + "STATE: the last request is closed (done). No open question. Thanks or goodbye = no function; a new request = set."
+    return today + "STATE: no request in progress. No open question."
 DEFAULT_TOOLS = None   # per stato: vedi tools_for_state
 
 
@@ -246,7 +303,8 @@ def decide(transcript, _tools_unused, fsm=None, context=0):
     convo = f"NOW USER: {lines[last_user_idx][1]}"
     tools = tools_for_state(fsm)
     # cloud: PROMPT_API + ultime righe del dialogo; locale: LOCAL_PROMPT e SOLO la battuta corrente
-    system = PROMPT_API if BACKEND in CLOUD_BACKENDS else LOCAL_PROMPT
+    system = (PROMPT_API_V2 if HARNESS == "v2" else PROMPT_API) if BACKEND in CLOUD_BACKENDS else LOCAL_PROMPT
+    state_line = fsm_line_v2(fsm) if (HARNESS == "v2" and BACKEND in CLOUD_BACKENDS) else fsm_line(fsm)
     if context == "state":
         context = 0
     if BACKEND in CLOUD_BACKENDS and not context:
@@ -256,7 +314,7 @@ def decide(transcript, _tools_unused, fsm=None, context=0):
         convo = "\n".join(f"{'OPERATOR' if r == 'assistant' else 'USER'}: {x}" for r, x in prev) + "\n" + convo
 
     messages = [{"role": "system", "content": system},
-                {"role": "user", "content": f"{fsm_line(fsm)}\n\n{convo}\n\nCall one function about the NOW line."}]
+                {"role": "user", "content": f"{state_line}\n\n{convo}\n\nCall one function about the NOW line."}]
     backend_used = BACKEND
     raw = ""
     if BACKEND in CLOUD_BACKENDS:
@@ -388,12 +446,13 @@ def main() -> int:
                     help="cline = API Cline (TA_API_KEY); openai = endpoint OpenAI-compatible generico (TA_OPENAI_BASE_URL, TA_OPENAI_API_KEY, TA_OPENAI_MODEL); locale come fallback")
     ap.add_argument("--cloud-model", default=None, help="id modello sul provider (default: TA_MODEL / TA_OPENAI_MODEL)")
     ap.add_argument("--extra-body", default=None, help='JSON aggiunto a ogni richiesta, es. {"chat_template_kwargs":{"enable_thinking":false}}')
+    ap.add_argument("--harness", choices=["v2", "legacy"], default="v2", help="v2 = domanda aperta citata con i valori, TODAY, stato 'taken' esplicito (06/09); legacy = riga di stato senza valori")
     ap.add_argument("--no-think", action="store_true", help="chat_template_kwargs.enable_thinking=false (Nemotron 3 / Qwen3 su vLLM o SGLang: PhoneLLM va usato cosi')")
     ap.add_argument("--no-local", action="store_true", help="con --backend cline: non caricare il modello locale (niente fallback, libera la VRAM)")
     args = ap.parse_args()
-    global tok, model, BACKEND, CONSTRAINED
+    global tok, model, BACKEND, CONSTRAINED, HARNESS
     load_env_file("~/.config/tool_agent.env")
-    BACKEND = args.backend
+    BACKEND = args.backend; HARNESS = args.harness
     try:
         import lmformatenforcer  # noqa: F401
         CONSTRAINED = os.environ.get("TA_CONSTRAINED", "0") == "1"   # misurato 05/09: vincolata 44/55 contro 47 libera (inventa valori per riempire il JSON)
@@ -418,7 +477,7 @@ def main() -> int:
         if args.no_think:
             extra.setdefault("chat_template_kwargs", {})["enable_thinking"] = False
         CLOUD["extra"] = extra
-        print(f"backend cloud ({BACKEND}): {CLOUD['base_url']} modello {CLOUD['model']} (timeout {CLOUD['timeout']} s, extra {extra or 'nessuno'})", flush=True)
+        print(f"backend cloud ({BACKEND}): {CLOUD['base_url']} modello {CLOUD['model']} (timeout {CLOUD['timeout']} s, extra {extra or 'nessuno'}, harness {HARNESS})", flush=True)
     if BACKEND == "local" or not args.no_local:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer

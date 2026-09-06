@@ -31,7 +31,7 @@ CASES = [
     (RES_BOOK("march", "30", "15:00"), [A("Your booking is confirmed for March 30th at 15:00."), U("Yeah, how about the next day?")],
      ("check", {"month": "march", "day": "31"}), ()),   # il cloud la calcola dal dialogo; il locale no (nessuna azione, accettabile)
     (RES_CHECK("april", "4"), [A("April 4th is available all day. Would you like to book?"), U("Yes, at 3 pm.")],
-     ("book", {"month": "april", "day": "4", "time": "15:00"}), ()),
+     ("check", {"month": "april", "day": "4", "time": "15:00"}), ()),   # contratto set/yes: "yes, at 3 pm" = set(time) + nuova conferma (resta check finche' il cliente dice si')
     (RES_CHECK("april", "4"), [A("April 4th is available all day. Would you like to book?"), U("And the day after?")],
      ("check", {"month": "april", "day": "5"}), ()),
     # in CONFIRM la FSM eredita il mese dell'offerta se non se ne dice un altro: basta il giorno

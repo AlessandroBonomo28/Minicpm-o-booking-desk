@@ -378,3 +378,6 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   regione di sistema = sfondo). Politica τ a tempo provata e scartata (parlava troppo). Adottato **σ stuck detector**:
   LLM in background con conversazione, schermo, stato, tempi e contratto -> ok/stuck + aiuto sullo schermo + force.
   Verifica sul mese portata da DEV; tetto di due aiuti per stato; titolo senza "CHECK". Sonde 9/9. Da provare dal vivo.
+- 07/09 — **Regola dello schermo** (Alessandro): l'HUD resta semplice, l'algebra spezza il compito in stati. Sullo schermo
+  solo righe pronunciabili al cliente così come sono; mai istruzioni per l'operatore (atto, SAY/ASK/WAIT): con force_speak
+  l'omni le leggeva alla lettera ("I'm going to ask the day"). L'aiuto di σ è la frase da dire, in prima persona.

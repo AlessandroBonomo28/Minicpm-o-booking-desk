@@ -965,7 +965,7 @@ def _hud_lookup(date: str, tm: str):
     if all_day:
         return "booked", _hud_time_label(all_day)
     if tm == "all-day":
-        times = sorted(_hud_time_label(v) for v in day)
+        times = sorted(str(v.get("time") or _hud_time_label(v)) for v in day)   # orari normalizzati HH:MM (lo schermo li rende '6 PM')
         if times:
             return "partial", "booked " + ", ".join(times)
         return "available", "no bookings that day"
@@ -1253,6 +1253,11 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         _hud_db_save(); return fsm, False
 
     rejected = {}
+    # 'any' / 'all' / 'whole' (07/09): il cliente ALLARGA la richiesta ("the whole month", "any time"): il campo si svuota
+    for k in ("day", "time"):
+        if clean(args.get(k)).lower().replace("-", " ") in ("any", "all", "whole", "every", "any day", "any time", "all day", "whole day", "whole month", "all month"):
+            slots[k] = ""; args[k] = None
+            if k == "time": slots["time_raw"] = ""
     # un solo numero nella battuta non puo' essere insieme giorno E ora ("the 2nd" -> day='the 2nd', time='2')
     if user_text and clean(args.get("day")) and clean(args.get("time")):
         nums = re.findall(r"\d+", _hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", re.sub(r"[^\w\s-]", " ", user_text.lower()))))
@@ -1415,7 +1420,7 @@ async def hud_fsm_omni_turn(request: Request):
     _hud_db_save()
     stuck = (heard_args.get("status") or "").lower() == "stuck"
     capped = False
-    if stuck:
+    if stuck or level == "red":
         # tetto: due aiuti per STATO della macchina (firma senza semaforo); oltre, niente giallo ne' force (mai un ciclo)
         sl = fsm.get("slots") or {}
         sig = f"{fsm.get('state')}|{fsm.get('intent')}|{sl.get('month')}|{sl.get('day')}|{sl.get('time')}|{fsm.get('status')}"
@@ -1428,7 +1433,7 @@ async def hud_fsm_omni_turn(request: Request):
             fsm["stuck_sig"] = sig; fsm["stuck_count"] = cnt + 1
         _hud_db_save()
     return JSONResponse(content={"fsm": fsm, "changed": changed, "level": level, "hint": hint, "stuck": stuck, "kind": heard_args.get("kind") or "",
-                                 "capped": capped, "force": bool(stuck or level == "red")})
+                                 "capped": capped, "force": bool((stuck or level == "red") and not capped)})
 
 
 @app.post("/api/hud_fsm/event")

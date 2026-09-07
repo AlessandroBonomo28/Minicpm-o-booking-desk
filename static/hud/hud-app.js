@@ -69,64 +69,64 @@ const hud = {
 };
 const canvas = $('hud'), ctx = canvas.getContext('2d');
 
-const timeLabel = (t) => (!t || t === 'all-day') ? 'ALL DAY' : String(t).toUpperCase();
-const slotLine = (f) => `${(f.slots.date || '').toUpperCase()} ${timeLabel(f.slots.time)}`.trim();
+/** Orari in forma parlata ('4 PM', '4:30 PM'): l'omni li dice cosi' e non inverte i numeri 24h. */
+function timeLabel(t) {
+    if (!t || t === 'all-day') return 'ALL DAY';
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(t).trim());
+    if (!m) return String(t).toUpperCase();
+    const h = parseInt(m[1], 10), mm = m[2], h12 = ((h + 11) % 12) + 1, ap = h < 12 ? 'AM' : 'PM';
+    return mm === '00' ? `${h12} ${ap}` : `${h12}:${mm} ${ap}`;
+}
+const takenList = (d) => String(d || '').replace(/^booked\s*/i, '').split(',').map(x => timeLabel(x.trim().toLowerCase())).filter(Boolean).join(', ');
+const slotLine = (f) => `${(f.slots.date || '').toUpperCase()}${f.slots.time && f.slots.time !== 'all-day' ? ', ' + timeLabel(f.slots.time) : (f.slots.time === 'all-day' ? ', ALL DAY' : '')}`.trim();
 
 /** Tabella "formato del frame per stato" di plan/ramo-hud.md. */
 function themeFor() {
+    // Regola (07/09): lo schermo e' DOMANDA e RISPOSTA, al massimo tre righe, tutte pronunciabili al cliente cosi' come sono.
+    // Niente istruzioni per l'operatore, niente elenchi non richiesti: i giorni occupati compaiono solo se la domanda e' sul mese.
     const f = hud.fsm;
     switch (hud.screen) {
         case 'COLLECTING': {
-            // campi indipendenti: si mostra quello che c'e' ('APRIL ?' / '? 2' / 'APRIL 2') e il primo che manca
             const miss = (f.missing || [])[0] || '';
             const month = (f.slots.month || '').toUpperCase(), day = f.slots.day || '';
             const rejKeys = Object.keys(f.rejected || {});
             const tent = f.tentative || {};
-            const mq = tent.month ? '?' : '', dq = tent.day ? '?' : '';   // valore tentativo (dall'operatore): punto interrogativo
-            const dateLine = (month || day) ? `DATE: ${month ? month + mq : '?'} ${day ? day + dq : '?'}` : 'DATE: ?';
-            let line3 = (f.slots.time && miss !== 'time') ? `TIME: ${timeLabel(f.slots.time)}` : '';
-            if (f.month_info && !f.slots.day) {   // manca il giorno -> il mese in sintesi (giorni occupati, il resto libero)
-                const bd = f.month_info.booked_days || [];
-                line3 = bd.length ? `${bd.join(', ')} BOOKED · OTHER DAYS FREE` : 'ALL DAYS FREE';
-            }
-            // un valore respinto (sintassi o DB) e' il fatto nuovo: va nella riga grande, da solo ("15:00 TAKEN", "TOMORROW NOT VALID");
-            // niente elenco delle ore libere: sarebbe un OFFER non richiesto (05/09, Alessandro)
+            const mq = tent.month ? '?' : '', dq = tent.day ? '?' : '';
+            const when = (month || day) ? `${month ? month + mq : ''}${day ? ' ' + day + dq : ''}`.trim() : '';
+            const verb = f.intent === 'check' ? 'IS IT FREE' : 'BOOK';
+            const line1 = when ? `${verb}: ${when}${f.slots.time && miss !== 'time' ? ', ' + timeLabel(f.slots.time) : ''}` : `${verb}: ?`;
+            const askFor = { month: 'WHICH MONTH?', day: 'WHICH DAY?', time: 'WHAT TIME?' }[miss] || '';
             const tentKeys = Object.keys(tent).filter(k => tent[k]);
-            let line2 = tentKeys.length ? `CONFIRM: ${tentKeys.map(k => k.toUpperCase()).join(' + ')}` : `MISSING: ${miss.toUpperCase()}`;
+            let line2 = tentKeys.length ? 'IS THAT RIGHT?' : askFor, line3 = '';
+            if (f.intent === 'check' && f.month_info && !f.slots.day) {   // domanda sul mese: la risposta e' del mese
+                const bd = f.month_info.booked_days || [];
+                line2 = bd.length ? `FREE, EXCEPT ${bd.join(', ')}` : 'ALL DAYS FREE'; line3 = askFor;
+            }
             if (rejKeys.length) {
                 const v = String(f.rejected[rejKeys[0]]).toUpperCase();
-                line2 = / TAKEN$| FULL$/.test(v) ? v : `${v} NOT VALID`;
+                line2 = / TAKEN$| FULL$/.test(v) ? v : `${v}: NOT VALID`;
             }
-            return { bg: rejKeys.length ? '#c62828' : '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'AVAILABILITY' : 'NEW BOOKING',   // sostantivi: 'AVAILABILITY CHECK' -> 'checking...', 'IS IT FREE?' -> 'Is it free?' (letti alla lettera)
-                     line1: dateLine, line2, line3 };
+            return { bg: rejKeys.length ? '#c62828' : '#1565c0', fg: '#ffffff', title: '', line1, line2, line3 };
         }
         case 'CHECKING':
-            return { bg: '#f9a825', fg: '#1a1a1a', title: 'CHECKING...', line1: slotLine(f), line2: 'please wait', line3: '' };
+            return { bg: '#f9a825', fg: '#1a1a1a', title: '', line1: slotLine(f), line2: 'ONE MOMENT', line3: '' };
         case 'CONFIRM':
         case 'DONE': {
-            const s = f.status, d = (f.detail || '').toUpperCase();
-            if (s === 'error') return { bg: '#b71c1c', fg: '#ffffff', title: 'ERROR / TIMEOUT', line1: slotLine(f), line2: f.intent === 'book' ? 'request failed' : 'check failed', line3: '' };
-            if (hud.screen === 'CONFIRM') {
-                // (06/09) questo ramo DEVE precedere quello 'book': una prenotazione in attesa del si' veniva resa 'SLOT TAKEN'
-                // offerta / prenotazione in sospeso: lo schermo dice esplicitamente che si aspetta il si' del cliente
-                // PARTIAL: "BOOKED 18:00" sotto "PARTLY BOOKED" veniva letto come "libero alle 18": si dice cosa e' OCCUPATO e che il resto e' libero
-                const taken = d.replace(/^BOOKED\s*/, '');
-                // ogni riga pronunciabile al cliente: niente 'WAIT FOR USER CONFIRMATION' (letto alla lettera il 07/09)
-                const avail = s === 'partial' ? `${taken} TAKEN` : (s === 'pending' ? 'FREE' : 'AVAILABLE');
-                const ask = s === 'partial' ? 'OTHER HOURS FREE. BOOK IT?' : (s === 'pending' ? 'SHALL I BOOK IT?' : 'BOOK IT?');
-                return { bg: s === 'partial' ? '#ef6c00' : '#2e7d32', fg: '#ffffff', title: f.intent === 'book' ? 'BOOKING' : 'AVAILABILITY',
-                         line1: slotLine(f), line2: avail, line3: ask };
-            }
+            const s = f.status, d = (f.detail || '');
+            if (s === 'error') return { bg: '#b71c1c', fg: '#ffffff', title: '', line1: slotLine(f), line2: 'SYSTEM ERROR, PLEASE RETRY', line3: '' };
             if (f.intent === 'book') {
-                if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: 'BOOKING DONE', line1: slotLine(f), line2: 'CONFIRMED', line3: '' };
-                return { bg: '#c62828', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'SLOT TAKEN', line3: d ? 'BOOKED ' + d : '' };
+                const q = `BOOK ${slotLine(f)}?`;
+                if (s === 'pending') return { bg: '#2e7d32', fg: '#ffffff', title: '', line1: q, line2: 'FREE', line3: hud.screen === 'CONFIRM' ? 'SHALL I BOOK IT?' : '' };
+                if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: '', line1: q, line2: 'BOOKED', line3: '' };
+                return { bg: '#c62828', fg: '#ffffff', title: '', line1: q, line2: 'TAKEN', line3: '' };
             }
-            if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'AVAILABILITY', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
-            if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'AVAILABILITY', line1: slotLine(f), line2: `${d.replace(/^BOOKED\s*/, '')} TAKEN`, line3: 'OTHER HOURS FREE' };
-            return { bg: '#c62828', fg: '#ffffff', title: 'AVAILABILITY', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: d };
+            const q = `${slotLine(f)}: FREE?`;
+            let a = s === 'available' ? 'YES' : (s === 'partial' ? `YES, EXCEPT ${takenList(d)}` : 'NO, TAKEN');
+            const bg = s === 'available' ? '#2e7d32' : (s === 'partial' ? '#ef6c00' : '#c62828');
+            return { bg, fg: '#ffffff', title: '', line1: q, line2: a, line3: (hud.screen === 'CONFIRM' && s !== 'booked') ? 'BOOK IT?' : '' };
         }
         default:
-            return { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: 'waiting for a request', line2: f.note || '', line3: '' };
+            return { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: f.note || '', line2: '', line3: '' };
     }
 }
 
@@ -196,10 +196,11 @@ function drawHud() {
         ctx.font = (theme.line2.length > 12 ? 'bold 26px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.76);
         if (theme.line3) { ctx.font = (theme.line3.length > 28 ? 'bold 14px' : 'bold 18px') + ' system-ui, sans-serif'; ctx.fillText(theme.line3, W / 2, H * 0.86); }
     } else {
-        ctx.font = (theme.title.length > 16 ? 'bold 28px' : 'bold 34px') + ' system-ui, sans-serif'; ctx.fillText(theme.title, W / 2, H * 0.28);
-        ctx.font = (theme.line1.length > 18 ? 'bold 30px' : 'bold 44px') + ' system-ui, sans-serif'; ctx.fillText(theme.line1, W / 2, H * 0.50);
-        ctx.font = (theme.line2.length > 12 ? 'bold 40px' : 'bold 56px') + ' system-ui, sans-serif'; ctx.fillText(theme.line2, W / 2, H * 0.68);
-        if (theme.line3) { ctx.font = 'bold 22px system-ui, sans-serif'; ctx.fillText(String(theme.line3).slice(0, 40), W / 2, H * 0.82); }
+        const fit = (text, max, y) => { let sz = max; ctx.font = `bold ${sz}px system-ui, sans-serif`; while (ctx.measureText(text).width > W * 0.92 && sz > 14) { sz -= 2; ctx.font = `bold ${sz}px system-ui, sans-serif`; } ctx.fillText(text, W / 2, y); };
+        if (theme.title) fit(theme.title, 34, H * 0.30);
+        if (theme.line1) fit(theme.line1, 40, H * (theme.title ? 0.50 : 0.42));
+        if (theme.line2) fit(theme.line2, 52, H * (theme.title ? 0.68 : 0.62));
+        if (theme.line3) fit(theme.line3, 28, H * 0.80);
     }
     ctx.font = '18px system-ui, sans-serif'; ctx.globalAlpha = 0.7; ctx.fillText('operator screen', W / 2, H * 0.92); ctx.globalAlpha = 1;
     $('hudState').textContent = hud.screen + (hud.fsm.status ? ' ' + hud.fsm.status.toUpperCase() : '') + ((hud.fsm.missing || []).length ? ' (missing ' + hud.fsm.missing.join(',') + ')' : '');
@@ -401,7 +402,7 @@ async function startSessionInner() {
     hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false;
     hud.lastContent = null; hud.pendingIsEvent = false; pendingContext = false; instructionActive = ''; clearTimeout(instructionTimer);
     omniTurnOpen = false; lastUserTurnAt = -1; lastForceAt = -100; forceCount = {}; forceLatched = false; holdActive = false; clearTimeout(silenceTimer);
-    lastOmniEndAt = -1; clearTimeout(noReplyTimer); sigmaBusy = false; lastHelp = '';
+    lastOmniEndAt = -1; clearTimeout(noReplyTimer); sigmaBusy = false; lastHelp = ''; forcesSinceUser = 0;
     await fsmReset();                                // ogni sessione parte da IDLE (le prenotazioni in db.html restano)
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
@@ -597,7 +598,7 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
         }
         const { ok, status, d, dt } = res;
         if (!ok) { hudLog('warn', `estrattore: ${d.error || status}`); return; }
-        if (d.user_text) { lastUserTurnAt = now(); lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 40) dialog.shift(); }
+        if (d.user_text) { lastUserTurnAt = now(); forcesSinceUser = 0; lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 40) dialog.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s${d.asr_model ? ' (' + d.asr_model + ')' : ''} + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
@@ -640,7 +641,7 @@ refreshAsrProfile();
 // σ stuck detector (07/09): a fine turno dell'omni e, se dopo una tua battuta non risponde entro NO_REPLY_S, con reason 'no_reply'.
 // Vede conversazione, schermo, stato e tempi; decide ok/stuck. Stuck -> giallo con l'aiuto sullo schermo + force_speak nudo.
 const NO_REPLY_S = 3;
-let lastOmniEndAt = -1, noReplyTimer = null, sigmaBusy = false, lastHelp = '';
+let lastOmniEndAt = -1, noReplyTimer = null, sigmaBusy = false, lastHelp = '', forcesSinceUser = 0;
 function armNoReplyCheck() {
     clearTimeout(noReplyTimer);
     noReplyTimer = setTimeout(() => {
@@ -686,7 +687,11 @@ async function onOperatorTurnEnd(text, forced = false, reason = 'turn_end') {
         conv('sys', stateLine(`turno omni giudicato: ${d2.level}${d2.hint ? ' ' + d2.hint : ''}`));
         if (d2.capped) hudLog('warn', 'σ: tetto di due aiuti per stato raggiunto, nessun altro force finche\' lo stato non cambia');
         lastHelp = (d2.stuck && d2.hint) ? d2.hint : (d2.level === 'red' ? d2.hint : '');
-        if (d2.force && !omniTurnOpen) { forceSpeakOnce = true; hudLog('warn', `σ chiede aiuto (${d2.kind || d2.level}): force_speak col prossimo chunk, che porta lo schermo nuovo`); }
+        if (d2.force && !omniTurnOpen) {
+            if (forcesSinceUser >= 1) hudLog('sys', `σ chiede aiuto (${d2.kind || d2.level}) ma un aiuto e' gia' stato dato: tocca al cliente`);
+            else if (now() - lastForceAt < 6) hudLog('sys', 'σ chiede aiuto ma l\'ultimo force e\' di meno di 6 s fa: niente');
+            else { forceSpeakOnce = true; forcesSinceUser++; lastForceAt = now(); hudLog('warn', `σ chiede aiuto (${d2.kind || d2.level}): force_speak col prossimo chunk, che porta lo schermo nuovo`); }
+        }
     } catch (e) { sigmaBusy = false; hudLog('warn', 'turno omni errore: ' + e.message); }
 }
 

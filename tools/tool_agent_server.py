@@ -53,7 +53,7 @@ DEFAULT_TOOLS = [
 #      cancel = abbandono. Nessuna chiamata = nulla. "yes, at 3 pm" = set(time) + nuova conferma (yes non porta valori).
 # Formato CANONICO in uscita dal modello (ramo hud-semaforo-fixrules): il modello normalizza il linguaggio, il gateway verifica.
 _FIELDS = {"month": {"type": ["string", "null"], "description": "month as an English month name in lowercase ('april'); null if not said"},
-           "day": {"type": ["string", "null"], "description": "day of the month as a plain number 1-31 ('2', '30'): convert 'the second' -> '2', '28th' -> '28'; null if not said"},
+           "day": {"type": ["string", "null"], "description": "day of the month as a plain number 1-31 ('2', '30'): convert 'the second' -> '2', '28th' -> '28'; 'any' if the customer asks about any day / the whole month; null if not said"},
            "time": {"type": ["string", "null"], "description": "time in 24h HH:MM ('15:00', '09:30'): convert '3 p.m.' -> '15:00', 'half past ten' -> '10:30', 'nine' -> '09:00' (1-7 without am/pm = afternoon); null if not said"}}
 def _fn(name, desc, props=None, required=None):
     return {"type": "function", "function": {"name": name, "description": desc,
@@ -190,7 +190,8 @@ PROMPT_API_V2 = ("You are the request extractor of a voice booking desk (OPERATO
                  "desk's lines or from STATE (they are context to understand the NOW line, not values to pass). A bare number answers what "
                  "STATE says is being asked. Relative dates ('the next day', 'the day after') are resolved only from a date said in the conversation; 'tomorrow' or 'next week' without a reference: pass nothing for the date.\n"
                  "Asking what is free ('when is it free?', 'what's the next free slot?', 'anything else that day?') = set with intent check "
-                 "and no values (the desk keeps the date it already has).\n"
+                 "and no values (the desk keeps the date it already has). If the customer WIDENS the request ('the whole month', 'any day', "
+                 "'all of April', 'any time', 'the whole day'), pass day: 'any' (or time: 'any'): the desk drops that value.\n"
                  "yes / no = a plain answer to the desk's open yes/no question quoted in STATE. yes ONLY if the customer accepts exactly "
                  "what the question offers; a question, a doubt, a request to verify ('did you check?', 'is it really free?', 'which one?') "
                  "or a comment is NOT a yes and NOT a value: no function. If the customer answers yes but also changes a value ('yes, at 3 pm'), "

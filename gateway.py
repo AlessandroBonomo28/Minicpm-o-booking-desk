@@ -1356,7 +1356,7 @@ def _hud_supervise(fsm, omni_text: str, heard_args: dict):
             return "red", f"{_hud_time_label(ct)} IS TAKEN"
     # GIALLO da σ: l'omni e' bloccato o fuori contesto e serve una mano (l'aiuto va sullo schermo, poi force_speak)
     if (h.get("status") or "").lower() == "stuck":
-        return "yellow", (h.get("help") or "ANSWER THE CUSTOMER").strip().upper()[:40]
+        return "yellow", (h.get("help") or "Please tell me what you need.").strip()[:90]   # frase per il cliente, cosi' com'e'
     # GIALLO: ripete un valore che contraddice un valore SOLIDO del cliente (valori canonici: confronto diretto)
     for k in ("month", "day", "time"):
         v = h.get(k)

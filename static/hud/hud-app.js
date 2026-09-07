@@ -63,7 +63,7 @@ const hud = {
         // un valore respinto e' un evento: entra nell'impronta con il numero di sequenza, cosi' produce un frame anche se
         // lo schermo e' uguale a prima (il frame e' il clock: "April" due volte -> due frame)
         const rej = Object.keys(f.rejected || {}).length ? `|rej${f.seq || 0}:${JSON.stringify(f.rejected)}` : '';
-        const act = actFor();   // atto sempre visibile (anche in verde): un turno forzato ha bisogno dell'istruzione nei pixel
+        const act = '';   // nessun atto sullo schermo (07/09)
         return JSON.stringify(themeForSeq()) + '|' + act + '|' + (f.level || '') + (f.hint || '') + '|b' + (blinkLeft > 0 ? blinkPhase : '') + rej;
     },
 };
@@ -97,7 +97,7 @@ function themeFor() {
                 const v = String(f.rejected[rejKeys[0]]).toUpperCase();
                 line2 = / TAKEN$| FULL$/.test(v) ? v : `${v} NOT VALID`;
             }
-            return { bg: rejKeys.length ? '#c62828' : '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'IS IT FREE?' : 'NEW BOOKING',   // niente 'CHECK' nel titolo: l'omni lo ripeteva ("checking availability")
+            return { bg: rejKeys.length ? '#c62828' : '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'AVAILABILITY' : 'NEW BOOKING',   // sostantivi: 'AVAILABILITY CHECK' -> 'checking...', 'IS IT FREE?' -> 'Is it free?' (letti alla lettera)
                      line1: dateLine, line2, line3 };
         }
         case 'CHECKING':
@@ -111,17 +111,19 @@ function themeFor() {
                 // offerta / prenotazione in sospeso: lo schermo dice esplicitamente che si aspetta il si' del cliente
                 // PARTIAL: "BOOKED 18:00" sotto "PARTLY BOOKED" veniva letto come "libero alle 18": si dice cosa e' OCCUPATO e che il resto e' libero
                 const taken = d.replace(/^BOOKED\s*/, '');
-                const avail = s === 'partial' ? `${taken} TAKEN` : (s === 'pending' ? 'SAY YES TO BOOK' : 'AVAILABLE');
-                return { bg: s === 'partial' ? '#ef6c00' : '#2e7d32', fg: '#ffffff', title: 'WAIT FOR USER CONFIRMATION',
-                         line1: `BOOKING FOR ${slotLine(f)}?`, line2: avail, line3: s === 'partial' ? 'OTHER HOURS FREE' : d };
+                // ogni riga pronunciabile al cliente: niente 'WAIT FOR USER CONFIRMATION' (letto alla lettera il 07/09)
+                const avail = s === 'partial' ? `${taken} TAKEN` : (s === 'pending' ? 'FREE' : 'AVAILABLE');
+                const ask = s === 'partial' ? 'OTHER HOURS FREE. BOOK IT?' : (s === 'pending' ? 'SHALL I BOOK IT?' : 'BOOK IT?');
+                return { bg: s === 'partial' ? '#ef6c00' : '#2e7d32', fg: '#ffffff', title: f.intent === 'book' ? 'BOOKING' : 'AVAILABILITY',
+                         line1: slotLine(f), line2: avail, line3: ask };
             }
             if (f.intent === 'book') {
                 if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: 'BOOKING DONE', line1: slotLine(f), line2: 'CONFIRMED', line3: '' };
                 return { bg: '#c62828', fg: '#ffffff', title: 'BOOKING', line1: slotLine(f), line2: 'SLOT TAKEN', line3: d ? 'BOOKED ' + d : '' };
             }
-            if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
-            if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: `${d.replace(/^BOOKED\s*/, '')} TAKEN`, line3: 'OTHER HOURS FREE' };
-            return { bg: '#c62828', fg: '#ffffff', title: 'RESULT', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: d };
+            if (s === 'available') return { bg: '#2e7d32', fg: '#ffffff', title: 'AVAILABILITY', line1: slotLine(f), line2: 'AVAILABLE', line3: d };
+            if (s === 'partial') return { bg: '#ef6c00', fg: '#ffffff', title: 'AVAILABILITY', line1: slotLine(f), line2: `${d.replace(/^BOOKED\s*/, '')} TAKEN`, line3: 'OTHER HOURS FREE' };
+            return { bg: '#c62828', fg: '#ffffff', title: 'AVAILABILITY', line1: slotLine(f), line2: 'ALREADY BOOKED', line3: d };
         }
         default:
             return { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: 'waiting for a request', line2: f.note || '', line3: '' };
@@ -173,11 +175,17 @@ function drawHud() {
     // banner del semaforo in alto (lampeggia: colore pieno / bianco a fasi alterne)
     const on = ($('blinkAlways') && $('blinkAlways').checked) || blinkLeft > 0 ? (blinkPhase % 2 === 0) : true;
     ctx.fillStyle = on ? LIGHT[level] : '#ffffff'; ctx.fillRect(0, 0, W, H * 0.16);
-    ctx.fillStyle = on ? '#ffffff' : LIGHT[level]; ctx.font = 'bold 30px system-ui, sans-serif';
+    ctx.fillStyle = on ? '#ffffff' : LIGHT[level];
     const bannerText = level === 'green' ? 'OK' : (level === 'yellow' ? `⚠ ${hint || 'CHECK THE SCREEN'}` : `■ ${hint || 'STOP'}`);
-    ctx.fillText(bannerText, W / 2, H * 0.08);
+    if (bannerText.length <= 22) { ctx.font = 'bold 30px system-ui, sans-serif'; ctx.fillText(bannerText, W / 2, H * 0.08); }
+    else {   // frase del supervisore: due righe, font ridotto
+        ctx.font = 'bold 19px system-ui, sans-serif';
+        const words = bannerText.split(' '), lines = ['']; for (const w of words) { const t = (lines[lines.length - 1] + ' ' + w).trim(); if (ctx.measureText(t).width > W * 0.94 && lines[lines.length - 1]) lines.push(w); else lines[lines.length - 1] = t; }
+        const shown = lines.slice(0, 2); if (lines.length > 2) shown[1] += '…';
+        shown.forEach((ln, i) => ctx.fillText(ln, W / 2, H * (shown.length === 1 ? 0.08 : 0.05 + i * 0.06)));
+    }
     ctx.fillStyle = theme.fg;
-    const act = actFor();   // atto sempre visibile (07/09: in verde senza atto -> 'let me check' e silenzi)
+    const act = '';   // 07/09: NESSUN atto sullo schermo. Regola: ogni riga deve essere pronunciabile al cliente cosi' com'e'; le istruzioni per l'operatore venivano lette alla lettera ('I'm going to ask the day')
     hud.lastText = [bannerText, act, theme.title, theme.line1, theme.line2, theme.line3 || ''].filter(Boolean).join(' | ');
     if (act) {
         // schermo a due meta': sopra l'atto, sotto lo stato (linea di separazione)

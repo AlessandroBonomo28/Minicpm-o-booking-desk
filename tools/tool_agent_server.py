@@ -94,7 +94,7 @@ SIGMA_TOOL = _fn("verdict", "Your verdict on the OPERATOR's situation right now.
                              "description": "stuck = the operator needs help NOW. ok = the conversation is proceeding (small talk is ok; waiting after a customer filler like 'um' is ok)"},
                   "kind": {"type": ["string", "null"], "enum": ["silent", "off_context", "repeating", "ignores_screen", "false_claim", "cannot_do", None],
                            "description": "silent = the customer's last line needed an answer (a question, a request, a value) and the operator has not answered; off_context = the operator talks about something that is not this booking (another product, a car when the customer books a call); repeating = it asks again what it already asked and the customer already answered; ignores_screen = it does not ask for what the SCREEN marks MISSING, does not read a result the SCREEN shows, or does not follow the HELP it was given; false_claim = it announces a booking, an availability or an action ('I'll check the whole month') the SCREEN does not show; cannot_do = the customer asked something the system CANNOT do (see CAPABILITIES) and the operator did not say so"},
-                  "help": {"type": ["string", "null"], "description": "ONLY if stuck: what the operator must say now, max 10 words, uppercase, using only facts on the SCREEN and the CAPABILITIES (e.g. 'ASK THE MONTH', 'IT IS A CALL BOOKING. ASK THE DAY', 'SAY: 15:00 IS TAKEN', 'SAY: I CAN ONLY CHECK ONE DAY. ASK WHICH DAY'); null otherwise"}},
+                  "help": {"type": ["string", "null"], "description": "ONLY if stuck: the exact sentence the operator should say to the customer now, first person, natural, max 14 words, using only facts on the SCREEN and the CAPABILITIES; never an instruction to the operator (it is read aloud as is). E.g. 'Which day in April would you like?', 'April 3rd is free except 6 pm. Shall I book it?', 'I can book one slot at a time. Which day?', 'Sorry, 3 pm on that day is taken.'; null otherwise"}},
                  ["status"])
 SIGMA_CAPABILITIES = ("CAPABILITIES of the booking system (the SCREEN is its state): it can tell whether ONE day or ONE time slot is free; "
                       "it can show which days of a month are booked (when the month is known and the day is missing); it can book ONE slot "
@@ -105,7 +105,8 @@ SIGMA_PROMPT = ("You are the SUPERVISOR of a voice booking desk. A small speech 
                 "the SCREEN, which shows the booking system's state and is the only source of truth. You see the whole conversation, the "
                 "SCREEN, the STATE, the TIMING and the CAPABILITIES. Call verdict() once. Be strict on off_context, false_claim and "
                 "cannot_do. If HELP was given before this turn and the operator's turn does not follow it, it is still stuck "
-                "(ignores_screen) with the same or a shorter help. " + SIGMA_CAPABILITIES + " "
+                "(ignores_screen) with the same or a shorter help. The help is spoken to the customer word for word: write it as the operator's "
+                "own sentence, never as an order to the operator. " + SIGMA_CAPABILITIES + " "
                 "When REASON is no_reply, the operator has said nothing since the customer's last line: if that line is a question, a "
                 "request, a value, or a direct address ('are you there?', 'hello?', 'so?'), it is stuck (kind silent) and help says what to "
                 "answer from the SCREEN; only a filler ('um', 'hmm', 'ok', 'yeah') with nothing to answer is ok. "
@@ -140,7 +141,7 @@ def decide_sigma(operator_text, fsm, transcript, screen, reason, timing, previou
         args["status"] = "stuck" if str(a.get("status", "ok")).lower() == "stuck" else "ok"
         h = a.get("help")
         if args["status"] == "stuck" and isinstance(h, str) and h.strip().lower() not in _EMPTY:
-            args["help"] = re.sub(r"\s+", " ", h.strip().strip('"\'')).upper()[:48]
+            args["help"] = re.sub(r"\s+", " ", h.strip().strip('"\''))[:90]
         calls.append({"name": "sigma", "arguments": args})
     return {"tool_calls": calls, "backend": f"{BACKEND}:{used_model or CLOUD['model']} {ms:.0f}ms"}
 

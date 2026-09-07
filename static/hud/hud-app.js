@@ -421,7 +421,7 @@ async function startSessionInner() {
             const said = currentAiText; currentAiText = '';
             dialog.push({ role: 'assistant', text: said }); if (dialog.length > 12) dialog.shift();
             const forced = forceSpeakSentAt >= 0 && omniSpokeAt >= forceSpeakSentAt && omniSpokeAt - forceSpeakSentAt < 3;
-            const informed = lastUserTurnAt >= 0 && omniSpokeAt - lastUserTurnAt < 6;   // turno che risponde a una tua battuta: i readback valgono
+            const informed = lastUserTurnAt >= 0 && omniSpokeAt >= lastUserTurnAt && omniSpokeAt - lastUserTurnAt < 6;   // turno iniziato DOPO la tua battuta: i readback valgono
             onOperatorTurnEnd(said, forced && !informed);
         }
     };
@@ -492,8 +492,10 @@ async function startSessionInner() {
                 if (forceSpeakOnce) { forceSpeakOnce = false; why = 'manuale'; }
                 else if ($('autoForce').checked && !msg.force_listen) {
                     if (isEvent && (sess.chunksSent + 1) >= 4) {
+                        const resultFrame = hud.screen === 'CONFIRM' || hud.screen === 'DONE' || (hud.fsm.level && hud.fsm.level !== 'green');
                         if (canForceNow(turns, sess)) why = 'evento';
-                        else { forceLatched = true; latchReason = 'evento'; hudLog('sys', `frame evento con turno ${omniTurnOpen ? 'aperto' : 'chiuso'}${turns.speaking ? ', voce' : ''}: force ARMATO`); }
+                        else if (resultFrame) { forceLatched = true; latchReason = 'evento'; hudLog('sys', `frame RISULTATO con turno ${omniTurnOpen ? 'aperto' : 'chiuso'}${turns.speaking ? ', voce' : ''}: force ARMATO`); }
+                        else hudLog('sys', 'frame evento (raccolta) con turno aperto: la risposta in corso basta, nessun latch');
                     } else if (forceLatched && canForceNow(turns, sess)) { why = 'latch ' + latchReason; forceLatched = false; }
                 }
                 if (why) {
@@ -582,7 +584,7 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
         }
         const { ok, status, d, dt } = res;
         if (!ok) { hudLog('warn', `estrattore: ${d.error || status}`); return; }
-        if (d.user_text) { lastUserTurnAt = now(); conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 12) dialog.shift(); }
+        if (d.user_text) { lastUserTurnAt = now(); lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 12) dialog.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s${d.asr_model ? ' (' + d.asr_model + ')' : ''} + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
@@ -593,7 +595,7 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
     finally {
         toolBusy = false;
         if (holdActive) { holdActive = false; forceLatched = true; latchReason = 'hold rilasciato'; }
-        if (lastUserTurnAt >= 0 && now() - lastUserTurnAt < 5) armSilenceWatchdog();
+        if (lastUserTurnAt >= 0 && now() - lastUserTurnAt < 5 && lastUserWords >= 3) armSilenceWatchdog();   // un filler ("Ummm", "uh") non merita una risposta forzata
         if (pendingTurns.length) onUserTurnEnd(pendingTurns.shift());
     }
 }
@@ -669,7 +671,8 @@ let forceSpeakOnce = false, cueOnce = false, cueSamples = null, forceSpeakSentAt
 // politica del turno τ (07/09): force sul frame EVENTO a turno chiuso; se il turno e' aperto il force resta ARMATO (latch) e scatta
 // al primo chunk con turno chiuso; guardiano a 3,5 s dopo una tua battuta senza risposta; hold (force_listen dalla pausa alla
 // decisione) come opzione spenta. Tetti: pausa 3 s, max 2 forzature per stato, mai nei primi 3 chunk.
-const FORCE_COOLDOWN_S = 3, SILENCE_S = 3.5, HOLD_MAX_CHUNKS = 3;
+const FORCE_COOLDOWN_S = 3, SILENCE_S = 4, HOLD_MAX_CHUNKS = 3;
+let lastUserWords = 0;
 let omniTurnOpen = false, lastUserTurnAt = -1, lastForceAt = -100, forceCount = {}, forceLatched = false, latchReason = '',
     silenceTimer = null, holdActive = false, holdChunks = 0;
 function canForceNow(turns, sess) {

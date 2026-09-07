@@ -373,3 +373,8 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   citata con i valori, stato TAKEN esplicito, valori solo dalla riga del cliente, `yes` con l'accettazione citata come
   argomento obbligatorio. Misure: minimax-m3 dialogo 21→28/28; flash-lite base 52→58/58, e le domande scambiate per sì
   sparite alla sonda. In produzione. Sonnet 5 misurato una volta: +3 punti, 2,5 s a chiamata, scartato per latenza.
+- 07/09 (notte) — **Ramo `forcespeak-stickyctx`**: `force_speak` (token `<|speak|>` forzato a turno chiuso, specchio di
+  force_listen) apre il turno 8/9 volte entro 1 s; iniezioni di testo provate e scartate (slot di uscita = parole sue,
+  regione di sistema = sfondo). Politica τ a tempo provata e scartata (parlava troppo). Adottato **σ stuck detector**:
+  LLM in background con conversazione, schermo, stato, tempi e contratto -> ok/stuck + aiuto sullo schermo + force.
+  Verifica sul mese portata da DEV; tetto di due aiuti per stato; titolo senza "CHECK". Sonde 9/9. Da provare dal vivo.

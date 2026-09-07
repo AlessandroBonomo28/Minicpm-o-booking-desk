@@ -16,3 +16,17 @@ cambiata nel frattempo; max 2 forzature per stato, pausa 3 s, mai nei primi 3 ch
 - "let me check" con esito a schermo: se capita, il turno forzato successivo legge l'esito (<= 2 s dalla chiusura).
 - 0 scritture sbagliate; 0 rossi falsi (i claim sul DB sono deterministici).
 Se la prova B mostra >= 2 invenzioni cieche per run: accendere hold e ripetere lo stesso copione (variabile singola).
+
+## Revisione 07/09 (Alessandro): la τ deterministica e' scartata, decide σ "stuck detector"
+σ (LLM in background, conversazione intera + schermo + stato + tempi + CONTRATTO) a fine turno dell'omni e 3 s dopo una battuta
+senza risposta -> ok | stuck {silent, off_context, repeating, ignores_screen, false_claim, cannot_do} + aiuto (max 10 parole).
+Stuck o rosso sul DB -> aiuto sullo schermo + force_speak nudo. Tetto: due aiuti per stato della macchina. Rigiudizio contro
+l'aiuto dato. Verifica sul mese (giorni occupati sullo schermo). Titolo "IS IT FREE?" al posto di "AVAILABILITY CHECK".
+Sonde (flash-lite): off_context -> ASK FOR THE MONTH; "Are you there?" senza risposta -> silent; "Ummm" -> ok (2/2);
+"I'll check the entire month" con i giorni occupati a schermo -> false_claim "READ THE BOOKED DAYS ON SCREEN"; lettura dei
+giorni occupati -> ok; aiuto ignorato -> ignores_screen; "every Monday" -> cannot_do "SAY: I CAN ONLY CHECK ONE DAY";
+tetto: giallo, giallo, poi verde e nessun force; stato nuovo -> il tetto riparte.
+Predizioni dal vivo: una risposta per battuta (niente doppie domande); filler senza forzature; "all the month" -> l'omni legge i
+giorni occupati; una bugia del tipo "I'll check" -> giallo + force entro 1,5 s dalla chiusura del turno e turno forzato che
+legge lo schermo >= 2/3; mai piu' di due forzature sullo stesso stato; 0 readback inventati nel record.
+Rischio non nostro: cloud lento stanotte (LLM 4-8 s, timeout di σ): l'estrattore cade sul fallback locale.

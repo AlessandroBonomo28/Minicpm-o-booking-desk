@@ -92,13 +92,20 @@ SIGMA_TOOL = _fn("verdict", "Your verdict on the OPERATOR's situation right now.
                   "claim_day": {"type": ["string", "null"], "description": "the day of the month the claim is about, as a number; null if none"},
                   "status": {"type": "string", "enum": ["ok", "stuck"],
                              "description": "stuck = the operator needs help NOW. ok = the conversation is proceeding (small talk is ok; waiting after a customer filler like 'um' is ok)"},
-                  "kind": {"type": ["string", "null"], "enum": ["silent", "off_context", "repeating", "ignores_screen", "false_claim", None],
-                           "description": "silent = the customer's last line needed an answer (a question, a request, a value) and the operator has not answered; off_context = the operator talks about something that is not this booking (another product, a car when the customer books a call); repeating = it asks again what it already asked and the customer already answered; ignores_screen = it does not ask for what the SCREEN marks MISSING, or does not read a result the SCREEN shows; false_claim = it announces a booking or an availability the SCREEN does not show"},
-                  "help": {"type": ["string", "null"], "description": "ONLY if stuck: what the operator must say now, max 8 words, uppercase, using only facts on the SCREEN (e.g. 'ASK THE MONTH', 'IT IS A CALL BOOKING. ASK THE DAY', 'SAY: 15:00 IS TAKEN', 'ANSWER: THE 7TH AT 4 PM IS FREE'); null otherwise"}},
+                  "kind": {"type": ["string", "null"], "enum": ["silent", "off_context", "repeating", "ignores_screen", "false_claim", "cannot_do", None],
+                           "description": "silent = the customer's last line needed an answer (a question, a request, a value) and the operator has not answered; off_context = the operator talks about something that is not this booking (another product, a car when the customer books a call); repeating = it asks again what it already asked and the customer already answered; ignores_screen = it does not ask for what the SCREEN marks MISSING, does not read a result the SCREEN shows, or does not follow the HELP it was given; false_claim = it announces a booking, an availability or an action ('I'll check the whole month') the SCREEN does not show; cannot_do = the customer asked something the system CANNOT do (see CAPABILITIES) and the operator did not say so"},
+                  "help": {"type": ["string", "null"], "description": "ONLY if stuck: what the operator must say now, max 10 words, uppercase, using only facts on the SCREEN and the CAPABILITIES (e.g. 'ASK THE MONTH', 'IT IS A CALL BOOKING. ASK THE DAY', 'SAY: 15:00 IS TAKEN', 'SAY: I CAN ONLY CHECK ONE DAY. ASK WHICH DAY'); null otherwise"}},
                  ["status"])
+SIGMA_CAPABILITIES = ("CAPABILITIES of the booking system (the SCREEN is its state): it can tell whether ONE day or ONE time slot is free; "
+                      "it can show which days of a month are booked (when the month is known and the day is missing); it can book ONE slot "
+                      "(month + day + time) only after the customer says yes; it can cancel the request. It CANNOT: book several slots or "
+                      "recurring bookings, search across months, handle names, rooms, services, prices or payments, or anything outside "
+                      "this booking. The operator must never announce an action the system is not doing: the SCREEN shows what it does.")
 SIGMA_PROMPT = ("You are the SUPERVISOR of a voice booking desk. A small speech model, the OPERATOR, talks with the CUSTOMER and reads "
                 "the SCREEN, which shows the booking system's state and is the only source of truth. You see the whole conversation, the "
-                "SCREEN, the STATE and the TIMING. Call verdict() once. Be strict on off_context and false_claim. "
+                "SCREEN, the STATE, the TIMING and the CAPABILITIES. Call verdict() once. Be strict on off_context, false_claim and "
+                "cannot_do. If HELP was given before this turn and the operator's turn does not follow it, it is still stuck "
+                "(ignores_screen) with the same or a shorter help. " + SIGMA_CAPABILITIES + " "
                 "When REASON is no_reply, the operator has said nothing since the customer's last line: if that line is a question, a "
                 "request, a value, or a direct address ('are you there?', 'hello?', 'so?'), it is stuck (kind silent) and help says what to "
                 "answer from the SCREEN; only a filler ('um', 'hmm', 'ok', 'yeah') with nothing to answer is ok. "
@@ -106,7 +113,7 @@ SIGMA_PROMPT = ("You are the SUPERVISOR of a voice booking desk. A small speech 
                 "proposals or examples.")
 
 
-def decide_sigma(operator_text, fsm, transcript, screen, reason, timing):
+def decide_sigma(operator_text, fsm, transcript, screen, reason, timing, previous_help=""):
     lines = [(t.get("role"), (t.get("text") or "").strip()) for t in (transcript or []) if (t.get("text") or "").strip()]
     convo = "\n".join(f"{'OPERATOR' if r == 'assistant' else 'CUSTOMER'}: {x}" for r, x in lines[-40:]) or "(nothing yet)"
     state_line = fsm_line_v2(fsm) if isinstance(fsm, dict) else "STATE: unknown"
@@ -114,7 +121,8 @@ def decide_sigma(operator_text, fsm, transcript, screen, reason, timing):
     tline = (f"TIMING: the customer's last line was {t.get('since_user_s', '?')} s ago; the operator is {'speaking now' if t.get('omni_speaking') else 'silent'}; "
              f"its last turn ended {t.get('since_omni_s', '?')} s ago.")
     last = operator_text or ("(no operator turn since the customer's last line)" if reason == "no_reply" else "(silence)")
-    user = (f"SCREEN (what the operator sees now): {screen or '?'}\n{state_line}\n{tline}\n\nCONVERSATION (oldest first):\n{convo}\n\n"
+    hline = f"HELP GIVEN TO THE OPERATOR BEFORE THIS TURN: {previous_help}\n" if previous_help else ""
+    user = (f"SCREEN (what the operator sees now): {screen or '?'}\n{state_line}\n{tline}\n{hline}\nCONVERSATION (oldest first):\n{convo}\n\n"
             f"OPERATOR'S LAST TURN: {last}\nREASON FOR THIS CHECK: {reason or 'turn_end'}\n\nCall verdict().")
     messages = [{"role": "system", "content": SIGMA_PROMPT}, {"role": "user", "content": user}]
     fname, args_json, used_model, ms = decide_cloud(messages, [SIGMA_TOOL])
@@ -215,6 +223,9 @@ def fsm_line_v2(fsm):
         got = [k for k in ("month", "day", "time") if sl.get(k)]
         miss = [k for k in (fsm.get("missing") or []) if k in ("month", "day", "time")]
         ask = miss[0] if miss else "nothing"
+        mi = fsm.get("month_info") or {}
+        if mi.get("month"):
+            today += f"The screen shows {mi['month']}: " + (f"booked days {', '.join(str(d) for d in mi['booked_days'])}, other days free. " if mi.get("booked_days") else "all days free. ")
         return today + (f"STATE: a {fsm.get('intent')} request is in progress; collected: {', '.join(got) or 'nothing'}; "
                         f"missing: {', '.join(miss) or 'nothing'}. The desk is asking for the {ask.upper()}: a bare number is the {ask}. No yes/no question is open.")
     if st == "DONE" and fsm.get("status") == "taken":
@@ -448,7 +459,7 @@ class H(BaseHTTPRequestHandler):
                     self._send(200, json.dumps({"tool_calls": [], "backend": "local: sigma non disponibile"}).encode()); return
                 t0 = time.time()
                 res = decide_sigma((req.get("operator_text") or "").strip(), req.get("fsm"), req.get("transcript") or [], req.get("screen") or "",
-                                   req.get("reason") or "turn_end", req.get("timing") or {})
+                                   req.get("reason") or "turn_end", req.get("timing") or {}, str(req.get("previous_help") or ""))
                 res["total_s"] = round(time.time() - t0, 2)
                 self._send(200, json.dumps(res, ensure_ascii=False).encode())
             except Exception as e:

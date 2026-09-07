@@ -1047,9 +1047,27 @@ _HUD_REQUIRED = {"check": ["month", "day"], "book": ["month", "day", "time"]}
 _HUD_EMPTY_SLOTS = {"month": "", "day": "", "time": "", "time_raw": "", "date": ""}
 
 
+def _hud_month_info(month: str):
+    """Verifica sul mese (07/09): riassunto per lo schermo quando manca il giorno ('1, 28 BOOKED / OTHER DAYS FREE')."""
+    if not month:
+        return None
+    days = set(); full = set()
+    for v in _HUD_DB["slots"].values():
+        d = str(v.get("date") or "")
+        if v.get("status") == "booked" and d.startswith(month + " "):
+            try:
+                n = int(d.split()[1])
+            except (IndexError, ValueError):
+                continue
+            days.add(n)
+            if v.get("time") == "all-day":
+                full.add(n)
+    return {"month": month, "booked_days": sorted(days), "full_days": sorted(full)}
+
+
 def _hud_fsm_reset(note: str = ""):
     _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots=dict(_HUD_EMPTY_SLOTS), missing=[], rejected={}, tentative={}, note=note,
-                          updated=datetime.now().isoformat(timespec="seconds"))
+                          month_info=None, stuck_count=0, updated=datetime.now().isoformat(timespec="seconds"))
     _hud_db_save()
     return _HUD_DB["fsm"]
 
@@ -1185,7 +1203,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         for k in filled: tentative[k] = True
         slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
         missing = [k for k in _HUD_REQUIRED[fsm["intent"]] if not slots.get(k)]
-        return bump(state="COLLECTING", slots=slots, missing=missing, tentative=tentative, rejected={}, status=None, detail="", note="")
+        return bump(state="COLLECTING", slots=slots, missing=missing, tentative=tentative, rejected={}, status=None, detail="", note="",
+                    month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
     if state == "COLLECTING" and tentative and name in ("yes", "no") and not any_said:
         # conferma a livello di campo dei valori tentativi (CONFIRM: MONTH sullo schermo)
         slots = dict(_HUD_EMPTY_SLOTS, **ref)
@@ -1282,7 +1301,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         missing.append("time")
     if missing:
         # ramo hud-semaforo: i tentativi (heard) NON bloccano; la conferma finale (con i valori) li copre
-        new = dict(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, tentative=tentative, status=None, detail="", note="", free=None)
+        new = dict(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, tentative=tentative, status=None, detail="", note="", free=None,
+                   month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
         if _hud_same_record(fsm, new):
             _hud_db_save(); return fsm, False   # idempotenza: stesso record = evento nullo
         return bump(**new)
@@ -1305,7 +1325,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     # riparte da zero e passa dalla conferma.
     free = None
     new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] == "pending" else "DONE"
-    new = dict(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative={}, status=res["status"], detail=res.get("detail") or "", note="", free=free)
+    new = dict(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative={}, status=res["status"], detail=res.get("detail") or "", note="", free=free, month_info=None)
     if _hud_same_record(fsm, new):
         _hud_db_save(); return fsm, False   # idempotenza: stesso record = evento nullo (il rosso resta)
     return bump(**new)
@@ -1394,8 +1414,21 @@ async def hud_fsm_omni_turn(request: Request):
         changed = True
     _hud_db_save()
     stuck = (heard_args.get("status") or "").lower() == "stuck"
+    capped = False
+    if stuck:
+        # tetto: due aiuti per STATO della macchina (firma senza semaforo); oltre, niente giallo ne' force (mai un ciclo)
+        sl = fsm.get("slots") or {}
+        sig = f"{fsm.get('state')}|{fsm.get('intent')}|{sl.get('month')}|{sl.get('day')}|{sl.get('time')}|{fsm.get('status')}"
+        cnt = int(fsm.get("stuck_count") or 0) if fsm.get("stuck_sig") == sig else 0
+        if cnt >= 2:
+            capped = True; stuck = False
+            if level == "yellow":
+                level, hint = "green", ""; fsm["level"] = level; fsm["hint"] = hint
+        else:
+            fsm["stuck_sig"] = sig; fsm["stuck_count"] = cnt + 1
+        _hud_db_save()
     return JSONResponse(content={"fsm": fsm, "changed": changed, "level": level, "hint": hint, "stuck": stuck, "kind": heard_args.get("kind") or "",
-                                 "force": bool(stuck or level == "red")})
+                                 "capped": capped, "force": bool(stuck or level == "red")})
 
 
 @app.post("/api/hud_fsm/event")

@@ -84,7 +84,11 @@ function themeFor() {
             const tent = f.tentative || {};
             const mq = tent.month ? '?' : '', dq = tent.day ? '?' : '';   // valore tentativo (dall'operatore): punto interrogativo
             const dateLine = (month || day) ? `DATE: ${month ? month + mq : '?'} ${day ? day + dq : '?'}` : 'DATE: ?';
-            const line3 = (f.slots.time && miss !== 'time') ? `TIME: ${timeLabel(f.slots.time)}` : '';
+            let line3 = (f.slots.time && miss !== 'time') ? `TIME: ${timeLabel(f.slots.time)}` : '';
+            if (f.month_info && !f.slots.day) {   // manca il giorno -> il mese in sintesi (giorni occupati, il resto libero)
+                const bd = f.month_info.booked_days || [];
+                line3 = bd.length ? `${bd.join(', ')} BOOKED · OTHER DAYS FREE` : 'ALL DAYS FREE';
+            }
             // un valore respinto (sintassi o DB) e' il fatto nuovo: va nella riga grande, da solo ("15:00 TAKEN", "TOMORROW NOT VALID");
             // niente elenco delle ore libere: sarebbe un OFFER non richiesto (05/09, Alessandro)
             const tentKeys = Object.keys(tent).filter(k => tent[k]);
@@ -93,7 +97,7 @@ function themeFor() {
                 const v = String(f.rejected[rejKeys[0]]).toUpperCase();
                 line2 = / TAKEN$| FULL$/.test(v) ? v : `${v} NOT VALID`;
             }
-            return { bg: rejKeys.length ? '#c62828' : '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'AVAILABILITY CHECK' : 'NEW BOOKING',
+            return { bg: rejKeys.length ? '#c62828' : '#1565c0', fg: '#ffffff', title: f.intent === 'check' ? 'IS IT FREE?' : 'NEW BOOKING',   // niente 'CHECK' nel titolo: l'omni lo ripeteva ("checking availability")
                      line1: dateLine, line2, line3 };
         }
         case 'CHECKING':
@@ -389,7 +393,7 @@ async function startSessionInner() {
     hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false;
     hud.lastContent = null; hud.pendingIsEvent = false; pendingContext = false; instructionActive = ''; clearTimeout(instructionTimer);
     omniTurnOpen = false; lastUserTurnAt = -1; lastForceAt = -100; forceCount = {}; forceLatched = false; holdActive = false; clearTimeout(silenceTimer);
-    lastOmniEndAt = -1; clearTimeout(noReplyTimer); sigmaBusy = false;
+    lastOmniEndAt = -1; clearTimeout(noReplyTimer); sigmaBusy = false; lastHelp = '';
     await fsmReset();                                // ogni sessione parte da IDLE (le prenotazioni in db.html restano)
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
@@ -628,7 +632,7 @@ refreshAsrProfile();
 // σ stuck detector (07/09): a fine turno dell'omni e, se dopo una tua battuta non risponde entro NO_REPLY_S, con reason 'no_reply'.
 // Vede conversazione, schermo, stato e tempi; decide ok/stuck. Stuck -> giallo con l'aiuto sullo schermo + force_speak nudo.
 const NO_REPLY_S = 3;
-let lastOmniEndAt = -1, noReplyTimer = null, sigmaBusy = false;
+let lastOmniEndAt = -1, noReplyTimer = null, sigmaBusy = false, lastHelp = '';
 function armNoReplyCheck() {
     clearTimeout(noReplyTimer);
     noReplyTimer = setTimeout(() => {
@@ -647,7 +651,7 @@ async function onOperatorTurnEnd(text, forced = false, reason = 'turn_end') {
             const timing = { since_user_s: lastUserTurnAt >= 0 ? +(now() - lastUserTurnAt).toFixed(1) : null,
                              since_omni_s: lastOmniEndAt >= 0 ? +(now() - lastOmniEndAt).toFixed(1) : null, omni_speaking: omniTurnOpen };
             const r = await fetch('/api/tool_agent/sigma', { method: 'POST', headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ operator_text: text, fsm: hud.fsm, transcript: dialog.slice(-40), screen: hud.lastText || '', reason, timing }) });
+                body: JSON.stringify({ operator_text: text, fsm: hud.fsm, transcript: dialog.slice(-40), screen: hud.lastText || '', reason, timing, previous_help: lastHelp }) });
             const d = await r.json();
             const dt = ((performance.now() - t0) / 1000).toFixed(2);
             sigmaBusy = false;
@@ -672,6 +676,8 @@ async function onOperatorTurnEnd(text, forced = false, reason = 'turn_end') {
         hudLog(d2.level === 'green' ? 'sys' : 'warn', `SEMAFORO ${d2.level.toUpperCase()}${d2.hint ? ' · ' + d2.hint : ''} — "${(text || '(silenzio)').slice(0, 60)}"`);
         applyFsm(d2.fsm, 0);
         conv('sys', stateLine(`turno omni giudicato: ${d2.level}${d2.hint ? ' ' + d2.hint : ''}`));
+        if (d2.capped) hudLog('warn', 'σ: tetto di due aiuti per stato raggiunto, nessun altro force finche\' lo stato non cambia');
+        lastHelp = (d2.stuck && d2.hint) ? d2.hint : (d2.level === 'red' ? d2.hint : '');
         if (d2.force && !omniTurnOpen) { forceSpeakOnce = true; hudLog('warn', `σ chiede aiuto (${d2.kind || d2.level}): force_speak col prossimo chunk, che porta lo schermo nuovo`); }
     } catch (e) { sigmaBusy = false; hudLog('warn', 'turno omni errore: ' + e.message); }
 }

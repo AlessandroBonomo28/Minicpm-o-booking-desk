@@ -4046,6 +4046,12 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
             raise RuntimeError("Duplex 未初始化，请先调用 init_unified()")
         self.duplex.finalize_unit()
 
+    def duplex_set_context(self, text: str) -> bool:
+        """Ramo forcespeak-stickyctx: testo nella regione di sistema (透传 a self.duplex.set_sticky_context)."""
+        if self.duplex is None:
+            raise RuntimeError("Duplex 未初始化，请先调用 init_unified()")
+        return self.duplex.set_sticky_context(text)
+
     def duplex_set_break(self):
         """设置打断信号（透传到 self.duplex.set_break_event）"""
         if self.duplex is None:
@@ -4479,7 +4485,15 @@ class DuplexCapability:
         self.prefill_schema_tokens = []
         self._current_unit_prefill_tokens = []
 
-    def set_sliding_window(self, mode: str = "off", high_tokens: int = 4000, low_tokens: int = 3500) -> None:
+    def set_sticky_context(self, text: str) -> bool:
+        """Ramo forcespeak-stickyctx: testo nella regione di sistema (schermo e/o istruzione), tra un finalize e il prefill successivo."""
+        if getattr(self, "_pending_finalize", None) is not None:
+            logger.warning("set_sticky_context chiamato con finalize pendente: ignorato")
+            return False
+        return self.decoder.set_sticky_text(text)
+
+    def set_sliding_window(self, mode: str = "off", high_tokens: int = 4000, low_tokens: int = 3500,
+                           context_max_units: Optional[int] = None, context_previous_max_tokens: Optional[int] = None) -> None:
         """Finestra scorrevole PER SESSIONE (da chiamare prima di prepare): "off" | "basic" | "context".
         Upstream la configura solo all'init (default off): qui la si accende dal payload di prepare."""
         mode = (mode or "off").lower()
@@ -4491,12 +4505,13 @@ class DuplexCapability:
                 sliding_window_mode=mode,
                 basic_window_high_tokens=int(high_tokens),
                 basic_window_low_tokens=int(low_tokens),
-                context_previous_max_tokens=cur.context_previous_max_tokens,
-                context_max_units=cur.context_max_units,
+                context_previous_max_tokens=int(context_previous_max_tokens or cur.context_previous_max_tokens),
+                context_max_units=int(context_max_units or cur.context_max_units),
             )
         )
         self.decoder.set_window_enabled(mode != "off")
-        logger.info("[Duplex] sliding window (session): mode=%s high=%d low=%d", mode, int(high_tokens), int(low_tokens))
+        logger.info("[Duplex] sliding window (session): mode=%s high=%d low=%d max_units=%s prev_max=%s", mode, int(high_tokens), int(low_tokens),
+                    context_max_units or cur.context_max_units, context_previous_max_tokens or cur.context_previous_max_tokens)
 
     def window_stats(self) -> Dict[str, Any]:
         """Stato compatto della finestra per le metriche: modalita', soglie, scorrimenti, token/unita' scartati."""

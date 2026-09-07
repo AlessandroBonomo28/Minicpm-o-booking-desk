@@ -1279,6 +1279,7 @@ class StreamDecoder:
         # previous content
         self._previous_text: str = ""  # accumulated generated text (without marker)
         self._previous_token_ids: List[int] = []  # previous full token ids (including marker)
+        self._sticky_token_ids: List[int] = []    # ramo forcespeak-stickyctx: testo di sistema a comando (schermo/istruzione), sempre dopo "previous"
 
         # validation statistics
         self._sliding_event_count: int = 0  # sliding window trigger count
@@ -1319,6 +1320,7 @@ class StreamDecoder:
         self._has_previous = False
         self._previous_text = ""
         self._previous_token_ids = []
+        self._sticky_token_ids = []
 
         # validation statistics
         self._sliding_event_count = 0  # sliding window trigger count
@@ -1535,6 +1537,7 @@ class StreamDecoder:
         self._has_previous = False
         self._previous_text = ""
         self._previous_token_ids = []
+        self._sticky_token_ids = []
 
     def _extract_generated_text(self, units: List[Dict[str, Any]]) -> Tuple[str, List[int]]:
         """extract generated text and token ids from units
@@ -1591,6 +1594,8 @@ class StreamDecoder:
         if self.cache is None:
             return False
 
+        # sticky (forcespeak-stickyctx): il testo di sistema a comando vive nella stessa regione di "previous", sempre in coda
+        new_previous_tokens = list(new_previous_tokens or []) + list(self._sticky_token_ids)
         old_previous_len = self._previous_content_length
         new_previous_len = len(new_previous_tokens)
         suffix_len = len(self._suffix_token_ids)
@@ -1969,6 +1974,22 @@ class StreamDecoder:
             expected = self._system_preserve_length + sum(u["length"] for u in self._unit_history)
 
         return dropped_count > 0
+
+    def set_sticky_text(self, text: str, marker: str = "\n\nscreen: ") -> bool:
+        """Ramo forcespeak-stickyctx: scrive (o cancella, text vuoto) un testo nella regione di sistema protetta, dopo
+        'previous' e prima del suffisso, e ricostruisce la cache: forward sui soli token nuovi + suffisso, unita' reindicizzate.
+        Richiede register_system_prompt_with_context (modo finestra 'context'). Ritorna True se la cache e' stata ricostruita."""
+        if self.cache is None or self.tokenizer is None or self._preserve_prefix_length <= 0:
+            logger.warning("set_sticky_text: regione di sistema non registrata (serve il modo finestra 'context')")
+            return False
+        text = (text or "").strip()
+        ids = self.tokenizer.encode(marker + text, add_special_tokens=False) if text else []
+        if ids == self._sticky_token_ids:
+            return False
+        self._sticky_token_ids = ids
+        ok = self._rebuild_cache_with_previous(self._previous_token_ids)
+        logger.info("[Duplex] STICKY_CONTEXT %s (%d token): %r -> cache %d", "set" if ids else "cleared", len(ids), text[:120], self.get_cache_length())
+        return bool(ok)
 
     def get_previous_context(self) -> Tuple[str, List[int]]:
         """get current accumulated previous context

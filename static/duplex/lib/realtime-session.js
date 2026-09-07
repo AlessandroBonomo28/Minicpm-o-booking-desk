@@ -256,7 +256,10 @@ export class RealtimeSession {
             newMsg.input.force_speak = true;   // ramo force-speak: il controllore apre un turno di parlato
         }
         if (msg.inject_text) {
-            newMsg.input.inject_text = String(msg.inject_text).slice(0, 600);   // context injection prima della decisione
+            newMsg.input.inject_text = String(msg.inject_text).slice(0, 600);   // testo nello slot di uscita (prova del 07/09: e' letto come parlato proprio)
+        }
+        if (msg.context_text !== undefined && msg.context_text !== null) {
+            newMsg.input.context_text = String(msg.context_text).slice(0, 800);   // regione sticky di sistema ("" = cancella)
         }
         if (msg.frame_base64_list) {
             newMsg.input.video_frames = msg.frame_base64_list;

@@ -286,6 +286,10 @@ class PyTorchBackend:
         duplex_view = self.processor.set_duplex_mode()
         return duplex_view.generate(force_listen=force_listen, force_speak=force_speak, inject_text=inject_text)
 
+    def duplex_set_context(self, text: str) -> bool:
+        duplex_view = self.processor.set_duplex_mode()
+        return duplex_view.set_context(text)
+
     def duplex_finalize(self) -> None:
         duplex_view = self.processor.set_duplex_mode()
         duplex_view.finalize()

@@ -104,7 +104,8 @@
       </div>
       <div class="row">
         <label>Finestra KV</label>
-        <select id="slidingWindow"><option value="basic" selected>basic: sopra 4000 token scarta le unità più vecchie fino a 3500 (prompt protetto)</option><option value="off">off: il contesto cresce senza limite (upstream)</option></select>
+        <select id="slidingWindow"><option value="context" selected>context: 45 unità, regione di sistema "previous" + schermo STICKY (serve per il testo nel contesto)</option><option value="basic">basic 4000/3500: un taglio ogni ~7 s col lampeggio (sessioni finora)</option><option value="off">off: nessun taglio, si ferma a 16k token (~3 min col lampeggio)</option></select>
+        <label style="min-width:auto"><input type="checkbox" id="stickyScreen" checked> schermo sticky</label> <span class="small">(a ogni cambio di contenuto il testo dello schermo va nella regione di sistema del modello, prima delle unità; richiede modo context)</span>
         <span class="small" id="kvInfo">KV: — · finestra: —</span>
       </div>
       <div class="row">
@@ -112,6 +113,7 @@
         <button class="danger" id="btnStop" disabled>Stop</button>
         <button id="btnForceListen" disabled>Force Listen</button>
         <button id="btnForceSpeak" disabled title="Al prossimo chunk il controllore sostituisce <|listen|> con <|speak|>: l'omni apre un turno e decide lui cosa dire (legge lo schermo)">Parla ora (force_speak)</button>
+        <select id="injectMode" title="dove va il testo col force_speak"><option value="system" selected>istruzione nella regione di sistema (sticky, poi rimossa a fine turno)</option><option value="unit">testo nello slot di uscita dell'unità (prova del 07/09: letto come parlato proprio)</option><option value="none">solo force, nessun testo</option></select>
         <input type="text" id="injectText" value="Read the operator screen aloud to the customer now, in one short sentence." placeholder="testo iniettato col force_speak (vuoto = solo force; {screen} = testo dello schermo)" style="width:520px" title="Context injection: alimentato nel KV dopo l'audio del chunk e prima della decisione parla/ascolta. Vuoto = force_speak nudo.">
         <button id="btnCue" disabled title="Al prossimo chunk manda nel canale del cliente il clip static/hud/cues/cue.wav (se c'e') al posto del microfono: stimolo acustico">Stimolo audio</button>
         <span class="small">chunk inviati: <b id="chunks">0</b> · frame inviati: <b id="framesSent">0</b></span>

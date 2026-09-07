@@ -264,6 +264,8 @@ class DuplexConfig(BaseModel):
     )
     sliding_window_high_tokens: int = Field(4000, ge=500, le=32000, description="soglia alta della finestra basic")
     sliding_window_low_tokens: int = Field(3500, ge=200, le=32000, description="soglia bassa della finestra basic")
+    context_max_units: int = Field(24, ge=4, le=400, description="modo 'context': unita' massime prima del taglio")
+    context_previous_max_tokens: int = Field(500, ge=0, le=4000, description="modo 'context': token massimi della regione 'previous'")
     
     # Listen 相关
     listen_prob_scale: float = Field(

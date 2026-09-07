@@ -421,11 +421,18 @@ class BackendProtocolSession:
             force_listen = bool(_coalesce(payload.get("force_listen"), hints.get("force_listen"), default=False))
             force_speak = bool(_coalesce(payload.get("force_speak"), hints.get("force_speak"), default=False)) and not force_listen
             inject_text = str(_coalesce(payload.get("inject_text"), hints.get("inject_text"), default="") or "")[:600]
+            context_text = payload.get("context_text", hints.get("context_text"))   # None = invariato; "" = cancella
+            context_text = None if context_text is None else str(context_text)[:800]
             max_slice_nums = int(_coalesce(payload.get("max_slice_nums"), hints.get("max_slice_nums"), default=1))
 
             t0 = time.perf_counter()
 
             def _duplex_step() -> tuple[Any, float, Dict[str, Any], Dict[str, Any]]:
+                if context_text is not None and hasattr(self.backend, "duplex_set_context"):
+                    try:
+                        self.backend.duplex_set_context(context_text)   # regione sticky, prima del prefill dell'unita'
+                    except Exception as exc:
+                        logger.warning("duplex_set_context fallito: %s", exc)
                 prefill_t0 = time.perf_counter()
                 prefill_result = self.backend.duplex_prefill(
                     audio_waveform=audio_waveform,

@@ -898,6 +898,8 @@ class DuplexView:
                 getattr(cfg, "sliding_window_mode", "off"),
                 getattr(cfg, "sliding_window_high_tokens", 4000),
                 getattr(cfg, "sliding_window_low_tokens", 3500),
+                context_max_units=getattr(cfg, "context_max_units", None),
+                context_previous_max_tokens=getattr(cfg, "context_previous_max_tokens", None),
             )
 
         # 调用透传方法
@@ -942,6 +944,10 @@ class DuplexView:
         
         return result
     
+    def set_context(self, text: str) -> bool:
+        """Ramo forcespeak-stickyctx: testo nella regione di sistema (tra un finalize e il prefill successivo)."""
+        return bool(self._model.duplex_set_context(text or ""))
+
     def generate(self, force_listen: bool = False, force_speak: bool = False, inject_text: str = "") -> DuplexGenerateResult:
         """生成响应
         

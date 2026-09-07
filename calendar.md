@@ -381,3 +381,6 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 07/09 — **Regola dello schermo** (Alessandro): l'HUD resta semplice, l'algebra spezza il compito in stati. Sullo schermo
   solo righe pronunciabili al cliente così come sono; mai istruzioni per l'operatore (atto, SAY/ASK/WAIT): con force_speak
   l'omni le leggeva alla lettera ("I'm going to ask the day"). L'aiuto di σ è la frase da dire, in prima persona.
+- 08/09 (00:00) — **FORCESPEAK-GOODTEST** = `forcespeak-stickyctx` @ 8cf0b2a, "la prova migliore fino ad ora in assoluto"
+  (sess_f0ab8867fc79): mese, giorno parziale, TAKEN, rosso corretto a voce, prenotazione scritta, 3 forzature di σ tutte
+  fondate, zero loop. Architettura documentata in `plan/architettura-forcespeak.md`, sessione in `plan/sessioni/`.

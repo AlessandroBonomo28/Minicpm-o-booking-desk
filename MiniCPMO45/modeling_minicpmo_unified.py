@@ -4001,6 +4001,7 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
         length_penalty: float = 1.1,
         force_listen_override: bool = False,
         force_speak_override: bool = False,
+        inject_text: Optional[str] = None,
     ):
         """生成响应（透传到 self.duplex.streaming_generate）
         
@@ -4033,6 +4034,7 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
             length_penalty=length_penalty,
             force_listen_override=force_listen_override,
             force_speak_override=force_speak_override,
+            inject_text=inject_text,
         )
     
     def duplex_finalize(self):
@@ -5032,6 +5034,7 @@ class DuplexCapability:
         return {
             "is_listen": is_listen,
             "forced_speak": bool(getattr(self, "_forced_speak", False)),
+            "injected_text": getattr(self, "_injected_text", "") or "",
             "text": text,
             "audio_waveform": audio_waveform if audio_waveform is not None else self._generate_silence_waveform(),
             "end_of_turn": end_of_turn,
@@ -5070,8 +5073,11 @@ class DuplexCapability:
         length_penalty=1.1,
         force_listen_override: bool = False,
         force_speak_override: bool = False,
+        inject_text: Optional[str] = None,
     ):
         """生成响应。返回后必须调用 finalize_unit()（除非 needs_finalize 为 False）。
+        inject_text (ramo force-speak): testo alimentato nel KV DOPO l'audio dell'unita' e PRIMA della decisione listen/speak
+        (context injection): il turno che segue e' una risposta a quel testo, non una chiacchiera. Solo a turno chiuso.
         force_speak_override (ramo beta-gamma, 06/09): specchio di force_listen_override. Se a j=0 il modello campiona
         <|listen|> con il turno chiuso, si sostituisce con <|speak|> (la stessa sequenza di ogni onset naturale): il
         controllore decide QUANDO parlare, il modello decide COSA. Ha la precedenza force_listen.
@@ -5116,6 +5122,15 @@ class DuplexCapability:
             self.current_turn_ended = True
             self._reset_token2wav_for_new_turn()
             logger.info("[Duplex] force_listen: fed <|turn_eos|> to close speaking turn, reset TTS caches")
+
+        self._injected_text = ""
+        if inject_text and str(inject_text).strip() and self.current_turn_ended and not force_listen:
+            _inj_ids = self.tokenizer.encode(str(inject_text), add_special_tokens=False)
+            if _inj_ids:
+                self.total_ids.extend(_inj_ids)
+                logits, _ = self.decoder.feed(self.decoder.embed_tokens(_inj_ids), return_logits=True)
+                self._injected_text = str(inject_text)
+                logger.info("[Duplex] INJECT_TEXT (%d tokens, unit %s): %r", len(_inj_ids), self.audio_chunk_idx, str(inject_text)[:120])
 
         total_hidden_in_unit = []
         total_ids_in_unit = []

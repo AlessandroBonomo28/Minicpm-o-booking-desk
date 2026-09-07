@@ -1376,6 +1376,10 @@ async def hud_fsm_omni_turn(request: Request):
     body = await request.json()
     calls = body.get("tool_calls") or []
     heard_args = next((c.get("arguments") or {} for c in calls if c.get("name") == "heard"), {})
+    cur = _HUD_DB.get("fsm") or _hud_fsm_reset()
+    if body.get("fsm_seq") is not None and int(body["fsm_seq"]) != int(cur.get("seq") or 0):
+        # verdetto su uno stato che nel frattempo e' cambiato: non si applica (con force_speak un giallo stantio verrebbe letto, non solo dipinto)
+        return JSONResponse(content={"fsm": cur, "changed": False, "level": cur.get("level") or "green", "hint": cur.get("hint") or "", "stale": True})
     changed = False
     if calls:
         _, changed = _hud_fsm_apply(calls, "", body.get("outcome") or "auto", body.get("source") or "heard", body.get("delay_s"))

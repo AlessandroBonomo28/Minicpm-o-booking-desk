@@ -51,7 +51,7 @@
     <div class="card" style="margin-top:14px">
       <h2>Richiesta manuale (senza voce) ed esito della FSM</h2>
       <div class="row"><label>Richiesta</label>
-        <select id="qIntent"><option value="check" selected>check (è libero?)</option><option value="book">book (prenota)</option></select>
+        <select id="qIntent"><option value="check" selected>check (è libero?)</option><option value="book">book (prenota)</option><option value="yes">yes (sì alla domanda aperta)</option><option value="no">no</option><option value="cancel">cancel (rinuncia)</option></select>
         <input type="text" id="qDate" value="MARCH 31" placeholder="data (vuota = manca)" style="width:130px"> <input type="text" id="qTime" value="15:00" placeholder="ora (vuota = manca / giornata)" style="width:170px"></div>
       <div class="row"><label>Esito</label>
         <select id="qOutcome"><option value="auto" selected>dal gestionale (prenotazioni inserite in db.html)</option><option value="ok">forza AVAILABLE</option><option value="no">forza BOOKED</option><option value="err">simula ERROR / TIMEOUT</option></select>
@@ -115,6 +115,8 @@
         <button id="btnForceSpeak" disabled title="Al prossimo chunk il controllore sostituisce <|listen|> con <|speak|>: l'omni apre un turno e decide lui cosa dire (legge lo schermo)">Parla ora (force_speak)</button>
         <select id="injectMode" title="dove va il testo col force_speak"><option value="none" selected>solo force, nessun testo (come nel ramo force-speak)</option><option value="system">istruzione nella regione di sistema (sticky, poi rimossa a fine turno; provato 07/09: non la esegue)</option><option value="unit">testo nello slot di uscita dell'unità (07/09: letto come parlato proprio, detta le prime parole)</option></select>
         <input type="text" id="injectText" value="Read the operator screen aloud to the customer now, in one short sentence." placeholder="testo iniettato col force_speak (vuoto = solo force; {screen} = testo dello schermo)" style="width:520px" title="Context injection: alimentato nel KV dopo l'audio del chunk e prima della decisione parla/ascolta. Vuoto = force_speak nudo.">
+        <label style="min-width:auto"><input type="checkbox" id="autoForce" checked> force automatico</label> <span class="small">(τ: sul frame EVENTO a turno chiuso, latch se il turno è aperto, guardiano a 3,5 s; max 2 per stato, pausa 3 s)</span>
+        <label style="min-width:auto"><input type="checkbox" id="holdOn"> hold</label> <span class="small">(force_listen dalla pausa alla decisione, max 3 chunk: niente risposta cieca; spento = come misurato finora)</span>
         <button id="btnCue" disabled title="Al prossimo chunk manda nel canale del cliente il clip static/hud/cues/cue.wav (se c'e') al posto del microfono: stimolo acustico">Stimolo audio</button>
         <span class="small">chunk inviati: <b id="chunks">0</b> · frame inviati: <b id="framesSent">0</b></span>
       </div>

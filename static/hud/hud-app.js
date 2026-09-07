@@ -63,7 +63,7 @@ const hud = {
         // un valore respinto e' un evento: entra nell'impronta con il numero di sequenza, cosi' produce un frame anche se
         // lo schermo e' uguale a prima (il frame e' il clock: "April" due volte -> due frame)
         const rej = Object.keys(f.rejected || {}).length ? `|rej${f.seq || 0}:${JSON.stringify(f.rejected)}` : '';
-        const act = (f.level && f.level !== 'green') ? actFor() : '';
+        const act = actFor();   // atto sempre visibile (anche in verde): un turno forzato ha bisogno dell'istruzione nei pixel
         return JSON.stringify(themeForSeq()) + '|' + act + '|' + (f.level || '') + (f.hint || '') + '|b' + (blinkLeft > 0 ? blinkPhase : '') + rej;
     },
 };
@@ -173,7 +173,7 @@ function drawHud() {
     const bannerText = level === 'green' ? 'OK' : (level === 'yellow' ? `⚠ ${hint || 'CHECK THE SCREEN'}` : `■ ${hint || 'STOP'}`);
     ctx.fillText(bannerText, W / 2, H * 0.08);
     ctx.fillStyle = theme.fg;
-    const act = level !== 'green' ? actFor() : '';   // in verde l'omni guida: niente atto dettato
+    const act = actFor();   // atto sempre visibile (07/09: in verde senza atto -> 'let me check' e silenzi)
     hud.lastText = [bannerText, act, theme.title, theme.line1, theme.line2, theme.line3 || ''].filter(Boolean).join(' | ');
     if (act) {
         // schermo a due meta': sopra l'atto, sotto lo stato (linea di separazione)
@@ -200,7 +200,7 @@ function hudSync(force = false) {
     if (!force && h === hud.lastHash) return;
     hud.lastHash = h;
     const content = h.replace(/\|b\d*/, '');   // impronta di CONTENUTO (senza fase del lampeggio)
-    if (content !== hud.lastContent) { hud.lastContent = content; if ($('stickyScreen').checked) pendingContext = true; }
+    if (content !== hud.lastContent) { hud.lastContent = content; hud.pendingIsEvent = true; if ($('stickyScreen').checked) pendingContext = true; }
     hud.pendingFrame = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
     hudLog('hud', `frame pronto (${$('hudState').textContent}) → allegato al prossimo chunk audio · schermo: ${hud.lastText || ''}`);
 }
@@ -262,7 +262,7 @@ async function fsmReset() {
 // richiesta manuale dal pannello (senza voce): check o book con data/ora scritte
 function manualRequest() {
     const intent = $('qIntent').value, date = $('qDate').value.trim(), time = $('qTime').value.trim();
-    const args = {}; if (date) args.date = date; if (time) args.time = time;
+    const args = {}; if (!['yes', 'no', 'cancel'].includes(intent)) { if (date) args.date = date; if (time) args.time = time; }
     hudLog('sys', `richiesta manuale: ${intent}(${JSON.stringify(args)})`);
     fsmEvent([{ name: intent, arguments: args }], '', 'manuale').catch(e => hudLog('warn', 'FSM errore: ' + e.message));
 }
@@ -387,7 +387,8 @@ async function startSession() {
 async function startSessionInner() {
     $('conv').innerHTML = ''; $('hudLog').innerHTML = '';
     hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false;
-    hud.lastContent = null; pendingContext = false; instructionActive = ''; clearTimeout(instructionTimer);
+    hud.lastContent = null; hud.pendingIsEvent = false; pendingContext = false; instructionActive = ''; clearTimeout(instructionTimer);
+    omniTurnOpen = false; lastUserTurnAt = -1; lastForceAt = -100; forceCount = {}; forceLatched = false; holdActive = false; clearTimeout(silenceTimer);
     await fsmReset();                                // ogni sessione parte da IDLE (le prenotazioni in db.html restano)
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
@@ -405,7 +406,7 @@ async function startSessionInner() {
     });
     session.onSystemLog = (t) => conv('sys', t);
     session.onSpeakStart = (text) => {
-        omniSpokeAt = now();
+        omniSpokeAt = now(); omniTurnOpen = true; clearTimeout(silenceTimer);
         const el = conv('ai', 'AI: ' + (text || ''));
         el.dataset.prefix = 'AI: ';
         onModelText(text || '');
@@ -414,13 +415,14 @@ async function startSessionInner() {
     session.onSpeakUpdate = (el, text) => { if (el) { el.textContent = ''; el.innerHTML = `<span class="t">${now().toFixed(1)}s</span>`; el.appendChild(document.createTextNode('AI: ' + text)); } onModelText(text || ''); };
     // fine del turno dell'omni: la libreria chiama onSpeakEnd (il modelState 'end_of_turn' delle metriche non arriva mai)
     session.onSpeakEnd = () => {
-        clearInstruction('turno finito');
+        omniTurnOpen = false; clearInstruction('turno finito');
         conv('sys', stateLine('fine turno AI'));
         if (currentAiText) {
             const said = currentAiText; currentAiText = '';
             dialog.push({ role: 'assistant', text: said }); if (dialog.length > 12) dialog.shift();
             const forced = forceSpeakSentAt >= 0 && omniSpokeAt >= forceSpeakSentAt && omniSpokeAt - forceSpeakSentAt < 3;
-            onOperatorTurnEnd(said, forced);
+            const informed = lastUserTurnAt >= 0 && omniSpokeAt - lastUserTurnAt < 6;   // turno che risponde a una tua battuta: i readback valgono
+            onOperatorTurnEnd(said, forced && !informed);
         }
     };
     session.onListenResult = (r) => { if (r && r.text) conv('sys', 'utente: ' + r.text); };
@@ -446,7 +448,7 @@ async function startSessionInner() {
                                        sliding_window_mode: $('slidingWindow').value, sliding_window_high_tokens: 4000, sliding_window_low_tokens: 3500,
                                        context_max_units: 45, context_previous_max_tokens: 500 },
                              use_tts: true, max_slice_nums: 1 };
-    conv('sys', `CONFIG · prompt: "${$('systemPrompt').value}" · sticky ${$('stickyScreen').checked ? 'on' : 'off'} · inject ${$('injectMode').value} · heard ${$('heardOn').checked ? 'on' : 'off'} · blink ${($('blinkAlways') && $('blinkAlways').checked) ? 'on' : 'off'}` + ` · asr ${$('asrProfile') ? $('asrProfile').value : '?'} · finestra ${$('slidingWindow').value} · trp ${$('textRepPenalty').value}`);   // nel registro della run
+    conv('sys', `CONFIG · prompt: "${$('systemPrompt').value}" · autoForce ${$('autoForce').checked ? 'on' : 'off'} · hold ${$('holdOn').checked ? 'on' : 'off'} · sticky ${$('stickyScreen').checked ? 'on' : 'off'} · inject ${$('injectMode').value} · heard ${$('heardOn').checked ? 'on' : 'off'} · blink ${($('blinkAlways') && $('blinkAlways').checked) ? 'on' : 'off'}` + ` · asr ${$('asrProfile') ? $('asrProfile').value : '?'} · finestra ${$('slidingWindow').value} · trp ${$('textRepPenalty').value}`);   // nel registro della run
     lastWindowEvents = 0; lastMetrics = {}; lastModelState = ''; $('kvInfo').textContent = 'KV: — · finestra: ' + $('slidingWindow').value;
     const ref = await loadRefAudio();
     if (ref) preparePayload.ref_audio_base64 = ref;
@@ -469,24 +471,40 @@ async function startSessionInner() {
                     if ($('slidingWindow').value !== 'context') hudLog('warn', 'regione sticky ignorata dal modello: serve la finestra in modo context');
                     else hudLog('hud', `CONTEXT → regione di sistema (chunk #${sess.chunksSent + 1}): "${msg.context_text.replace(/\n/g, ' ⏎ ')}"`);
                 }
-                if (forceSpeakOnce) {
-                    forceSpeakOnce = false; msg.force_speak = true; forceSpeakSentAt = now();
-                    const mode = $('injectMode').value, inj = mode === 'none' ? '' : injectTextNow();
-                    if (inj && mode === 'unit') msg.inject_text = inj;
-                    if (inj && mode === 'system') { instructionActive = inj; pendingContext = true; clearTimeout(instructionTimer); instructionTimer = setTimeout(() => clearInstruction('timeout 8 s'), 8000); }
-                    const chunkNo = sess.chunksSent + 1, sentAt = forceSpeakSentAt;
-                    hudLog('warn', `FORCE_SPEAK inviato con il chunk #${chunkNo} (schermo: ${hud.lastText || ''})${inj ? ' · ' + (mode === 'system' ? 'ISTRUZIONE in regione di sistema' : 'INIETTATO nello slot di uscita') + ': "' + inj + '"' : ' · nessun testo'}`);
-                    if (pendingContext) { pendingContext = false; msg.context_text = composeContext(); hudLog('hud', `CONTEXT → regione di sistema (chunk #${chunkNo}): "${msg.context_text.replace(/\n/g, ' ⏎ ')}"`); }
-                    setTimeout(() => hudLog(omniSpokeAt > sentAt ? 'hud' : 'warn', `FORCE_SPEAK #${chunkNo} → ${omniSpokeAt > sentAt ? 'turno aperto a +' + (omniSpokeAt - sentAt).toFixed(1) + ' s' : 'NESSUN TESTO entro 3 s (turno vuoto o ignorato)'}`), 3000);
+                // hold (opzione): dalla pausa alla decisione l'omni ascolta (force_listen), al massimo HOLD_MAX_CHUNKS chunk
+                if (holdActive) {
+                    if (holdChunks < HOLD_MAX_CHUNKS) { msg.force_listen = true; holdChunks++; hudLog('sys', `HOLD: force_listen sul chunk #${sess.chunksSent + 1}`); }
+                    else { holdActive = false; forceLatched = true; latchReason = 'hold scaduto'; hudLog('warn', 'HOLD scaduto: force armato'); }
                 }
                 // lampeggio: costante (un frame per chunk, banner alternato) oppure solo 4 frame al cambio di livello
                 if (!hud.pendingFrame && ($('blinkAlways').checked || blinkLeft > 0)) { blinkPhase++; if (blinkLeft > 0) blinkLeft--; hudSync(true); }
+                let isEvent = false;
                 if (hud.pendingFrame) {
                     msg.frame_base64_list = [hud.pendingFrame];
                     hud.pendingFrame = null; hud.framesSent++; hud.lastFrameAt = now(); awaitingReaction = true;
+                    isEvent = !!hud.pendingIsEvent; hud.pendingIsEvent = false;
                     $('framesSent').textContent = hud.framesSent;
                     $('frameInfo').textContent = `ultimo frame inviato a ${hud.lastFrameAt.toFixed(1)}s (${$('hudState').textContent})`;
-                    hudLog('hud', `FRAME INVIATO (${$('hudState').textContent}) con il chunk #${sess.chunksSent + 1}`);
+                    hudLog('hud', `FRAME INVIATO (${$('hudState').textContent}) con il chunk #${sess.chunksSent + 1}${isEvent ? ' · EVENTO' : ''}`);
+                }
+                // politica τ: manuale > evento > latch/guardiano
+                let why = '';
+                if (forceSpeakOnce) { forceSpeakOnce = false; why = 'manuale'; }
+                else if ($('autoForce').checked && !msg.force_listen) {
+                    if (isEvent && (sess.chunksSent + 1) >= 4) {
+                        if (canForceNow(turns, sess)) why = 'evento';
+                        else { forceLatched = true; latchReason = 'evento'; hudLog('sys', `frame evento con turno ${omniTurnOpen ? 'aperto' : 'chiuso'}${turns.speaking ? ', voce' : ''}: force ARMATO`); }
+                    } else if (forceLatched && canForceNow(turns, sess)) { why = 'latch ' + latchReason; forceLatched = false; }
+                }
+                if (why) {
+                    msg.force_speak = true; forceSpeakSentAt = now(); lastForceAt = forceSpeakSentAt; forceCount[hud.fsm.seq || 0] = (forceCount[hud.fsm.seq || 0] || 0) + 1;
+                    const mode = why === 'manuale' ? $('injectMode').value : 'none', inj = mode === 'none' ? '' : injectTextNow();
+                    if (inj && mode === 'unit') msg.inject_text = inj;
+                    if (inj && mode === 'system') { instructionActive = inj; pendingContext = true; clearTimeout(instructionTimer); instructionTimer = setTimeout(() => clearInstruction('timeout 8 s'), 8000); }
+                    const chunkNo = sess.chunksSent + 1, sentAt = forceSpeakSentAt;
+                    hudLog('warn', `FORCE_SPEAK (${why}) con il chunk #${chunkNo} (schermo: ${hud.lastText || ''})${inj ? ' · ' + (mode === 'system' ? 'ISTRUZIONE in regione di sistema' : 'INIETTATO nello slot di uscita') + ': "' + inj + '"' : ''}`);
+                    if (pendingContext) { pendingContext = false; msg.context_text = composeContext(); hudLog('hud', `CONTEXT → regione di sistema (chunk #${chunkNo}): "${msg.context_text.replace(/\n/g, ' ⏎ ')}"`); }
+                    setTimeout(() => hudLog(omniSpokeAt > sentAt ? 'hud' : 'warn', `FORCE_SPEAK #${chunkNo} → ${omniSpokeAt > sentAt ? 'turno aperto a +' + (omniSpokeAt - sentAt).toFixed(1) + ' s' : 'NESSUN TESTO entro 3 s (turno vuoto o ignorato)'}`), 3000);
                 }
                 sess.sendChunk(msg);
                 $('chunks').textContent = sess.chunksSent;
@@ -539,6 +557,7 @@ async function decideUtterance(utterance, ctxSec = 0) {
 let speculative = null;
 function onUserPause(audio, speechMs, ctxSec) {
     if ($('trigMode').value !== 'tool' || toolBusy) return;
+    if ($('holdOn').checked && !omniTurnOpen) { holdActive = true; holdChunks = 0; }
     const t0 = performance.now();
     speculative = { speechMs, stale: false, t0, promise: decideUtterance(audio, ctxSec).catch(e => ({ ok: false, status: 0, d: { error: e.message }, dt: '?' })) };
 }
@@ -563,7 +582,7 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
         }
         const { ok, status, d, dt } = res;
         if (!ok) { hudLog('warn', `estrattore: ${d.error || status}`); return; }
-        if (d.user_text) { conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 12) dialog.shift(); }
+        if (d.user_text) { lastUserTurnAt = now(); conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 12) dialog.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s${d.asr_model ? ' (' + d.asr_model + ')' : ''} + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
@@ -571,7 +590,12 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
         await fsmEvent(calls, d.user_text, 'estrattore (turno utente)');
         conv('sys', stateLine(`dopo la tua battuta: ${calls.map(c => c.name + JSON.stringify(c.arguments)).join(' ')}`));
     } catch (e) { hudLog('warn', 'estrattore errore: ' + e.message); }
-    finally { toolBusy = false; if (pendingTurns.length) onUserTurnEnd(pendingTurns.shift()); }
+    finally {
+        toolBusy = false;
+        if (holdActive) { holdActive = false; forceLatched = true; latchReason = 'hold rilasciato'; }
+        if (lastUserTurnAt >= 0 && now() - lastUserTurnAt < 5) armSilenceWatchdog();
+        if (pendingTurns.length) onUserTurnEnd(pendingTurns.shift());
+    }
 }
 
 async function refreshAsrProfile() {
@@ -599,6 +623,7 @@ refreshAsrProfile();
 /** Fine turno dell'omni (ramo hud-semaforo): heard (se attivo e in raccolta) + giudizio deterministico del turno. */
 async function onOperatorTurnEnd(text, forced = false) {
     let calls = [];
+    const seqSeen = hud.fsm.seq || 0;   // se la FSM cambia mentre heard pensa, il verdetto e' stantio: il gateway lo scarta
     try {
         if ($('heardOn').checked) {
             const t0 = performance.now();
@@ -618,9 +643,10 @@ async function onOperatorTurnEnd(text, forced = false) {
             } else hudLog('warn', `heard: ${d.error || r.status}`);
         }
         const r2 = await fetch('/api/hud_fsm/omni_turn', { method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text, tool_calls: calls, outcome: $('qOutcome').value, source: 'heard (turno omni)' }) });
+            body: JSON.stringify({ text, tool_calls: calls, outcome: $('qOutcome').value, source: 'heard (turno omni)', fsm_seq: seqSeen }) });
         const d2 = await r2.json();
         if (!r2.ok) { hudLog('warn', `semaforo: ${d2.error || r2.status}`); return; }
+        if (d2.stale) { hudLog('sys', 'heard: verdetto stantio scartato (la FSM e\' cambiata durante il giudizio)'); return; }
         hudLog(d2.level === 'green' ? 'sys' : 'warn', `SEMAFORO ${d2.level.toUpperCase()}${d2.hint ? ' · ' + d2.hint : ''} — "${text.slice(0, 60)}"`);
         applyFsm(d2.fsm, 0);
         conv('sys', stateLine(`turno omni giudicato: ${d2.level}${d2.hint ? ' ' + d2.hint : ''}`));
@@ -640,6 +666,23 @@ $('btnStop').onclick = stopSession;
 $('btnForceListen').onclick = () => session && session.toggleForceListen();
 // ramo force-speak: un turno di parlato a comando. Il flag viene consumato dal prossimo chunk audio (entro 1 s).
 let forceSpeakOnce = false, cueOnce = false, cueSamples = null, forceSpeakSentAt = -1, omniSpokeAt = -1;
+// politica del turno τ (07/09): force sul frame EVENTO a turno chiuso; se il turno e' aperto il force resta ARMATO (latch) e scatta
+// al primo chunk con turno chiuso; guardiano a 3,5 s dopo una tua battuta senza risposta; hold (force_listen dalla pausa alla
+// decisione) come opzione spenta. Tetti: pausa 3 s, max 2 forzature per stato, mai nei primi 3 chunk.
+const FORCE_COOLDOWN_S = 3, SILENCE_S = 3.5, HOLD_MAX_CHUNKS = 3;
+let omniTurnOpen = false, lastUserTurnAt = -1, lastForceAt = -100, forceCount = {}, forceLatched = false, latchReason = '',
+    silenceTimer = null, holdActive = false, holdChunks = 0;
+function canForceNow(turns, sess) {
+    return !omniTurnOpen && !(turns && turns.speaking) && (sess.chunksSent + 1) >= 4 && (now() - lastForceAt) >= FORCE_COOLDOWN_S && (forceCount[hud.fsm.seq || 0] || 0) < 2;
+}
+function armSilenceWatchdog() {
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => {
+        if (omniSpokeAt >= lastUserTurnAt || !session || !$('autoForce').checked) return;
+        forceLatched = true; latchReason = 'guardiano';
+        hudLog('warn', `SILENZIO: nessuna risposta entro ${SILENCE_S} s dalla tua battuta → force armato`);
+    }, SILENCE_S * 1000);
+}
 // regione sticky di sistema (ramo forcespeak-stickyctx): schermo + istruzione temporanea del force
 let pendingContext = false, instructionActive = '', instructionTimer = null;
 function composeContext() {

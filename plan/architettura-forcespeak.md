@@ -12,8 +12,10 @@ gli mette sullo schermo la frase da dire e gli apre il turno con il suo stesso t
    al massimo tre righe, tutte pronunciabili al cliente cosi' come sono. Niente istruzioni per l'operatore: con force_speak
    il turno forzato e' una lettura letterale ("SAY: AVAILABLE" -> "I'm going to say available").
    - raccolta: `BOOK: APRIL` / `WHICH DAY?`; verifica sul mese: `IS IT FREE: APRIL` / `FREE, EXCEPT 1, 2, 3, 20, 25, 28` / `WHICH DAY?`
-   - risultato: `APRIL 20, ALL DAY: FREE?` / `YES, EXCEPT 3 PM, 6 PM` / `BOOK IT?`;  `APRIL 20, 2 PM: FREE?` / `YES` / `BOOK IT?`
-   - prenotazione: `BOOK APRIL 20, 2 PM?` / `FREE` / `SHALL I BOOK IT?` -> `BOOKED` oppure `TAKEN`
+   - risultato (GOODTEST-2): riga 1 lo slot, riga 2 un FATTO, riga 3 la domanda dell'operatore al cliente:
+     `APRIL 20, ALL DAY` / `FREE, EXCEPT 3 PM, 6 PM` / `WHAT TIME?`;  `APRIL 20, 2 PM` / `FREE` / `SHALL I BOOK IT?`
+     (mai `YES`/`NO`: si confondono con il si' del cliente; l'omni diceva "I'll book it for you")
+   - prenotazione: `APRIL 20, 2 PM` / `FREE` / `SHALL I BOOK IT?` -> `BOOKED` / `ANYTHING ELSE?` oppure `TAKEN`
    - banner in alto: verde OK; giallo = la frase di aiuto di σ; rosso = fatto del DB ("NOTHING BOOKED YET", "18:00 IS TAKEN")
    - orari in forma parlata (`6 PM`), giorni occupati solo se la domanda e' sul mese, nessun elenco non richiesto.
 3. **Token di controllo = il "quando".** `force_listen` (upstream) zittisce; `force_speak` (nostro, commit 31b5d52 su

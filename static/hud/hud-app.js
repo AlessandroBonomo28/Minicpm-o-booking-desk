@@ -93,7 +93,7 @@ function themeFor() {
             const tent = f.tentative || {};
             const mq = tent.month ? '?' : '', dq = tent.day ? '?' : '';
             const when = (month || day) ? `${month ? month + mq : ''}${day ? ' ' + day + dq : ''}`.trim() : '';
-            const verb = f.intent === 'check' ? 'IS IT FREE' : 'BOOK';
+            const verb = f.intent === 'check' ? 'FREE' : 'BOOK';
             const line1 = when ? `${verb}: ${when}${f.slots.time && miss !== 'time' ? ', ' + timeLabel(f.slots.time) : ''}` : `${verb}: ?`;
             const askFor = { month: 'WHICH MONTH?', day: 'WHICH DAY?', time: 'WHAT TIME?' }[miss] || '';
             const tentKeys = Object.keys(tent).filter(k => tent[k]);
@@ -114,16 +114,19 @@ function themeFor() {
         case 'DONE': {
             const s = f.status, d = (f.detail || '');
             if (s === 'error') return { bg: '#b71c1c', fg: '#ffffff', title: '', line1: slotLine(f), line2: 'SYSTEM ERROR, PLEASE RETRY', line3: '' };
+            // (08/09, GOODTEST-2) risultato = riga 1 lo slot, riga 2 un FATTO (FREE / TAKEN / BOOKED, mai YES/NO che si confonde
+            // con il si' del cliente), riga 3 la domanda che l'operatore fa al cliente per il passo successivo.
+            const slot = slotLine(f);
             if (f.intent === 'book') {
-                const q = `BOOK ${slotLine(f)}?`;
-                if (s === 'pending') return { bg: '#2e7d32', fg: '#ffffff', title: '', line1: q, line2: 'FREE', line3: hud.screen === 'CONFIRM' ? 'SHALL I BOOK IT?' : '' };
-                if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: '', line1: q, line2: 'BOOKED', line3: '' };
-                return { bg: '#c62828', fg: '#ffffff', title: '', line1: q, line2: 'TAKEN', line3: '' };
+                if (s === 'pending') return { bg: '#2e7d32', fg: '#ffffff', title: '', line1: slot, line2: 'FREE', line3: hud.screen === 'CONFIRM' ? 'SHALL I BOOK IT?' : '' };
+                if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: '', line1: slot, line2: 'BOOKED', line3: 'ANYTHING ELSE?' };
+                return { bg: '#c62828', fg: '#ffffff', title: '', line1: slot, line2: 'TAKEN', line3: '' };
             }
-            const q = `${slotLine(f)}: FREE?`;
-            let a = s === 'available' ? 'YES' : (s === 'partial' ? `YES, EXCEPT ${takenList(d)}` : 'NO, TAKEN');
+            const allDay = !f.slots.time || f.slots.time === 'all-day';
+            const fact = s === 'available' ? 'FREE' : (s === 'partial' ? `FREE, EXCEPT ${takenList(d)}` : 'TAKEN');
             const bg = s === 'available' ? '#2e7d32' : (s === 'partial' ? '#ef6c00' : '#c62828');
-            return { bg, fg: '#ffffff', title: '', line1: q, line2: a, line3: (hud.screen === 'CONFIRM' && s !== 'booked') ? 'BOOK IT?' : '' };
+            const next = hud.screen !== 'CONFIRM' || s === 'booked' ? '' : (allDay ? 'WHAT TIME?' : 'SHALL I BOOK IT?');
+            return { bg, fg: '#ffffff', title: '', line1: slot, line2: fact, line3: next };
         }
         default:
             return { bg: '#263238', fg: '#eceff1', title: 'BOOKING DESK', line1: f.note || '', line2: '', line3: '' };

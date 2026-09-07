@@ -282,9 +282,9 @@ class PyTorchBackend:
             max_slice_nums=max_slice_nums,
         )
 
-    def duplex_generate(self, force_listen: bool = False, force_speak: bool = False) -> DuplexGenerateResult:
+    def duplex_generate(self, force_listen: bool = False, force_speak: bool = False, inject_text: str = "") -> DuplexGenerateResult:
         duplex_view = self.processor.set_duplex_mode()
-        return duplex_view.generate(force_listen=force_listen, force_speak=force_speak)
+        return duplex_view.generate(force_listen=force_listen, force_speak=force_speak, inject_text=inject_text)
 
     def duplex_finalize(self) -> None:
         duplex_view = self.processor.set_duplex_mode()

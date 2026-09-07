@@ -478,6 +478,7 @@ class DuplexGenerateResult(BaseModel):
         description="是否处于 listen 状态"
     )
     forced_speak: bool = False   # ramo force-speak: turno aperto dal controllore
+    injected_text: str = ""      # ramo force-speak: testo iniettato nel KV prima della decisione
     text: str = Field(
         "", 
         description="生成的文本（listen 时为空）"

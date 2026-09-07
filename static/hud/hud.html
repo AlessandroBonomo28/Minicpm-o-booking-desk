@@ -112,6 +112,7 @@
         <button class="danger" id="btnStop" disabled>Stop</button>
         <button id="btnForceListen" disabled>Force Listen</button>
         <button id="btnForceSpeak" disabled title="Al prossimo chunk il controllore sostituisce <|listen|> con <|speak|>: l'omni apre un turno e decide lui cosa dire (legge lo schermo)">Parla ora (force_speak)</button>
+        <input type="text" id="injectText" value="Read the operator screen aloud to the customer now, in one short sentence." placeholder="testo iniettato col force_speak (vuoto = solo force; {screen} = testo dello schermo)" style="width:520px" title="Context injection: alimentato nel KV dopo l'audio del chunk e prima della decisione parla/ascolta. Vuoto = force_speak nudo.">
         <button id="btnCue" disabled title="Al prossimo chunk manda nel canale del cliente il clip static/hud/cues/cue.wav (se c'e') al posto del microfono: stimolo acustico">Stimolo audio</button>
         <span class="small">chunk inviati: <b id="chunks">0</b> · frame inviati: <b id="framesSent">0</b></span>
       </div>

@@ -118,6 +118,7 @@ def _result_metrics(result: Any, base: Optional[Dict[str, Any]] = None) -> Dict[
         ("n_tokens", "n_tokens"),
         ("n_tts_tokens", "n_tts_tokens"),
         ("forced_speak", "forced_speak"),
+        ("injected_text", "injected_text"),
     ):
         value = getattr(result, attr, None)
         if value is not None:
@@ -419,6 +420,7 @@ class BackendProtocolSession:
             hints = _first_dict(payload.get("hints"))
             force_listen = bool(_coalesce(payload.get("force_listen"), hints.get("force_listen"), default=False))
             force_speak = bool(_coalesce(payload.get("force_speak"), hints.get("force_speak"), default=False)) and not force_listen
+            inject_text = str(_coalesce(payload.get("inject_text"), hints.get("inject_text"), default="") or "")[:600]
             max_slice_nums = int(_coalesce(payload.get("max_slice_nums"), hints.get("max_slice_nums"), default=1))
 
             t0 = time.perf_counter()
@@ -431,7 +433,7 @@ class BackendProtocolSession:
                     max_slice_nums=max_slice_nums,
                 )
                 prefill_ms = (time.perf_counter() - prefill_t0) * 1000
-                result = self.backend.duplex_generate(force_listen=force_listen, force_speak=force_speak)
+                result = self.backend.duplex_generate(force_listen=force_listen, force_speak=force_speak, inject_text=inject_text)
                 return result, prefill_ms, prefill_result, self._safe_metrics()
 
             result, prefill_ms, prefill_result, backend_metrics = await asyncio.to_thread(_duplex_step)

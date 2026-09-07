@@ -942,7 +942,7 @@ class DuplexView:
         
         return result
     
-    def generate(self, force_listen: bool = False, force_speak: bool = False) -> DuplexGenerateResult:
+    def generate(self, force_listen: bool = False, force_speak: bool = False, inject_text: str = "") -> DuplexGenerateResult:
         """生成响应
         
         Args:
@@ -964,6 +964,7 @@ class DuplexView:
             length_penalty=self.config.length_penalty,
             force_listen_override=force_listen,
             force_speak_override=force_speak,
+            inject_text=inject_text or None,
         )
         
         # 转换音频
@@ -978,6 +979,7 @@ class DuplexView:
         return DuplexGenerateResult(
             is_listen=result.get("is_listen", True),
             forced_speak=bool(result.get("forced_speak", False)),
+            injected_text=str(result.get("injected_text") or ""),
             text=result.get("text", ""),
             audio_data=audio_data,
             end_of_turn=result.get("end_of_turn", False),

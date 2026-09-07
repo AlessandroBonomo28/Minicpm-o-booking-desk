@@ -255,6 +255,9 @@ export class RealtimeSession {
         if (msg.force_speak && !newMsg.input.force_listen) {
             newMsg.input.force_speak = true;   // ramo force-speak: il controllore apre un turno di parlato
         }
+        if (msg.inject_text) {
+            newMsg.input.inject_text = String(msg.inject_text).slice(0, 600);   // context injection prima della decisione
+        }
         if (msg.frame_base64_list) {
             newMsg.input.video_frames = msg.frame_base64_list;
         }

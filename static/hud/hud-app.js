@@ -402,6 +402,7 @@ async function startSessionInner() {
     });
     session.onSystemLog = (t) => conv('sys', t);
     session.onSpeakStart = (text) => {
+        omniSpokeAt = now();
         const el = conv('ai', 'AI: ' + (text || ''));
         el.dataset.prefix = 'AI: ';
         onModelText(text || '');
@@ -414,7 +415,8 @@ async function startSessionInner() {
         if (currentAiText) {
             const said = currentAiText; currentAiText = '';
             dialog.push({ role: 'assistant', text: said }); if (dialog.length > 12) dialog.shift();
-            onOperatorTurnEnd(said);
+            const forced = forceSpeakSentAt >= 0 && omniSpokeAt >= forceSpeakSentAt && omniSpokeAt - forceSpeakSentAt < 3;
+            onOperatorTurnEnd(said, forced);
         }
     };
     session.onListenResult = (r) => { if (r && r.text) conv('sys', 'utente: ' + r.text); };
@@ -459,8 +461,9 @@ async function startSessionInner() {
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
                 if (forceSpeakOnce) {
                     forceSpeakOnce = false; msg.force_speak = true; forceSpeakSentAt = now();
+                    const inj = injectTextNow(); if (inj) msg.inject_text = inj;
                     const chunkNo = sess.chunksSent + 1, sentAt = forceSpeakSentAt;
-                    hudLog('warn', `FORCE_SPEAK inviato con il chunk #${chunkNo} (schermo: ${hud.lastText || ''})`);
+                    hudLog('warn', `FORCE_SPEAK inviato con il chunk #${chunkNo} (schermo: ${hud.lastText || ''})${inj ? ' · INIETTATO: "' + inj + '"' : ' · nessun testo iniettato'}`);
                     setTimeout(() => hudLog(omniSpokeAt > sentAt ? 'hud' : 'warn', `FORCE_SPEAK #${chunkNo} → ${omniSpokeAt > sentAt ? 'turno aperto a +' + (omniSpokeAt - sentAt).toFixed(1) + ' s' : 'NESSUN TESTO entro 3 s (turno vuoto o ignorato)'}`), 3000);
                 }
                 // lampeggio: costante (un frame per chunk, banner alternato) oppure solo 4 frame al cambio di livello
@@ -581,7 +584,7 @@ $('btnAsrProfile').onclick = async () => {
 refreshAsrProfile();
 
 /** Fine turno dell'omni (ramo hud-semaforo): heard (se attivo e in raccolta) + giudizio deterministico del turno. */
-async function onOperatorTurnEnd(text) {
+async function onOperatorTurnEnd(text, forced = false) {
     let calls = [];
     try {
         if ($('heardOn').checked) {
@@ -592,6 +595,11 @@ async function onOperatorTurnEnd(text) {
             const dt = ((performance.now() - t0) / 1000).toFixed(2);
             if (r.ok) {
                 calls = d.tool_calls || [];
+                if (forced && calls.length) {   // turno forzato: i valori "ripetuti" possono essere inventati (run 37f56b: "the 17th") -> restano solo i claim
+                    const a = calls[0].arguments || {}; const kept = {}; for (const k of ['claim', 'claim_time']) if (a[k]) kept[k] = a[k];
+                    hudLog('sys', `turno FORZATO: readback ignorati ${JSON.stringify({ month: a.month, day: a.day, time: a.time })}`);
+                    calls = Object.keys(kept).length ? [{ name: 'heard', arguments: kept }] : [];
+                }
                 if (calls.length) hudLog('hud', `HEARD (${dt} s): ${JSON.stringify(calls[0].arguments)} da "${text.slice(0, 50)}"`);
                 else hudLog('sys', `heard (${dt} s): l'omni non ripete valori`);
             } else hudLog('warn', `heard: ${d.error || r.status}`);
@@ -618,7 +626,9 @@ $('btnStart').onclick = startSession;
 $('btnStop').onclick = stopSession;
 $('btnForceListen').onclick = () => session && session.toggleForceListen();
 // ramo force-speak: un turno di parlato a comando. Il flag viene consumato dal prossimo chunk audio (entro 1 s).
-let forceSpeakOnce = false, cueOnce = false, cueSamples = null, forceSpeakSentAt = -1;
+let forceSpeakOnce = false, cueOnce = false, cueSamples = null, forceSpeakSentAt = -1, omniSpokeAt = -1;
+/** Testo da iniettare col force_speak: vuoto = solo force; {screen} = testo dello schermo. */
+function injectTextNow() { const t = ($('injectText').value || '').trim(); return t ? t.replace(/\{screen\}/g, hud.lastText || '') : ''; }
 $('btnForceSpeak').onclick = () => { forceSpeakOnce = true; hudLog('warn', 'FORCE_SPEAK richiesto: parte col prossimo chunk'); };
 $('btnCue').onclick = async () => {
     if (!cueSamples) {

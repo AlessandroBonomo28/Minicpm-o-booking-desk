@@ -389,6 +389,7 @@ async function startSessionInner() {
     hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false;
     hud.lastContent = null; hud.pendingIsEvent = false; pendingContext = false; instructionActive = ''; clearTimeout(instructionTimer);
     omniTurnOpen = false; lastUserTurnAt = -1; lastForceAt = -100; forceCount = {}; forceLatched = false; holdActive = false; clearTimeout(silenceTimer);
+    lastOmniEndAt = -1; clearTimeout(noReplyTimer); sigmaBusy = false;
     await fsmReset();                                // ogni sessione parte da IDLE (le prenotazioni in db.html restano)
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
@@ -415,11 +416,11 @@ async function startSessionInner() {
     session.onSpeakUpdate = (el, text) => { if (el) { el.textContent = ''; el.innerHTML = `<span class="t">${now().toFixed(1)}s</span>`; el.appendChild(document.createTextNode('AI: ' + text)); } onModelText(text || ''); };
     // fine del turno dell'omni: la libreria chiama onSpeakEnd (il modelState 'end_of_turn' delle metriche non arriva mai)
     session.onSpeakEnd = () => {
-        omniTurnOpen = false; clearInstruction('turno finito');
+        omniTurnOpen = false; lastOmniEndAt = now(); clearInstruction('turno finito');
         conv('sys', stateLine('fine turno AI'));
         if (currentAiText) {
             const said = currentAiText; currentAiText = '';
-            dialog.push({ role: 'assistant', text: said }); if (dialog.length > 12) dialog.shift();
+            dialog.push({ role: 'assistant', text: said }); if (dialog.length > 40) dialog.shift();
             const forced = forceSpeakSentAt >= 0 && omniSpokeAt >= forceSpeakSentAt && omniSpokeAt - forceSpeakSentAt < 3;
             const informed = lastUserTurnAt >= 0 && omniSpokeAt >= lastUserTurnAt && omniSpokeAt - lastUserTurnAt < 6;   // turno iniziato DOPO la tua battuta: i readback valgono
             onOperatorTurnEnd(said, forced && !informed);
@@ -584,7 +585,7 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
         }
         const { ok, status, d, dt } = res;
         if (!ok) { hudLog('warn', `estrattore: ${d.error || status}`); return; }
-        if (d.user_text) { lastUserTurnAt = now(); lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 12) dialog.shift(); }
+        if (d.user_text) { lastUserTurnAt = now(); lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 40) dialog.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s${d.asr_model ? ' (' + d.asr_model + ')' : ''} + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
@@ -595,7 +596,8 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
     finally {
         toolBusy = false;
         if (holdActive) { holdActive = false; forceLatched = true; latchReason = 'hold rilasciato'; }
-        if (lastUserTurnAt >= 0 && now() - lastUserTurnAt < 5 && lastUserWords >= 3) armSilenceWatchdog();   // un filler ("Ummm", "uh") non merita una risposta forzata
+        if (lastUserTurnAt >= 0 && now() - lastUserTurnAt < 5) armNoReplyCheck();   // decide σ se il silenzio e' un problema (un filler no, una domanda si')
+        if ($('autoForce').checked && lastUserTurnAt >= 0 && now() - lastUserTurnAt < 5 && lastUserWords >= 3) armSilenceWatchdog();
         if (pendingTurns.length) onUserTurnEnd(pendingTurns.shift());
     }
 }
@@ -623,36 +625,55 @@ $('btnAsrProfile').onclick = async () => {
 refreshAsrProfile();
 
 /** Fine turno dell'omni (ramo hud-semaforo): heard (se attivo e in raccolta) + giudizio deterministico del turno. */
-async function onOperatorTurnEnd(text, forced = false) {
+// σ stuck detector (07/09): a fine turno dell'omni e, se dopo una tua battuta non risponde entro NO_REPLY_S, con reason 'no_reply'.
+// Vede conversazione, schermo, stato e tempi; decide ok/stuck. Stuck -> giallo con l'aiuto sullo schermo + force_speak nudo.
+const NO_REPLY_S = 3;
+let lastOmniEndAt = -1, noReplyTimer = null, sigmaBusy = false;
+function armNoReplyCheck() {
+    clearTimeout(noReplyTimer);
+    noReplyTimer = setTimeout(() => {
+        if (!session || !$('heardOn').checked || omniSpokeAt >= lastUserTurnAt || omniTurnOpen) return;
+        onOperatorTurnEnd('', false, 'no_reply');
+    }, NO_REPLY_S * 1000);
+}
+async function onOperatorTurnEnd(text, forced = false, reason = 'turn_end') {
     let calls = [];
-    const seqSeen = hud.fsm.seq || 0;   // se la FSM cambia mentre heard pensa, il verdetto e' stantio: il gateway lo scarta
+    const seqSeen = hud.fsm.seq || 0;   // se la FSM cambia mentre σ pensa, il verdetto e' stantio: il gateway lo scarta
+    if (sigmaBusy && reason === 'no_reply') return;
     try {
         if ($('heardOn').checked) {
+            sigmaBusy = true;
             const t0 = performance.now();
-            const r = await fetch('/api/tool_agent/heard', { method: 'POST', headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ operator_text: text, fsm: hud.fsm }) });
+            const timing = { since_user_s: lastUserTurnAt >= 0 ? +(now() - lastUserTurnAt).toFixed(1) : null,
+                             since_omni_s: lastOmniEndAt >= 0 ? +(now() - lastOmniEndAt).toFixed(1) : null, omni_speaking: omniTurnOpen };
+            const r = await fetch('/api/tool_agent/sigma', { method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ operator_text: text, fsm: hud.fsm, transcript: dialog.slice(-40), screen: hud.lastText || '', reason, timing }) });
             const d = await r.json();
             const dt = ((performance.now() - t0) / 1000).toFixed(2);
+            sigmaBusy = false;
             if (r.ok) {
                 calls = d.tool_calls || [];
-                if (forced && calls.length) {   // turno forzato: i valori "ripetuti" possono essere inventati (run 37f56b: "the 17th") -> restano solo i claim
-                    const a = calls[0].arguments || {}; const kept = {}; for (const k of ['claim', 'claim_time']) if (a[k]) kept[k] = a[k];
-                    hudLog('sys', `turno FORZATO: readback ignorati ${JSON.stringify({ month: a.month, day: a.day, time: a.time })}`);
-                    calls = Object.keys(kept).length ? [{ name: 'heard', arguments: kept }] : [];
+                const a = calls.length ? (calls[0].arguments || {}) : null;
+                if (a && forced) {   // turno forzato non informato: i readback possono essere inventati -> restano claim e verdetto
+                    for (const k of ['month', 'day', 'time']) delete a[k];
+                    hudLog('sys', 'turno FORZATO non informato: readback ignorati');
                 }
-                if (calls.length) hudLog('hud', `HEARD (${dt} s): ${JSON.stringify(calls[0].arguments)} da "${text.slice(0, 50)}"`);
-                else hudLog('sys', `heard (${dt} s): l'omni non ripete valori`);
-            } else hudLog('warn', `heard: ${d.error || r.status}`);
-        }
+                if (a) hudLog(a.status === 'stuck' ? 'warn' : 'hud', `σ (${dt} s, ${reason}): ${a.status === 'stuck' ? 'STUCK ' + (a.kind || '') + (a.help ? ' → "' + a.help + '"' : '') : 'ok'}` +
+                    `${a.claim ? ' · claim ' + a.claim + (a.claim_time ? ' ' + a.claim_time : '') + (a.claim_day ? ' giorno ' + a.claim_day : '') : ''}` +
+                    `${(a.month || a.day || a.time) ? ' · readback ' + JSON.stringify({ month: a.month, day: a.day, time: a.time }) : ''}`);
+                else hudLog('sys', `σ (${dt} s): nessun verdetto`);
+            } else hudLog('warn', `σ: ${d.error || r.status}`);
+        } else if (reason === 'no_reply') return;
         const r2 = await fetch('/api/hud_fsm/omni_turn', { method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text, tool_calls: calls, outcome: $('qOutcome').value, source: 'heard (turno omni)', fsm_seq: seqSeen }) });
+            body: JSON.stringify({ text, tool_calls: calls, outcome: $('qOutcome').value, source: 'σ (turno omni)', fsm_seq: seqSeen, reason }) });
         const d2 = await r2.json();
         if (!r2.ok) { hudLog('warn', `semaforo: ${d2.error || r2.status}`); return; }
-        if (d2.stale) { hudLog('sys', 'heard: verdetto stantio scartato (la FSM e\' cambiata durante il giudizio)'); return; }
-        hudLog(d2.level === 'green' ? 'sys' : 'warn', `SEMAFORO ${d2.level.toUpperCase()}${d2.hint ? ' · ' + d2.hint : ''} — "${text.slice(0, 60)}"`);
+        if (d2.stale) { hudLog('sys', 'σ: verdetto stantio scartato (la FSM e\' cambiata durante il giudizio)'); return; }
+        hudLog(d2.level === 'green' ? 'sys' : 'warn', `SEMAFORO ${d2.level.toUpperCase()}${d2.hint ? ' · ' + d2.hint : ''} — "${(text || '(silenzio)').slice(0, 60)}"`);
         applyFsm(d2.fsm, 0);
         conv('sys', stateLine(`turno omni giudicato: ${d2.level}${d2.hint ? ' ' + d2.hint : ''}`));
-    } catch (e) { hudLog('warn', 'turno omni errore: ' + e.message); }
+        if (d2.force && !omniTurnOpen) { forceSpeakOnce = true; hudLog('warn', `σ chiede aiuto (${d2.kind || d2.level}): force_speak col prossimo chunk, che porta lo schermo nuovo`); }
+    } catch (e) { sigmaBusy = false; hudLog('warn', 'turno omni errore: ' + e.message); }
 }
 
 async function checkToolAgent() {

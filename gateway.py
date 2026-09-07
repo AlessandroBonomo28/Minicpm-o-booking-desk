@@ -1166,7 +1166,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     if name == "yes" and any_said:
         name = "set"   # "yes, at 3 pm" = correzione + nuova conferma: yes non porta valori
     tentative = dict(fsm.get("tentative") or {})
-    if name == "heard":
+    if name in ("heard", "sigma"):
         # secondo orecchio: solo in raccolta, solo campi MANCANTI, mai sopra un valore del cliente; il campo diventa TENTATIVO.
         # Se il turno e' un CLAIM ("19:00 is taken", "confirmed"), i valori sono il soggetto dell'affermazione, non una ripetizione: non entrano.
         if state != "COLLECTING" or clean(args.get("claim")):
@@ -1334,6 +1334,9 @@ def _hud_supervise(fsm, omni_text: str, heard_args: dict):
             return "red", f"{_hud_time_label(ct)} IS FREE"
         if claim == "slot_free" and not free:
             return "red", f"{_hud_time_label(ct)} IS TAKEN"
+    # GIALLO da σ: l'omni e' bloccato o fuori contesto e serve una mano (l'aiuto va sullo schermo, poi force_speak)
+    if (h.get("status") or "").lower() == "stuck":
+        return "yellow", (h.get("help") or "ANSWER THE CUSTOMER").strip().upper()[:40]
     # GIALLO: ripete un valore che contraddice un valore SOLIDO del cliente (valori canonici: confronto diretto)
     for k in ("month", "day", "time"):
         v = h.get(k)
@@ -1375,13 +1378,14 @@ async def hud_fsm_omni_turn(request: Request):
     """Fine turno dell'omni: applica heard (se c'e') e giudica il turno (semaforo)."""
     body = await request.json()
     calls = body.get("tool_calls") or []
-    heard_args = next((c.get("arguments") or {} for c in calls if c.get("name") == "heard"), {})
+    reason = body.get("reason") or "turn_end"
+    heard_args = next((c.get("arguments") or {} for c in calls if c.get("name") in ("heard", "sigma")), {})
     cur = _HUD_DB.get("fsm") or _hud_fsm_reset()
     if body.get("fsm_seq") is not None and int(body["fsm_seq"]) != int(cur.get("seq") or 0):
         # verdetto su uno stato che nel frattempo e' cambiato: non si applica (con force_speak un giallo stantio verrebbe letto, non solo dipinto)
         return JSONResponse(content={"fsm": cur, "changed": False, "level": cur.get("level") or "green", "hint": cur.get("hint") or "", "stale": True})
     changed = False
-    if calls:
+    if calls and reason != "no_reply":
         _, changed = _hud_fsm_apply(calls, "", body.get("outcome") or "auto", body.get("source") or "heard", body.get("delay_s"))
     fsm = _HUD_DB.get("fsm") or _hud_fsm_reset()
     level, hint = _hud_supervise(fsm, body.get("text") or "", heard_args)
@@ -1389,7 +1393,9 @@ async def hud_fsm_omni_turn(request: Request):
         fsm["level"] = level; fsm["hint"] = hint; fsm["seq"] = int(fsm.get("seq") or 0) + 1; fsm["updated"] = datetime.now().isoformat(timespec="seconds")
         changed = True
     _hud_db_save()
-    return JSONResponse(content={"fsm": fsm, "changed": changed, "level": level, "hint": hint})
+    stuck = (heard_args.get("status") or "").lower() == "stuck"
+    return JSONResponse(content={"fsm": fsm, "changed": changed, "level": level, "hint": hint, "stuck": stuck, "kind": heard_args.get("kind") or "",
+                                 "force": bool(stuck or level == "red")})
 
 
 @app.post("/api/hud_fsm/event")
@@ -1465,6 +1471,19 @@ async def hud_asr_profile_set(request: Request):
             subprocess.run(["bash", script, prof], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     threading.Thread(target=_run, daemon=True).start()
     return JSONResponse(content={"ok": True, "profile": prof})
+
+
+@app.post("/api/tool_agent/sigma")
+async def tool_agent_sigma(request: Request):
+    """σ stuck detector: conversazione intera + schermo + stato + tempi -> ok/stuck, aiuto, readback, claim (solo cloud)."""
+    import httpx
+    body = await request.body()
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post("http://127.0.0.1:22700/sigma", content=body, headers={"content-type": "application/json"})
+        return JSONResponse(status_code=r.status_code, content=r.json())
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"error": f"tool agent non raggiungibile: {type(e).__name__}: {e}"})
 
 
 @app.post("/api/tool_agent/heard")

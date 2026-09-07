@@ -81,6 +81,62 @@ HEARD_PROMPT = ("You read what the OPERATOR of a voice booking desk just said to
                 "a confirmation without values), call no function and answer NONE.")
 
 
+# ---- σ "stuck detector" (07/09, Alessandro): un LLM in background con la conversazione intera, lo schermo, lo stato e i tempi
+#      decide se l'omni e' BLOCCATO o FUORI CONTESTO e gli serve una mano (giallo con l'aiuto sullo schermo + force_speak).
+#      Sostituisce heard: nella stessa chiamata riporta anche readback e claim.
+SIGMA_TOOL = _fn("verdict", "Your verdict on the OPERATOR's situation right now.",
+                 {**_FIELDS,
+                  "claim": {"type": ["string", "null"], "enum": ["slot_taken", "slot_free", "slot_invalid", "booking_confirmed", None],
+                            "description": "what the operator STATES about the booking system in its last turn, true or not: slot_taken, slot_free (also a proposal), slot_invalid, booking_confirmed; null if it states nothing"},
+                  "claim_time": {"type": ["string", "null"], "description": "the time the claim is about, 24h HH:MM; null if none"},
+                  "claim_day": {"type": ["string", "null"], "description": "the day of the month the claim is about, as a number; null if none"},
+                  "status": {"type": "string", "enum": ["ok", "stuck"],
+                             "description": "stuck = the operator needs help NOW. ok = the conversation is proceeding (small talk is ok; waiting after a customer filler like 'um' is ok)"},
+                  "kind": {"type": ["string", "null"], "enum": ["silent", "off_context", "repeating", "ignores_screen", "false_claim", None],
+                           "description": "silent = the customer's last line needed an answer (a question, a request, a value) and the operator has not answered; off_context = the operator talks about something that is not this booking (another product, a car when the customer books a call); repeating = it asks again what it already asked and the customer already answered; ignores_screen = it does not ask for what the SCREEN marks MISSING, or does not read a result the SCREEN shows; false_claim = it announces a booking or an availability the SCREEN does not show"},
+                  "help": {"type": ["string", "null"], "description": "ONLY if stuck: what the operator must say now, max 8 words, uppercase, using only facts on the SCREEN (e.g. 'ASK THE MONTH', 'IT IS A CALL BOOKING. ASK THE DAY', 'SAY: 15:00 IS TAKEN', 'ANSWER: THE 7TH AT 4 PM IS FREE'); null otherwise"}},
+                 ["status"])
+SIGMA_PROMPT = ("You are the SUPERVISOR of a voice booking desk. A small speech model, the OPERATOR, talks with the CUSTOMER and reads "
+                "the SCREEN, which shows the booking system's state and is the only source of truth. You see the whole conversation, the "
+                "SCREEN, the STATE and the TIMING. Call verdict() once. Be strict on off_context and false_claim. "
+                "When REASON is no_reply, the operator has said nothing since the customer's last line: if that line is a question, a "
+                "request, a value, or a direct address ('are you there?', 'hello?', 'so?'), it is stuck (kind silent) and help says what to "
+                "answer from the SCREEN; only a filler ('um', 'hmm', 'ok', 'yeah') with nothing to answer is ok. "
+                "month/day/time: ONLY values the operator repeats as the customer's own in its last turn (a readback), never questions, "
+                "proposals or examples.")
+
+
+def decide_sigma(operator_text, fsm, transcript, screen, reason, timing):
+    lines = [(t.get("role"), (t.get("text") or "").strip()) for t in (transcript or []) if (t.get("text") or "").strip()]
+    convo = "\n".join(f"{'OPERATOR' if r == 'assistant' else 'CUSTOMER'}: {x}" for r, x in lines[-40:]) or "(nothing yet)"
+    state_line = fsm_line_v2(fsm) if isinstance(fsm, dict) else "STATE: unknown"
+    t = timing or {}
+    tline = (f"TIMING: the customer's last line was {t.get('since_user_s', '?')} s ago; the operator is {'speaking now' if t.get('omni_speaking') else 'silent'}; "
+             f"its last turn ended {t.get('since_omni_s', '?')} s ago.")
+    last = operator_text or ("(no operator turn since the customer's last line)" if reason == "no_reply" else "(silence)")
+    user = (f"SCREEN (what the operator sees now): {screen or '?'}\n{state_line}\n{tline}\n\nCONVERSATION (oldest first):\n{convo}\n\n"
+            f"OPERATOR'S LAST TURN: {last}\nREASON FOR THIS CHECK: {reason or 'turn_end'}\n\nCall verdict().")
+    messages = [{"role": "system", "content": SIGMA_PROMPT}, {"role": "user", "content": user}]
+    fname, args_json, used_model, ms = decide_cloud(messages, [SIGMA_TOOL])
+    calls = []
+    if fname == "verdict":
+        try:
+            a = json.loads(args_json or "{}")
+        except Exception:
+            a = {}
+        args = {}
+        for k in ("month", "day", "time", "claim", "claim_time", "claim_day", "kind"):
+            v = a.get(k)
+            if isinstance(v, (str, int, float)) and str(v).strip().lower() not in _EMPTY:
+                args[k] = str(v).strip()
+        args["status"] = "stuck" if str(a.get("status", "ok")).lower() == "stuck" else "ok"
+        h = a.get("help")
+        if args["status"] == "stuck" and isinstance(h, str) and h.strip().lower() not in _EMPTY:
+            args["help"] = re.sub(r"\s+", " ", h.strip().strip('"\'')).upper()[:48]
+        calls.append({"name": "sigma", "arguments": args})
+    return {"tool_calls": calls, "backend": f"{BACKEND}:{used_model or CLOUD['model']} {ms:.0f}ms"}
+
+
 def decide_heard(operator_text, fsm):
     """Ritorna la chiamata heard (o nessuna) sul testo dell'operatore. Solo con il backend cloud (il locale non e' usato)."""
     messages = [{"role": "system", "content": HEARD_PROMPT},
@@ -384,11 +440,25 @@ class H(BaseHTTPRequestHandler):
             self._send(404, b"")
 
     def do_POST(self):
+        if self.path == "/sigma":
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                req = json.loads(self.rfile.read(n) or b"{}")
+                if BACKEND not in CLOUD_BACKENDS:
+                    self._send(200, json.dumps({"tool_calls": [], "backend": "local: sigma non disponibile"}).encode()); return
+                t0 = time.time()
+                res = decide_sigma((req.get("operator_text") or "").strip(), req.get("fsm"), req.get("transcript") or [], req.get("screen") or "",
+                                   req.get("reason") or "turn_end", req.get("timing") or {})
+                res["total_s"] = round(time.time() - t0, 2)
+                self._send(200, json.dumps(res, ensure_ascii=False).encode())
+            except Exception as e:
+                self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}).encode())
+            return
         if self.path == "/heard":
             n = int(self.headers.get("Content-Length", 0))
             try:
                 req = json.loads(self.rfile.read(n) or b"{}")
-                if BACKEND != "cline":
+                if BACKEND not in CLOUD_BACKENDS:
                     self._send(200, json.dumps({"tool_calls": [], "backend": "local: heard non disponibile"}).encode()); return
                 t0 = time.time()
                 res = decide_heard((req.get("operator_text") or "").strip(), req.get("fsm"))

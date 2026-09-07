@@ -83,7 +83,7 @@
       <div class="row"><label>Lampeggio</label>
         <input type="checkbox" id="blinkAlways" checked> <span class="small">banner del semaforo <b>sempre</b> lampeggiante (un frame per chunk, banner pieno/bianco alternati); senza spunta lampeggia solo 4 frame al cambio di livello</span></div>
       <div class="row"><label>Secondo orecchio</label>
-        <input type="checkbox" id="heardOn" checked> <span class="small"><b>heard</b>: a fine turno dell'omni le sue ripetizioni ("Got it, April 20th") riempiono i campi mancanti come valori TENTATIVI (schermo <code>APRIL?</code>, atto <code>CONFIRM: MONTH</code>); si scrive solo con valori confermati. Spunta via per testare senza.</span></div>
+        <input type="checkbox" id="heardOn" checked> <span class="small"><b>σ stuck detector</b>: a fine turno dell'omni e 3 s dopo una tua battuta senza risposta; vede conversazione, schermo, stato e tempi; readback → tentativi, claim verificati sul DB (rosso); <b>stuck</b> (silenzio, fuori contesto, ripete, ignora lo schermo, annuncio falso) → giallo con l'aiuto sullo schermo + force_speak</span></div>
       <div class="row"><label>Frame iniziale</label>
         <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
       <div class="row"><label>Frame manuale</label><button id="btnFrame" disabled>Invia il frame corrente ora</button></div>
@@ -115,7 +115,7 @@
         <button id="btnForceSpeak" disabled title="Al prossimo chunk il controllore sostituisce <|listen|> con <|speak|>: l'omni apre un turno e decide lui cosa dire (legge lo schermo)">Parla ora (force_speak)</button>
         <select id="injectMode" title="dove va il testo col force_speak"><option value="none" selected>solo force, nessun testo (come nel ramo force-speak)</option><option value="system">istruzione nella regione di sistema (sticky, poi rimossa a fine turno; provato 07/09: non la esegue)</option><option value="unit">testo nello slot di uscita dell'unità (07/09: letto come parlato proprio, detta le prime parole)</option></select>
         <input type="text" id="injectText" value="Read the operator screen aloud to the customer now, in one short sentence." placeholder="testo iniettato col force_speak (vuoto = solo force; {screen} = testo dello schermo)" style="width:520px" title="Context injection: alimentato nel KV dopo l'audio del chunk e prima della decisione parla/ascolta. Vuoto = force_speak nudo.">
-        <label style="min-width:auto"><input type="checkbox" id="autoForce" checked> force automatico</label> <span class="small">(τ: sul frame EVENTO a turno chiuso, latch se il turno è aperto, guardiano a 3,5 s; max 2 per stato, pausa 3 s)</span>
+        <label style="min-width:auto"><input type="checkbox" id="autoForce"> τ deterministica</label> <span class="small">(scartata 07/09: force sul frame evento, latch, guardiano a tempo; la decisione ora è di σ)</span>
         <label style="min-width:auto"><input type="checkbox" id="holdOn"> hold</label> <span class="small">(force_listen dalla pausa alla decisione, max 3 chunk: niente risposta cieca; spento = come misurato finora)</span>
         <button id="btnCue" disabled title="Al prossimo chunk manda nel canale del cliente il clip static/hud/cues/cue.wav (se c'e') al posto del microfono: stimolo acustico">Stimolo audio</button>
         <span class="small">chunk inviati: <b id="chunks">0</b> · frame inviati: <b id="framesSent">0</b></span>

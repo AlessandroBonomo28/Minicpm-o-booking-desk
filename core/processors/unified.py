@@ -942,11 +942,12 @@ class DuplexView:
         
         return result
     
-    def generate(self, force_listen: bool = False) -> DuplexGenerateResult:
+    def generate(self, force_listen: bool = False, force_speak: bool = False) -> DuplexGenerateResult:
         """生成响应
         
         Args:
             force_listen: 前端 Force Listen 开关，强制本次生成为 listen
+            force_speak: (ramo force-speak) il controllore chiede un turno di parlato se il modello avrebbe ascoltato
             
         Returns:
             DuplexGenerateResult
@@ -962,6 +963,7 @@ class DuplexView:
             text_repetition_window_size=self.config.text_repetition_window_size,
             length_penalty=self.config.length_penalty,
             force_listen_override=force_listen,
+            force_speak_override=force_speak,
         )
         
         # 转换音频
@@ -975,6 +977,7 @@ class DuplexView:
         
         return DuplexGenerateResult(
             is_listen=result.get("is_listen", True),
+            forced_speak=bool(result.get("forced_speak", False)),
             text=result.get("text", ""),
             audio_data=audio_data,
             end_of_turn=result.get("end_of_turn", False),

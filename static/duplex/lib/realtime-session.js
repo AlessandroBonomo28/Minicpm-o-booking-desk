@@ -252,6 +252,9 @@ export class RealtimeSession {
         if (this.forceListenActive || msg.force_listen) {
             newMsg.input.force_listen = true;
         }
+        if (msg.force_speak && !newMsg.input.force_listen) {
+            newMsg.input.force_speak = true;   // ramo force-speak: il controllore apre un turno di parlato
+        }
         if (msg.frame_base64_list) {
             newMsg.input.video_frames = msg.frame_base64_list;
         }
@@ -264,7 +267,7 @@ export class RealtimeSession {
 
         const hasVideo = newMsg.input.video_frames ? ` +${newMsg.input.video_frames.length}fr` : '';
         this._logProtoEvent('client', 'input.append',
-            `#${this.chunksSent}${hasVideo}${newMsg.input.force_listen ? ' force' : ''}`, newMsg);
+            `#${this.chunksSent}${hasVideo}${newMsg.input.force_listen ? ' force' : ''}${newMsg.input.force_speak ? ' FORCE_SPEAK' : ''}`, newMsg);
 
         this.onMetrics({ type: 'result', chunksSent: this.chunksSent });
     }

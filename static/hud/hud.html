@@ -111,6 +111,8 @@
         <button class="primary" id="btnStart">Avvia sessione (mic + HUD)</button>
         <button class="danger" id="btnStop" disabled>Stop</button>
         <button id="btnForceListen" disabled>Force Listen</button>
+        <button id="btnForceSpeak" disabled title="Al prossimo chunk il controllore sostituisce <|listen|> con <|speak|>: l'omni apre un turno e decide lui cosa dire (legge lo schermo)">Parla ora (force_speak)</button>
+        <button id="btnCue" disabled title="Al prossimo chunk manda nel canale del cliente il clip static/hud/cues/cue.wav (se c'e') al posto del microfono: stimolo acustico">Stimolo audio</button>
         <span class="small">chunk inviati: <b id="chunks">0</b> · frame inviati: <b id="framesSent">0</b></span>
       </div>
     </div>

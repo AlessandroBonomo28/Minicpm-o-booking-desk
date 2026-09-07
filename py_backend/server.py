@@ -117,6 +117,7 @@ def _result_metrics(result: Any, base: Optional[Dict[str, Any]] = None) -> Dict[
         ("cost_token2wav_ms", "cost_token2wav_ms"),
         ("n_tokens", "n_tokens"),
         ("n_tts_tokens", "n_tts_tokens"),
+        ("forced_speak", "forced_speak"),
     ):
         value = getattr(result, attr, None)
         if value is not None:
@@ -417,6 +418,7 @@ class BackendProtocolSession:
             decoded_frames = decode_frame_base64_list(_extract_frame_base64_list(payload))
             hints = _first_dict(payload.get("hints"))
             force_listen = bool(_coalesce(payload.get("force_listen"), hints.get("force_listen"), default=False))
+            force_speak = bool(_coalesce(payload.get("force_speak"), hints.get("force_speak"), default=False)) and not force_listen
             max_slice_nums = int(_coalesce(payload.get("max_slice_nums"), hints.get("max_slice_nums"), default=1))
 
             t0 = time.perf_counter()
@@ -429,7 +431,7 @@ class BackendProtocolSession:
                     max_slice_nums=max_slice_nums,
                 )
                 prefill_ms = (time.perf_counter() - prefill_t0) * 1000
-                result = self.backend.duplex_generate(force_listen=force_listen)
+                result = self.backend.duplex_generate(force_listen=force_listen, force_speak=force_speak)
                 return result, prefill_ms, prefill_result, self._safe_metrics()
 
             result, prefill_ms, prefill_result, backend_metrics = await asyncio.to_thread(_duplex_step)

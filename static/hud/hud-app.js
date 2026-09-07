@@ -367,7 +367,7 @@ async function loadRefAudio() {
 
 function setRunning(on) {
     running = on;
-    $('btnStart').disabled = on; $('btnStop').disabled = !on; $('btnForceListen').disabled = !on;
+    $('btnStart').disabled = on; $('btnStop').disabled = !on; $('btnForceListen').disabled = !on; $('btnForceSpeak').disabled = !on; $('btnCue').disabled = !on;
     $('btnFrame').disabled = !on;
     $('lamp').className = 'lamp' + (on ? ' on' : ''); $('stateText').textContent = on ? 'sessione attiva' : 'disconnesso';
 }
@@ -451,7 +451,18 @@ async function startSessionInner() {
             const turns = new TurnDetector((utterance, speechMs, ctxSec) => onUserTurnEnd(utterance, speechMs, ctxSec),
                                            (audio, speechMs, ctxSec) => onUserPause(audio, speechMs, ctxSec), () => { if (speculative) speculative.stale = true; });
             mic = new MicCapture((audioF32) => {
+                if (cueOnce && cueSamples) {   // stimolo acustico: il clip prende il posto del microfono per questo chunk
+                    cueOnce = false; const mixed = new Float32Array(audioF32.length);
+                    mixed.set(cueSamples.subarray(0, Math.min(cueSamples.length, mixed.length)));
+                    audioF32 = mixed; hudLog('warn', `STIMOLO AUDIO inviato con il chunk #${sess.chunksSent + 1}`);
+                }
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
+                if (forceSpeakOnce) {
+                    forceSpeakOnce = false; msg.force_speak = true; forceSpeakSentAt = now();
+                    const chunkNo = sess.chunksSent + 1, sentAt = forceSpeakSentAt;
+                    hudLog('warn', `FORCE_SPEAK inviato con il chunk #${chunkNo} (schermo: ${hud.lastText || ''})`);
+                    setTimeout(() => hudLog(omniSpokeAt > sentAt ? 'hud' : 'warn', `FORCE_SPEAK #${chunkNo} → ${omniSpokeAt > sentAt ? 'turno aperto a +' + (omniSpokeAt - sentAt).toFixed(1) + ' s' : 'NESSUN TESTO entro 3 s (turno vuoto o ignorato)'}`), 3000);
+                }
                 // lampeggio: costante (un frame per chunk, banner alternato) oppure solo 4 frame al cambio di livello
                 if (!hud.pendingFrame && ($('blinkAlways').checked || blinkLeft > 0)) { blinkPhase++; if (blinkLeft > 0) blinkLeft--; hudSync(true); }
                 if (hud.pendingFrame) {
@@ -606,6 +617,22 @@ async function checkToolAgent() {
 $('btnStart').onclick = startSession;
 $('btnStop').onclick = stopSession;
 $('btnForceListen').onclick = () => session && session.toggleForceListen();
+// ramo force-speak: un turno di parlato a comando. Il flag viene consumato dal prossimo chunk audio (entro 1 s).
+let forceSpeakOnce = false, cueOnce = false, cueSamples = null, forceSpeakSentAt = -1;
+$('btnForceSpeak').onclick = () => { forceSpeakOnce = true; hudLog('warn', 'FORCE_SPEAK richiesto: parte col prossimo chunk'); };
+$('btnCue').onclick = async () => {
+    if (!cueSamples) {
+        try {
+            const r = await fetch('/static/hud/cues/cue.wav', { cache: 'no-store' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR_IN });
+            const buf = await ac.decodeAudioData(await r.arrayBuffer());
+            cueSamples = buf.getChannelData(0).slice(0, SR_IN);   // al massimo 1 s = un chunk
+            hudLog('sys', `clip stimolo caricato: ${(buf.duration).toFixed(2)} s`);
+        } catch (e) { hudLog('warn', 'stimolo audio: manca static/hud/cues/cue.wav (' + e.message + ')'); return; }
+    }
+    cueOnce = true; hudLog('warn', 'STIMOLO AUDIO richiesto: parte col prossimo chunk al posto del microfono');
+};
 $('btnQuery').onclick = manualRequest;
 $('btnReset').onclick = fsmReset;
 $('btnFrame').onclick = () => hudSync(true);

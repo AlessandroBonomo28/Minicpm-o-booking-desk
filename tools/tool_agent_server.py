@@ -53,8 +53,8 @@ DEFAULT_TOOLS = [
 #      cancel = abbandono. Nessuna chiamata = nulla. "yes, at 3 pm" = set(time) + nuova conferma (yes non porta valori).
 # Formato CANONICO in uscita dal modello (ramo hud-semaforo-fixrules): il modello normalizza il linguaggio, il gateway verifica.
 _FIELDS = {"month": {"type": ["string", "null"], "description": "month as an English month name in lowercase ('april'); null if not said"},
-           "day": {"type": ["string", "null"], "description": "day of the month as a plain number 1-31 ('2', '30'): convert 'the second' -> '2', '28th' -> '28'; 'any' if the customer asks about any day / the whole month; null if not said"},
-           "time": {"type": ["string", "null"], "description": "time in 24h HH:MM ('15:00', '09:30'): convert '3 p.m.' -> '15:00', 'half past ten' -> '10:30', 'nine' -> '09:00' (1-7 without am/pm = afternoon); null if not said"}}
+           "day": {"type": ["string", "null"], "description": "day of the month as a plain number 1-31 ('2', '30'): convert 'the second' -> '2', '28th' -> '28'; 'any' if the customer asks about any day / the whole month; 'pick' if the customer asks the desk to choose the day ('you pick', 'pick one', 'choose for me', 'the first one free'); null if not said"},
+           "time": {"type": ["string", "null"], "description": "time in 24h HH:MM ('15:00', '09:30'): convert '3 p.m.' -> '15:00', 'half past ten' -> '10:30', 'nine' -> '09:00' (1-7 without am/pm = afternoon); 'any' if the customer asks about any time / the whole day; 'pick' if the customer asks the desk to choose the time ('you pick the time', 'whatever is free'); null if not said"}}
 def _fn(name, desc, props=None, required=None):
     return {"type": "function", "function": {"name": name, "description": desc,
             "parameters": {"type": "object", "properties": props or {}, "required": required or []}}}
@@ -94,12 +94,13 @@ SIGMA_TOOL = _fn("verdict", "Your verdict on the OPERATOR's situation right now.
                   "status": {"type": "string", "enum": ["ok", "stuck"],
                              "description": "stuck = the operator needs help NOW. ok = the conversation is proceeding (small talk is ok; waiting after a customer filler like 'um' is ok)"},
                   "kind": {"type": ["string", "null"], "enum": ["silent", "off_context", "repeating", "ignores_screen", "false_claim", "cannot_do", None],
-                           "description": "silent = the customer's last line needed an answer (a question, a request, a value) and the operator has not answered; off_context = the operator talks about something that is not this booking (another product, a car when the customer books a call); repeating = it asks again what it already asked and the customer already answered; ignores_screen = it does not ask for what the SCREEN marks MISSING, does not read a result the SCREEN shows, or does not follow the HELP it was given; false_claim = it announces a booking the SCREEN does not show as BOOKED, an availability the SCREEN contradicts (a day or time the SCREEN shows as booked, taken or full), or an action ('I'll check the whole month') the system is not doing; proposing a free day or time is NOT a false claim; cannot_do = the customer asked something the system CANNOT do (see CAPABILITIES) and the operator did not say so"},
+                           "description": "silent = the customer's last line needed an answer (a question, a request, a value) and the operator has not answered; off_context = the operator talks about something that is not this booking (another product, a car when the customer books a call); repeating = it asks again what it already asked and the customer already answered, or (while still speaking) it repeats its own sentences or enumerates day after day / hour after hour; ignores_screen = it does not ask for what the SCREEN marks MISSING, does not read a result the SCREEN shows, or does not follow the HELP it was given; false_claim = it announces a booking the SCREEN does not show as BOOKED, an availability the SCREEN contradicts (a day or time the SCREEN shows as booked, taken or full), or an action ('I'll check the whole month') the system is not doing; proposing a free day or time is NOT a false claim; cannot_do = the customer asked something the system CANNOT do (see CAPABILITIES) and the operator did not say so"},
                   "help": {"type": ["string", "null"], "description": "ONLY if stuck: the exact sentence the operator should say to the customer now, first person, natural, max 14 words, using only facts on the SCREEN and the CAPABILITIES; never an instruction to the operator (it is read aloud as is). E.g. 'Which day in April would you like?', 'April 3rd is free except 6 pm. Shall I book it?', 'I can book one slot at a time. Which day?', 'Sorry, 3 pm on that day is taken.'; null otherwise"}},
                  ["status"])   # claim_month: flash-lite non lo compila (misurato 08/09, anche se obbligatorio): il gateway lo ricava dal testo del turno
 SIGMA_CAPABILITIES = ("CAPABILITIES of the booking system (the SCREEN is its state): it can tell whether ONE day or ONE time slot is free; "
                       "it can show which days of a month are booked (when the month is known and the day is missing); it can book ONE slot "
-                      "(month + day + time) only after the customer says yes; it can cancel the request. It CANNOT: book several slots or "
+                      "(month + day + time) only after the customer says yes; it can choose a free day or a free time itself when the customer asks the "
+                      "desk to pick (the SCREEN then shows the proposal with a question mark); it can cancel the request. It CANNOT: book several slots or "
                       "recurring bookings, search across months, handle names, rooms, services, prices or payments, or anything outside "
                       "this booking. The operator must never announce an action the system is not doing: the SCREEN shows what it does.")
 SIGMA_PROMPT = ("You are the SUPERVISOR of a voice booking desk. A small speech model, the OPERATOR, talks with the CUSTOMER and reads "
@@ -108,6 +109,10 @@ SIGMA_PROMPT = ("You are the SUPERVISOR of a voice booking desk. A small speech 
                 "cannot_do. If HELP was given before this turn and the operator's turn does not follow it, it is still stuck "
                 "(ignores_screen) with the same or a shorter help. The help is spoken to the customer word for word: write it as the operator's "
                 "own sentence, never as an order to the operator. " + SIGMA_CAPABILITIES + " "
+                "When REASON is mid_turn, the operator is STILL SPEAKING and you see its turn so far and how long it has lasted: it is stuck "
+                "(kind repeating) if it repeats its own sentences, enumerates days or times one after another beyond the SCREEN's own line, or "
+                "has spoken for more than 15 s without asking the customer anything; reading the SCREEN's line once, or a normal answer of a few "
+                "sentences, is ok. The help is what it should say next, in one short sentence. "
                 "When REASON is no_reply, the operator has said nothing since the customer's last line: if that line is a question, a "
                 "request, a value, or a direct address ('are you there?', 'hello?', 'so?'), it is stuck (kind silent) and help says what to "
                 "answer from the SCREEN; only a filler ('um', 'hmm', 'ok', 'yeah') with nothing to answer is ok. "
@@ -126,8 +131,10 @@ def decide_sigma(operator_text, fsm, transcript, screen, reason, timing, previou
     state_line = fsm_line_v2(fsm) if isinstance(fsm, dict) else "STATE: unknown"
     t = timing or {}
     tline = (f"TIMING: the customer's last line was {t.get('since_user_s', '?')} s ago; the operator is {'speaking now' if t.get('omni_speaking') else 'silent'}; "
-             f"its last turn ended {t.get('since_omni_s', '?')} s ago.")
+             f"its last turn ended {t.get('since_omni_s', '?')} s ago." + (f" The current turn has lasted {t.get('turn_s')} s so far and is not finished." if reason == "mid_turn" else ""))
     last = operator_text or ("(no operator turn since the customer's last line)" if reason == "no_reply" else "(silence)")
+    if reason == "mid_turn":
+        last = "(STILL SPEAKING, turn so far) " + (operator_text or "(nothing yet)")
     hline = f"HELP GIVEN TO THE OPERATOR BEFORE THIS TURN: {previous_help}\n" if previous_help else ""
     user = (f"SCREEN (what the operator sees now): {screen or '?'}\n{state_line}\n{tline}\n{hline}\nCONVERSATION (oldest first):\n{convo}\n\n"
             f"OPERATOR'S LAST TURN: {last}\nREASON FOR THIS CHECK: {reason or 'turn_end'}\n\nCall verdict().")
@@ -197,7 +204,9 @@ PROMPT_API_V2 = ("You are the request extractor of a voice booking desk (OPERATO
                  "STATE says is being asked. Relative dates ('the next day', 'the day after') are resolved only from a date said in the conversation; 'tomorrow' or 'next week' without a reference: pass nothing for the date.\n"
                  "Asking what is free ('when is it free?', 'what's the next free slot?', 'anything else that day?') = set with intent check "
                  "and no values (the desk keeps the date it already has). If the customer WIDENS the request ('the whole month', 'any day', "
-                 "'all of April', 'any time', 'the whole day'), pass day: 'any' (or time: 'any'): the desk drops that value.\n"
+                 "'all of April', 'any time', 'the whole day'), pass day: 'any' (or time: 'any'): the desk drops that value. If the customer "
+                 "DELEGATES the choice to the desk ('you pick', 'pick one randomly', 'choose for me', 'the first one you have', 'I don't mind, "
+                 "you decide'), pass day: 'pick' (or time: 'pick'): the desk will propose one itself.\n"
                  "yes / no = a plain answer to the desk's open yes/no question quoted in STATE. yes ONLY if the customer accepts exactly "
                  "what the question offers; a question, a doubt, a request to verify ('did you check?', 'is it really free?', 'which one?') "
                  "or a comment is NOT a yes and NOT a value: no function. If the customer answers yes but also changes a value ('yes, at 3 pm'), "
@@ -441,7 +450,7 @@ def decide(transcript, _tools_unused, fsm=None, context=0):
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 args[k] = str(int(v))
             elif isinstance(v, str) and v.strip().lower() not in _EMPTY:
-                if k == "time" and not re.search(r"\d|noon|midnight|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|half|quarter", v.lower()):
+                if k == "time" and v.strip().lower() not in ("any", "pick") and not re.search(r"\d|noon|midnight|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|half|quarter", v.lower()):
                     continue
                 args[k] = v.strip()
         calls.append({"name": name, "arguments": args})

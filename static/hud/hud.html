@@ -84,6 +84,8 @@
         <input type="checkbox" id="blinkAlways" checked> <span class="small">banner del semaforo <b>sempre</b> lampeggiante (un frame per chunk, banner pieno/bianco alternati); senza spunta lampeggia solo 4 frame al cambio di livello</span></div>
       <div class="row"><label>Secondo orecchio</label>
         <input type="checkbox" id="heardOn" checked> <span class="small"><b>σ stuck detector</b>: a fine turno dell'omni e 3 s dopo una tua battuta senza risposta; vede conversazione, schermo, stato e tempi; readback → tentativi, claim verificati sul DB (rosso); <b>stuck</b> (silenzio, fuori contesto, ripete, ignora lo schermo, annuncio falso) → giallo con l'aiuto sullo schermo + force_speak</span></div>
+      <div class="row"><label>σ in corsa</label>
+        <input type="checkbox" id="midTurnOn" checked> <span class="small"><b>taglio dei turni degenerati</b> (08/09): a 10 s di turno aperto, poi ogni 8 s, σ vede il testo parziale; <b>stuck</b> (ripete, elenca, va avanti da solo) → <code>force_listen</code> per un chunk (il modello chiude il turno con <code>&lt;|turn_eos|&gt;</code>, audio fermato) → aiuto sullo schermo + force_speak come a fine turno; max 3 tagli per battuta del cliente</span></div>
       <div class="row"><label>Frame iniziale</label>
         <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
       <div class="row"><label>Frame manuale</label><button id="btnFrame" disabled>Invia il frame corrente ora</button></div>

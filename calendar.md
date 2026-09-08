@@ -397,3 +397,8 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   `plan/sessioni/sess_f229adaaa73a-loop.md`): non la regola nuova ma un turno degenerato di 46 s ("the 16th is available. Okay, let me
   check again...") con `<|speak|>` a ogni secondo e nessuno che lo fermi: σ agisce solo a fine turno. Proposte: σ in corsa + taglio con
   `force_listen`, barge-in garantito, "scegli tu" come capacità della macchina. Registro: testo completo dei turni.
+- 08/09 (sera, 2) — **σ in corsa + taglio, "scegli tu"** (approvati: "vai 1 e 3"). A 10 s di turno aperto e poi ogni 8 s σ giudica il testo
+  parziale; stuck → `force_listen` per un chunk (il modello chiude il turno con `<|turn_eos|>`), audio fermato, aiuto + force_speak
+  come a fine turno, max 3 tagli per battuta. "Pick one" → evento `pick`: la macchina propone il primo giorno / la prima ora libera,
+  `no` → il prossimo, sì → solido; una proposta che completa il record va dritta al risultato con i marchi. Replay 59/59, sonde
+  20/20 (σ a turno aperto 4/4, pick 4/4), API viva. Predizioni P8–P11 in `plan/sessioni/betagamma-predizioni.md`. Da provare dal vivo.

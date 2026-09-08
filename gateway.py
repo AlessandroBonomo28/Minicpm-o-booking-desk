@@ -22,6 +22,7 @@ import time
 import threading
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import calendar as _calmod
 from contextlib import asynccontextmanager
 from urllib.parse import urlencode
 
@@ -1067,7 +1068,7 @@ def _hud_month_info(month: str):
 
 def _hud_fsm_reset(note: str = ""):
     _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots=dict(_HUD_EMPTY_SLOTS), missing=[], rejected={}, tentative={}, note=note,
-                          month_info=None, stuck_count=0, unbound_yes=None, updated=datetime.now().isoformat(timespec="seconds"))
+                          month_info=None, stuck_count=0, unbound_yes=None, pick=[], pick_skip={}, updated=datetime.now().isoformat(timespec="seconds"))
     _hud_db_save()
     return _HUD_DB["fsm"]
 
@@ -1144,10 +1145,37 @@ def _hud_same_record(cur: dict, new: dict) -> bool:
         return False
     if {k for k, v in (cur.get("tentative") or {}).items() if v} != {k for k, v in (new.get("tentative") or {}).items() if v}:
         return False
+    if sorted(cur.get("pick") or []) != sorted(new.get("pick") or []):
+        return False   # "scegli tu" e' un fatto nuovo anche a campi uguali
     a, b = cur.get("slots") or {}, new.get("slots") or {}
     if any((a.get(k) or "") != (b.get(k) or "") for k in ("month", "day")):
         return False
     return _hud_norm_time(a.get("time") or "") == _hud_norm_time(b.get("time") or "")
+
+
+_HUD_PICK_WORDS = ("pick", "you pick", "choose", "you choose", "your choice", "pick one", "first free", "first available", "whatever", "surprise me")
+
+
+def _hud_pick_fill(intent: str, slots: dict, pick, skip: dict):
+    """"Scegli tu" (08/09, proposta 3): la MACCHINA propone il primo giorno / la prima ora libera per i campi delegati e mancanti,
+    saltando cio' che il cliente ha gia' rifiutato (skip). Ritorna i campi riempiti (entrano come tentativi "proposal")."""
+    filled = []
+    if "day" in pick and slots.get("month") and not slots.get("day") and slots["month"] in _MONTHS:
+        mi = _hud_month_info(slots["month"]) or {}
+        ndays = _calmod.monthrange(2026, _MONTHS.index(slots["month"]) + 1)[1]
+        skipped = {int(x) for x in (skip.get("day") or []) if str(x).isdigit()}
+        cand = [d for d in range(1, ndays + 1) if d not in skipped]
+        free = [d for d in cand if d not in mi.get("booked_days", [])] or [d for d in cand if d not in mi.get("full_days", [])]
+        if free:
+            slots["day"] = str(free[0]); filled.append("day")
+    if "time" in pick and intent == "book" and slots.get("month") and slots.get("day") and not slots.get("time"):
+        date = f"{slots['month']} {slots['day']}"; skipped = set(skip.get("time") or [])
+        for h in range(9, 19):   # orario dello sportello: 9-18, a ore piene
+            t = f"{h:02d}:00"
+            if t not in skipped and _hud_lookup(date, t)[0] == "available":
+                slots["time"] = t; slots["time_raw"] = t; filled.append("time"); break
+    slots["date"] = f"{slots['month']} {slots['day']}" if slots.get("month") and slots.get("day") else ""
+    return filled
 
 
 def _hud_recent(ts, seconds: float) -> bool:
@@ -1193,6 +1221,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     if name == "yes" and any_said:
         name = "set"   # "yes, at 3 pm" = correzione + nuova conferma: yes non porta valori
     tentative = dict(fsm.get("tentative") or {})
+    pick = list(fsm.get("pick") or []); pick_skip = {k: list(v) for k, v in (fsm.get("pick_skip") or {}).items()}
     _solidified = False; _proposal_confirm = False
     if name in ("heard", "sigma"):
         # secondo orecchio: solo in raccolta, solo campi MANCANTI, mai sopra un valore del cliente; il campo diventa TENTATIVO.
@@ -1236,8 +1265,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
             if re.fullmatch(r"([1-9]|[12]\d|3[01])", d): slots["day"] = d; filled.append("day")
         if said["time"] and (not slots.get("time") or replace("time")) and "time" in _HUD_REQUIRED[fsm.get("intent") or "check"]:
             if _hud_time_valid(_hud_norm_time(said["time"]), fsm.get("intent") or "check"): slots["time"] = said["time"]; slots["time_raw"] = said["time"]; filled.append("time")
-        if not filled:
-            _hud_db_save(); return fsm, False
+        if not filled or all(slots.get(k) == ref.get(k) and (fsm.get("tentative") or {}).get(k) == mark for k in filled):
+            _hud_db_save(); return fsm, False   # niente di nuovo (es. l'omni legge la proposta gia' sullo schermo)
         for k in filled: tentative[k] = mark   # True = readback dell'operatore; "proposal" = proposta verificata libera
         slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
         missing = [k for k in _HUD_REQUIRED[fsm["intent"]] if not slots.get(k)]
@@ -1245,10 +1274,10 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
             # corsa: il si' del cliente era arrivato PRIMA del verdetto di σ sulla proposta -> lo lega adesso (i tentativi diventano solidi)
             fsm["unbound_yes"] = None; tentative = {}
             intent = fsm["intent"]; name = "set"; args = {}; said = {k: "" for k in said}; any_said = False; _solidified = True
-        elif proposal and not missing and fsm["intent"] == "book":
-            # la proposta completa la prenotazione: e' l'offerta dello sportello, si va dritti alla conferma (schermo
-            # "APRIL 15, 3 PM / FREE / SHALL I BOOK IT?"): un solo si', che resta l'unico evento che scrive. I marchi restano
-            # sul record cosi' il no toglie i campi proposti invece di azzerare la richiesta.
+        elif proposal and not missing:
+            # la proposta completa il record: e' l'offerta dello sportello, si va dritti al risultato (prenotazione: "APRIL 15, 3 PM /
+            # FREE / SHALL I BOOK IT?", un solo si', che resta l'unico evento che scrive; verifica: "APRIL 15, ALL DAY / FREE / WHAT
+            # TIME?"). I marchi restano sul record cosi' il no toglie i campi proposti invece di chiudere o azzerare la richiesta.
             intent = fsm["intent"]; name = "set"; args = {}; said = {k: "" for k in said}; any_said = False; _solidified = True; _proposal_confirm = True
         else:
             return bump(state="COLLECTING", slots=slots, missing=missing, tentative=tentative, rejected={}, status=None, detail="", note="",
@@ -1257,33 +1286,49 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         # conferma a livello di campo dei valori tentativi (CONFIRM: MONTH sullo schermo)
         slots = dict(_HUD_EMPTY_SLOTS, **ref)
         if name == "no":
-            for k in list(tentative): slots[k] = ""; slots["time_raw"] = "" if k == "time" else slots.get("time_raw", "")
+            for k in list(tentative):
+                if k in pick: pick_skip.setdefault(k, []).append(slots.get(k))   # delega: questo no lo salta, si propone il prossimo
+                slots[k] = ""; slots["time_raw"] = "" if k == "time" else slots.get("time_raw", "")
             slots["date"] = ""
+            picked = _hud_pick_fill(fsm["intent"], slots, pick, pick_skip); tentative = {k: "proposal" for k in picked}
             missing = [k for k in _HUD_REQUIRED[fsm["intent"]] if not slots.get(k)]
-            return bump(state="COLLECTING", slots=slots, missing=missing, tentative={}, rejected={}, status=None, detail="", note="",
-                        month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
-        tentative = {}   # yes: i tentativi diventano solidi; si prosegue come dopo un set completo
-        intent = fsm["intent"]; name = "set"; args = {}; said = {k: "" for k in said}; any_said = False
-        _solidified = True
+            if picked and not missing:
+                intent = fsm["intent"]; name = "set"; args = {}; said = {k: "" for k in said}; any_said = False; _solidified = True; _proposal_confirm = True
+            else:
+                return bump(state="COLLECTING", slots=slots, missing=missing, tentative=tentative, rejected={}, status=None, detail="", note="",
+                            pick=pick, pick_skip=pick_skip, month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
+        else:
+            pick = [k for k in pick if k not in tentative]   # yes: il campo delegato e' scelto
+            tentative = {}   # yes: i tentativi diventano solidi; si prosegue come dopo un set completo
+            intent = fsm["intent"]; name = "set"; args = {}; said = {k: "" for k in said}; any_said = False
+            _solidified = True
     if name == "no":
-        if state == "CONFIRM" and fsm.get("intent") == "book":
+        if state == "CONFIRM":
             marks = [k for k, v in (fsm.get("tentative") or {}).items() if v == "proposal"]
             if marks:
-                # (08/09) offerta dello sportello rifiutata: via i campi proposti, la richiesta del cliente resta in raccolta
+                # (08/09) offerta dello sportello rifiutata: via i campi proposti, la richiesta del cliente resta; se il campo era
+                # delegato ("scegli tu") la macchina propone il prossimo e si torna al risultato
+                intent = fsm.get("intent") or "check"
                 slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
                 if ref.get("time") and ref.get("time") != "all-day":
                     slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
                 for k in marks:
+                    if k in pick: pick_skip.setdefault(k, []).append(slots.get(k))
                     slots[k] = ""
                     if k == "time": slots["time_raw"] = ""
-                slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
-                missing = [k for k in _HUD_REQUIRED["book"] if not slots.get(k)]
-                return bump(state="COLLECTING", intent="book", slots=slots, missing=missing, tentative={}, rejected={}, status=None, detail="", note="", free=None,
-                            month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
-            return _hud_fsm_reset(note="BOOKING NOT CONFIRMED"), True
-        if state == "CONFIRM":
-            return bump(state="DONE")
-        _hud_db_save(); return fsm, False
+                picked = _hud_pick_fill(intent, slots, pick, pick_skip); tentative = {k: "proposal" for k in picked}
+                missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
+                if picked and not missing:
+                    name = "set"; args = {}; said = {k: "" for k in said}; any_said = False; _solidified = True; _proposal_confirm = True
+                else:
+                    return bump(state="COLLECTING", intent=intent, slots=slots, missing=missing, tentative=tentative, rejected={}, status=None, detail="", note="", free=None,
+                                pick=pick, pick_skip=pick_skip, month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
+            elif fsm.get("intent") == "book":
+                return _hud_fsm_reset(note="BOOKING NOT CONFIRMED"), True
+            else:
+                return bump(state="DONE")
+        else:
+            _hud_db_save(); return fsm, False
     if name == "yes":
         if state != "CONFIRM":
             if state == "COLLECTING":
@@ -1291,6 +1336,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
             _hud_db_save(); return fsm, False   # nessuna domanda si'/no aperta: il si' non lega a niente
         # l'UNICO evento che scrive: conferma la prenotazione in sospeso o accetta l'offerta (se manca l'ora la si chiede)
         intent = "book"; confirmed = True
+        pick = [k for k in pick if not (fsm.get("tentative") or {}).get(k)]   # il campo proposto e accettato non e' piu' delegato
         slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
         if ref.get("time") and ref.get("time") != "all-day":
             slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
@@ -1310,15 +1356,21 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
                 slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
         else:
             intent = said_intent if said_intent in ("book", "check") else "check"   # richiesta nuova; un valore senza intento = verifica
-            slots = dict(_HUD_EMPTY_SLOTS)
+            slots = dict(_HUD_EMPTY_SLOTS); pick = []; pick_skip = {}
     else:
         _hud_db_save(); return fsm, False
 
     rejected = {}
     # 'any' / 'all' / 'whole' (07/09): il cliente ALLARGA la richiesta ("the whole month", "any time"): il campo si svuota
     for k in ("day", "time"):
-        if clean(args.get(k)).lower().replace("-", " ") in ("any", "all", "whole", "every", "any day", "any time", "all day", "whole day", "whole month", "all month"):
-            slots[k] = ""; args[k] = None; tentative.pop(k, None)   # anche una proposta pendente sul campo e' superata
+        v = clean(args.get(k)).lower().replace("-", " ")
+        if v in ("any", "all", "whole", "every", "any day", "any time", "all day", "whole day", "whole month", "all month"):
+            slots[k] = ""; args[k] = None; tentative.pop(k, None); pick = [x for x in pick if x != k]   # anche una proposta pendente sul campo e' superata
+            if k == "time": slots["time_raw"] = ""
+        elif v in _HUD_PICK_WORDS:
+            # "scegli tu" (08/09): il cliente DELEGA la scelta: il campo si svuota e la macchina lo propone lei (primo libero)
+            slots[k] = ""; args[k] = None; tentative.pop(k, None); pick_skip.pop(k, None)
+            if k not in pick: pick.append(k)
             if k == "time": slots["time_raw"] = ""
     # un solo numero nella battuta non puo' essere insieme giorno E ora ("the 2nd" -> day='the 2nd', time='2')
     if user_text and clean(args.get("day")) and clean(args.get("time")):
@@ -1346,8 +1398,9 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
             if m: slots["month"] = m
             if d: slots["day"] = d
     for k in ("month", "day", "time"):
-        if clean(args.get(k)) and k in tentative:
-            tentative.pop(k)   # il cliente dice il valore: il tentativo dell'operatore e' superato (il cliente vince)
+        if clean(args.get(k)):
+            tentative.pop(k, None)   # il cliente dice il valore: il tentativo dell'operatore e' superato (il cliente vince)
+            pick = [x for x in pick if x != k]
     if clean(args.get("month")):
         m = _hud_norm_date(clean(args["month"]))
         if m in _MONTHS: slots["month"] = m
@@ -1364,12 +1417,18 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         _route_bare_number(user_text)   # il modello non ha estratto nulla ma la battuta era un numero secco
     slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
+    if pick and not rejected and state != "CONFIRM":
+        picked = _hud_pick_fill(intent, slots, pick, pick_skip)   # "scegli tu": la macchina propone (tentativo "proposal")
+        for k in picked: tentative[k] = "proposal"
+        missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
+        if picked and not missing:
+            _proposal_confirm = True   # la proposta completa il record: risultato diretto, i marchi restano per il no
     if "time" in rejected and "time" not in missing:
         missing.append("time")
     if missing:
         # ramo hud-semaforo: i tentativi (heard) NON bloccano; la conferma finale (con i valori) li copre
         new = dict(state="COLLECTING", intent=intent, slots=slots, missing=missing, rejected=rejected, tentative=tentative, status=None, detail="", note="", free=None,
-                   month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
+                   pick=pick, pick_skip=pick_skip, month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
         if _hud_same_record(fsm, new):
             _hud_db_save(); return fsm, False   # idempotenza: stesso record = evento nullo
         return bump(**new)
@@ -1393,7 +1452,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     free = None
     new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] == "pending" else "DONE"
     new = dict(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative=(tentative if _proposal_confirm and new_state == "CONFIRM" else {}),
-               status=res["status"], detail=res.get("detail") or "", note="", free=free, month_info=None)
+               status=res["status"], detail=res.get("detail") or "", note="", free=free, month_info=None, pick=pick, pick_skip=pick_skip)
     if _hud_same_record(fsm, new):
         _hud_db_save(); return fsm, False   # idempotenza: stesso record = evento nullo (il rosso resta)
     return bump(**new)
@@ -1496,7 +1555,7 @@ async def hud_fsm_omni_turn(request: Request):
         # verdetto su uno stato che nel frattempo e' cambiato: non si applica (con force_speak un giallo stantio verrebbe letto, non solo dipinto)
         return JSONResponse(content={"fsm": cur, "changed": False, "level": cur.get("level") or "green", "hint": cur.get("hint") or "", "stale": True})
     applied = False   # il verdetto ha cambiato il RECORD (proposta o readback entrati): distinto dal cambio di semaforo
-    if calls and reason != "no_reply":
+    if calls and reason not in ("no_reply", "cut"):   # turno tagliato (σ in corsa): il verdetto vale per il semaforo, non per il record
         _, applied = _hud_fsm_apply(calls, "", body.get("outcome") or "auto", body.get("source") or "heard", body.get("delay_s"))
     changed = applied
     fsm = _HUD_DB.get("fsm") or _hud_fsm_reset()

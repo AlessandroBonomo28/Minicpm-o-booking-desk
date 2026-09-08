@@ -58,3 +58,35 @@ Sette segnalazioni valide, tutte sullo stesso asse (la proposta dell'operatore n
 Trovato dal vivo e corretto: in `omni_turn` avevo confuso "record cambiato" con "semaforo cambiato": un giallo puro non avrebbe piu' forzato.
 Banco: replay 42/42, sonde 12/12, API viva: giallo puro -> force; proposta entrata con σ stuck -> verde, niente force; annuncio falso -> rosso + force.
 P7 cambia: proposta d'ora libera con giorno noto -> `SHALL I BOOK IT?` subito, il si' scrive. Non presa: alternativa dopo TAKEN (bug #2, da decidere).
+
+## Fase 2 (08/09 sera, approvata da Alessandro: "vai 1 e 3"): σ in corsa + taglio, "scegli tu"
+Causa (sess_f229adaaa73a): un turno degenerato (46 s, `<|speak|>` a ogni secondo) non ha nessuno che lo fermi, e "pick one randomly"
+non è un evento della macchina. Due variabili nuove, misurabili a banco:
+1. **σ in corsa + taglio** (client `midTurnCheck`, checkbox "σ in corsa", default ON): a 10 s di turno aperto e poi ogni 8 s, σ riceve il
+   testo parziale (`reason: mid_turn`, `turn_s`); stuck → `force_listen` sul chunk successivo (nel modello: `<|turn_eos|>` + listen +
+   reset TTS, cioè il turno si chiude pulito), audio fermato subito, poi a turno chiuso il verdetto del taglio va al semaforo con
+   `reason: cut` (mai readback né claim nel record) → giallo con l'aiuto + force_speak con le guardie di sempre (un aiuto per battuta,
+   6 s, tetto 2 per stato). Max 3 tagli per battuta del cliente. Sonde σ mid_turn 4/4: elenca → stuck, ripete → stuck, legge la riga
+   dello schermo una volta → ok, risposta normale → ok.
+2. **"Scegli tu"** (estrattore `day: 'pick'` / `time: 'pick'`; gateway `_hud_pick_fill`): la macchina propone il primo giorno senza
+   prenotazioni (poi il primo non pieno) / la prima ora libera tra le 9 e le 18; entra come tentativo `proposal` (schermo
+   `BOOK: APRIL 4?` / `DOES THAT WORK?`); `no` → il prossimo (il rifiutato è saltato); sì → solido; un valore del cliente o `any`
+   chiude la delega; se il record si completa si va dritti al risultato (`APRIL 5, 9 AM / FREE / SHALL I BOOK IT?`, oppure per una
+   verifica `APRIL 4, ALL DAY / FREE / WHAT TIME?`) con i marchi, così il `no` propone il successivo. L'omni che legge la proposta
+   della macchina non produce un frame nuovo (stesso valore, stesso marchio). Estrattore: "pick one randomly", "I don't mind, you
+   choose", "you pick the time" → pick; "when is it free?" resta una verifica (4/4).
+Banco: replay 59/59 (`tools/fsm_replay_test.py`), sonde 20/20 (`tools/sigma_probe.py`), API viva: pick 4 → no → 5 → sì → pick ora 9:00
+in conferma; turno tagliato → giallo con l'aiuto + force, record invariato.
+
+### Predizioni (stesso copione della run in loop: book, April, "when is it free", "I don't know", "pick one randomly")
+- P8. Un turno che elenca i giorni o si ripete viene tagliato a ~11 s (σ ~1 s + il chunk): l'audio si ferma, il turno si chiude,
+  sullo schermo l'aiuto di σ, force_speak entro 1,5 s se in questa battuta non c'è già stato un force. Il turno 1 della run (lettura
+  della riga in 12 s) è al margine: la sonda lo dà ok se legge la riga una volta e chiede il giorno.
+- P9 (rischio). Dopo il taglio il turno forzato può riprendere il ciclo (il KV lo contiene ancora): σ taglia di nuovo (max 3 per
+  battuta) e poi tace; la tua battuta successiva riparte pulita.
+- P10. "pick one randomly" → `BOOK: APRIL 4?` / `DOES THAT WORK?` entro ~1,5 s (il 4 è il primo giorno senza prenotazioni nel DB
+  vivo) → l'omni lo legge → sì → `WHAT TIME?` → "you pick" → `APRIL 4, 9 AM / FREE / SHALL I BOOK IT?` → sì → `BOOKED`.
+  Un `no` fa passare al 5 (poi 6...) o alle 10 AM: nessun elenco, nessuna invenzione.
+- P11. L'omni che legge "How about April 4th?" non cambia il record (nessun frame nuovo, nessun rosso).
+Falsificazione: il taglio non chiude il turno (il modello riprende senza `<|turn_eos|>`) o l'audio continua; σ taglia un turno sano che
+legge la riga; "pick one" non estratto (none).

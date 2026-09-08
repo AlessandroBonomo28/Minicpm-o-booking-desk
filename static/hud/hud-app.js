@@ -408,7 +408,7 @@ async function startSessionInner() {
     hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false;
     hud.lastContent = null; hud.pendingIsEvent = false; pendingContext = false; instructionActive = ''; clearTimeout(instructionTimer);
     omniTurnOpen = false; lastUserTurnAt = -1; lastForceAt = -100; forceCount = {}; forceLatched = false; holdActive = false; clearTimeout(silenceTimer);
-    lastOmniEndAt = -1; clearTimeout(noReplyTimer); sigmaBusy = false; lastHelp = ''; forcesSinceUser = 0;
+    lastOmniEndAt = -1; clearTimeout(noReplyTimer); sigmaBusy = false; lastHelp = ''; forcesSinceUser = 0; clearTimeout(midTurnTimer); cutChunksLeft = 0; cutVerdict = null; cutsSinceUser = 0;
     await fsmReset();                                // ogni sessione parte da IDLE (le prenotazioni in db.html restano)
     hud.pendingFrame = null; hud.lastHash = null;   // il frame iniziale lo decide la spunta
     t0ms.v = performance.now();
@@ -426,7 +426,7 @@ async function startSessionInner() {
     });
     session.onSystemLog = (t) => conv('sys', t);
     session.onSpeakStart = (text) => {
-        omniSpokeAt = now(); omniTurnOpen = true; clearTimeout(silenceTimer);
+        omniSpokeAt = now(); omniTurnOpen = true; clearTimeout(silenceTimer); armMidTurnCheck(MID_TURN_FIRST_S);
         const el = conv('ai', 'AI: ' + (text || ''));
         el.dataset.prefix = 'AI: ';
         onModelText(text || '');
@@ -435,7 +435,7 @@ async function startSessionInner() {
     session.onSpeakUpdate = (el, text) => { if (el) { el.textContent = ''; el.innerHTML = `<span class="t">${now().toFixed(1)}s</span>`; el.appendChild(document.createTextNode('AI: ' + text)); } onModelText(text || ''); };
     // fine del turno dell'omni: la libreria chiama onSpeakEnd (il modelState 'end_of_turn' delle metriche non arriva mai)
     session.onSpeakEnd = () => {
-        omniTurnOpen = false; lastOmniEndAt = now(); clearInstruction('turno finito');
+        omniTurnOpen = false; lastOmniEndAt = now(); clearInstruction('turno finito'); clearTimeout(midTurnTimer);
         conv('sys', stateLine('fine turno AI'));
         if (currentAiText) {
             const said = currentAiText; currentAiText = '';
@@ -443,7 +443,8 @@ async function startSessionInner() {
             dialog.push({ role: 'assistant', text: said }); if (dialog.length > 40) dialog.shift();
             const forced = forceSpeakSentAt >= 0 && omniSpokeAt >= forceSpeakSentAt && omniSpokeAt - forceSpeakSentAt < 3;
             const informed = lastUserTurnAt >= 0 && omniSpokeAt >= lastUserTurnAt && omniSpokeAt - lastUserTurnAt < 6;   // turno iniziato DOPO la tua battuta: i readback valgono
-            onOperatorTurnEnd(said, forced && !informed);
+            if (cutVerdict) { const v = cutVerdict; cutVerdict = null; cutChunksLeft = 0; onOperatorTurnEnd(said, false, 'cut', v); }
+            else onOperatorTurnEnd(said, forced && !informed);
         }
     };
     session.onListenResult = (r) => { if (r && r.text) conv('sys', 'utente: ' + r.text); };
@@ -508,9 +509,15 @@ async function startSessionInner() {
                     $('frameInfo').textContent = `ultimo frame inviato a ${hud.lastFrameAt.toFixed(1)}s (${$('hudState').textContent})`;
                     hudLog('hud', `FRAME INVIATO (${$('hudState').textContent}) con il chunk #${sess.chunksSent + 1}${isEvent ? ' · EVENTO' : ''}`);
                 }
+                // TAGLIO (σ in corsa): force_listen per un chunk, audio fermato subito
+                if (cutChunksLeft > 0) {
+                    cutChunksLeft--; msg.force_listen = true;
+                    try { sess.audioPlayer.stopAll(); } catch (_) {}
+                    hudLog('warn', `TAGLIO: force_listen sul chunk #${sess.chunksSent + 1} (il modello chiude il turno con <|turn_eos|>)`);
+                }
                 // politica τ: manuale > evento > latch/guardiano
                 let why = '';
-                if (forceSpeakOnce) { forceSpeakOnce = false; why = 'manuale'; }
+                if (forceSpeakOnce && !msg.force_listen) { forceSpeakOnce = false; why = 'manuale'; }
                 else if ($('autoForce').checked && !msg.force_listen) {
                     if (isEvent && (sess.chunksSent + 1) >= 4) {
                         const resultFrame = hud.screen === 'CONFIRM' || hud.screen === 'DONE' || (hud.fsm.level && hud.fsm.level !== 'green');
@@ -605,7 +612,7 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
         }
         const { ok, status, d, dt } = res;
         if (!ok) { hudLog('warn', `estrattore: ${d.error || status}`); return; }
-        if (d.user_text) { lastUserTurnAt = now(); forcesSinceUser = 0; lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 40) dialog.shift(); }
+        if (d.user_text) { lastUserTurnAt = now(); forcesSinceUser = 0; cutsSinceUser = 0; lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 40) dialog.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s${d.asr_model ? ' (' + d.asr_model + ')' : ''} + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
@@ -649,6 +656,42 @@ refreshAsrProfile();
 // Vede conversazione, schermo, stato e tempi; decide ok/stuck. Stuck -> giallo con l'aiuto sullo schermo + force_speak nudo.
 const NO_REPLY_S = 3;
 let lastOmniEndAt = -1, noReplyTimer = null, sigmaBusy = false, lastHelp = '', forcesSinceUser = 0;
+// σ in corsa (08/09, proposta 1): a MID_TURN_FIRST_S di turno aperto e poi ogni MID_TURN_EVERY_S, σ giudica il testo parziale;
+// stuck -> TAGLIO: force_listen per un chunk (il modello chiude il turno con <|turn_eos|>), audio fermato; a turno chiuso il
+// verdetto del taglio va al semaforo (reason 'cut': niente readback ne' claim nel record) -> aiuto + force_speak come sempre.
+const MID_TURN_FIRST_S = 10, MID_TURN_EVERY_S = 8, MAX_CUTS_PER_USER_TURN = 3;
+let midTurnTimer = null, cutChunksLeft = 0, cutVerdict = null, cutsSinceUser = 0;
+function armMidTurnCheck(delayS) {
+    clearTimeout(midTurnTimer);
+    midTurnTimer = setTimeout(midTurnCheck, delayS * 1000);
+}
+async function midTurnCheck() {
+    if (!session || !omniTurnOpen || !$('midTurnOn').checked || !$('heardOn').checked || cutVerdict) return;
+    if (sigmaBusy) { armMidTurnCheck(2); return; }
+    const turnS = +(now() - omniSpokeAt).toFixed(1), partial = currentAiText || '';
+    const seqSeen = hud.fsm.seq || 0;
+    try {
+        sigmaBusy = true;
+        const t0 = performance.now();
+        const timing = { since_user_s: lastUserTurnAt >= 0 ? +(now() - lastUserTurnAt).toFixed(1) : null, since_omni_s: null, omni_speaking: true, turn_s: turnS };
+        const r = await fetch('/api/tool_agent/sigma', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ operator_text: partial, fsm: hud.fsm, transcript: dialog.slice(-40), screen: hud.lastText || '', reason: 'mid_turn', timing, previous_help: lastHelp }) });
+        const d = await r.json(); sigmaBusy = false;
+        const dt = ((performance.now() - t0) / 1000).toFixed(2);
+        if (!r.ok) { hudLog('warn', `σ in corsa: ${d.error || r.status}`); armMidTurnCheck(MID_TURN_EVERY_S); return; }
+        const a = ((d.tool_calls || [])[0] || {}).arguments || null;
+        if (!omniTurnOpen) { hudLog('sys', `σ in corsa (${dt} s, turno di ${turnS} s): il turno si e' chiuso da solo nel frattempo`); return; }
+        if (a && a.status === 'stuck') {
+            if (cutsSinceUser >= MAX_CUTS_PER_USER_TURN) { hudLog('warn', `σ in corsa (${dt} s, turno di ${turnS} s): STUCK ${a.kind || ''} ma tetto di ${MAX_CUTS_PER_USER_TURN} tagli per battuta raggiunto: tocca al cliente`); return; }
+            cutsSinceUser++; cutChunksLeft = 1;
+            cutVerdict = { calls: [{ name: 'sigma', arguments: { status: 'stuck', kind: a.kind || null, help: a.help || null } }], seq: seqSeen, turnS, text: partial };
+            hudLog('warn', `σ in corsa (${dt} s, turno di ${turnS} s): STUCK ${a.kind || ''}${a.help ? ' → "' + a.help + '"' : ''} → TAGLIO: force_listen col prossimo chunk — "${partial.slice(-80)}"`);
+        } else {
+            hudLog('sys', `σ in corsa (${dt} s, turno di ${turnS} s): ok — "${partial.slice(-60)}"`);
+            armMidTurnCheck(MID_TURN_EVERY_S);
+        }
+    } catch (e) { sigmaBusy = false; hudLog('warn', 'σ in corsa errore: ' + e.message); armMidTurnCheck(MID_TURN_EVERY_S); }
+}
 function armNoReplyCheck() {
     clearTimeout(noReplyTimer);
     noReplyTimer = setTimeout(() => {
@@ -656,12 +699,15 @@ function armNoReplyCheck() {
         onOperatorTurnEnd('', false, 'no_reply');
     }, NO_REPLY_S * 1000);
 }
-async function onOperatorTurnEnd(text, forced = false, reason = 'turn_end') {
+async function onOperatorTurnEnd(text, forced = false, reason = 'turn_end', preset = null) {
     let calls = [];
-    const seqSeen = hud.fsm.seq || 0;   // se la FSM cambia mentre σ pensa, il verdetto e' stantio: il gateway lo scarta
+    const seqSeen = preset ? preset.seq : (hud.fsm.seq || 0);   // se la FSM cambia mentre σ pensa, il verdetto e' stantio: il gateway lo scarta
     if (sigmaBusy && reason === 'no_reply') return;
     try {
-        if ($('heardOn').checked) {
+        if (preset) {
+            calls = preset.calls;   // turno TAGLIATO da σ in corsa: il verdetto e' gia' stato dato sul testo parziale
+            hudLog('warn', `turno tagliato dopo ${preset.turnS} s: verdetto di σ in corsa al semaforo (${(preset.calls[0].arguments || {}).kind || ''})`);
+        } else if ($('heardOn').checked) {
             sigmaBusy = true;
             const t0 = performance.now();
             const timing = { since_user_s: lastUserTurnAt >= 0 ? +(now() - lastUserTurnAt).toFixed(1) : null,

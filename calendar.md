@@ -391,3 +391,9 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   azzerato quando la macchina cambia col cliente (causa dello stuck falso a 136 s: flash-lite dà la precedenza all'aiuto sullo
   schermo, misurato); prompt σ: proposta = claim slot_free, ok se libera. Replay locale 22/22 (`tools/fsm_replay_test.py`), sonde
   10/10 (`tools/sigma_probe.py`). Predizioni in `plan/sessioni/betagamma-predizioni.md`. Da provare dal vivo.
+- 08/09 (sera) — Revisione del ramo BETAGAMMA presa in carico (giorno pieno -> rosso, seconda proposta sostituisce, `any`/`no` puliscono,
+  proposta che completa -> conferma diretta con un solo sì, sì arrivato prima del verdetto legato entro 8 s, mese della proposta dal
+  testo, proposta entrata ≠ stuck); replay 42/42, sonde 12/12, API viva verificata. **Run sess_f229adaaa73a in loop** (analisi in
+  `plan/sessioni/sess_f229adaaa73a-loop.md`): non la regola nuova ma un turno degenerato di 46 s ("the 16th is available. Okay, let me
+  check again...") con `<|speak|>` a ogni secondo e nessuno che lo fermi: σ agisce solo a fine turno. Proposte: σ in corsa + taglio con
+  `force_listen`, barge-in garantito, "scegli tu" come capacità della macchina. Registro: testo completo dei turni.

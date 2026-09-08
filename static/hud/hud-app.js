@@ -439,6 +439,7 @@ async function startSessionInner() {
         conv('sys', stateLine('fine turno AI'));
         if (currentAiText) {
             const said = currentAiText; currentAiText = '';
+            runLogPush($('conv'), 'ai', 'AI (turno completo): ' + said);   // solo registro: la riga viva in pagina si aggiorna da sola
             dialog.push({ role: 'assistant', text: said }); if (dialog.length > 40) dialog.shift();
             const forced = forceSpeakSentAt >= 0 && omniSpokeAt >= forceSpeakSentAt && omniSpokeAt - forceSpeakSentAt < 3;
             const informed = lastUserTurnAt >= 0 && omniSpokeAt >= lastUserTurnAt && omniSpokeAt - lastUserTurnAt < 6;   // turno iniziato DOPO la tua battuta: i readback valgono

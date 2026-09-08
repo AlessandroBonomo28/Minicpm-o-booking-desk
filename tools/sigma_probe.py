@@ -22,7 +22,15 @@ def post(path, body):
 SIGMA = [  # (nome, schermo, fsm, conversazione, turno operatore, reason, timing, previous_help, atteso)
     ("proposta = claim slot_free giorno 15, ok", "BOOK: APRIL | WHICH DAY?", COLL_APR, BASE,
      "Okay, let's pick a random day. How about April 15th? Does that work?", "turn_end", {"since_user_s": 2.1, "since_omni_s": 0, "omni_speaking": False}, "",
+     {"status": "ok", "claim": "slot_free", "claim_day": "15"}),   # claim_month: flash-lite non lo compila, lo ricava il gateway dal testo
+    ("mese ancora mancante, 'How about April 15th?' -> claim con mese e giorno, ok", "BOOK: ? | WHICH MONTH?",
+     {"state": "COLLECTING", "intent": "book", "slots": SL(), "missing": ["month", "day", "time"], "tentative": {}},
+     [U("I'd like to book a call."), A("Sure, which month?"), U("I don't know, you pick.")],
+     "Okay. How about April 15th? Does that work for you?", "turn_end", {"since_user_s": 2.0, "since_omni_s": 0, "omni_speaking": False}, "",
      {"status": "ok", "claim": "slot_free", "claim_day": "15"}),
+    ("proposta di un giorno pieno (lo schermo non lo sa): σ ok, lo verifica il DB", "BOOK: APRIL | WHICH DAY?", COLL_APR, BASE,
+     "How about April 1st? Does that work?", "turn_end", {"since_user_s": 2.1, "since_omni_s": 0, "omni_speaking": False}, "",
+     {"status": "ok", "claim": "slot_free", "claim_day": "1"}),
     ("annuncio senza il si' del cliente, con la proposta a schermo -> stuck false_claim", "BOOK: APRIL 15? | DOES THAT WORK?", COLL_PROP,
      BASE + [A("Okay, let's pick a random day. How about April 15th? Does that work?")],
      "Great! I'll go ahead and book April 15th for you. Is there anything else?", "turn_end", {"since_user_s": 9.8, "since_omni_s": 0, "omni_speaking": False}, "",

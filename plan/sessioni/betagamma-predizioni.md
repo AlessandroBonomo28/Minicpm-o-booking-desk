@@ -40,3 +40,21 @@ valore del cliente già presente, fuori raccolta, no, correzione); `tools/sigma_
 - P7. Proposta di un'ora ("how about 3 pm?") con giorno noto: entra solo se libera; se occupata, rosso `3 PM IS TAKEN` come prima.
 Falsificazione: dopo il sì la macchina resta a `WHICH DAY?`; oppure entra una proposta occupata; oppure σ resta ok mentre l'omni
 annuncia una prenotazione con la proposta ancora col `?`.
+
+## Revisione (08/09 sera): 2 revisori (FSM; client+σ) + 22 sonde locali, presi in carico prima del test dal vivo
+Sette segnalazioni valide, tutte sullo stesso asse (la proposta dell'operatore nella macchina):
+1. Giorno PIENO proposto (in prenotazione lo schermo non elenca gli occupati): prima cadeva in silenzio -> ora rosso `APRIL 1 IS FULL`
+   (il giorno verificato come l'ora; anche `APRIL 9 IS FREE` a chi dice occupato un giorno libero; ora occupata su giorno non nel record -> rosso).
+2. Seconda proposta sopra una proposta ("sorry... how about the 17th?"): sostituisce la prima (il cliente risponde all'ultima sentita).
+3. `any day` dopo una proposta: via anche il tentativo (lo schermo torna a WHICH DAY?).
+4. `no` a una proposta in verifica: torna la riga del mese (FREE, EXCEPT ...), il record e' funzione dei campi, non del percorso.
+5. Proposta che COMPLETA una prenotazione ("3 pm is free, shall I book it?"): va dritta alla conferma `APRIL 20, 4 PM / FREE / SHALL I BOOK IT?`,
+   un solo si' (l'unico evento che scrive); il `no` toglie solo i campi proposti (giorno del cliente conservato) invece di annullare tutto.
+6. Corsa: un si' arrivato PRIMA del verdetto di σ sulla proposta resta "slegato" 8 s e la proposta che entra dopo lo lega.
+7. Mese della proposta: "How about April 15th?" a mese mancante entra (mese+giorno proposti); "May 15th" con il cliente su aprile ->
+   rosso `APRIL, NOT MAY`. flash-lite non compila `claim_month` nemmeno se obbligatorio (misurato 3 volte): il gateway legge il mese
+   nominato nel testo del turno (un fatto, non una forma).
+8. Un turno che ha prodotto un evento (proposta entrata) non e' "stuck": σ non gli mette il giallo sopra (mai una domanda contraddittoria).
+Trovato dal vivo e corretto: in `omni_turn` avevo confuso "record cambiato" con "semaforo cambiato": un giallo puro non avrebbe piu' forzato.
+Banco: replay 42/42, sonde 12/12, API viva: giallo puro -> force; proposta entrata con σ stuck -> verde, niente force; annuncio falso -> rosso + force.
+P7 cambia: proposta d'ora libera con giorno noto -> `SHALL I BOOK IT?` subito, il si' scrive. Non presa: alternativa dopo TAKEN (bug #2, da decidere).

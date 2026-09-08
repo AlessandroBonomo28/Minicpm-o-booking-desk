@@ -1067,7 +1067,7 @@ def _hud_month_info(month: str):
 
 def _hud_fsm_reset(note: str = ""):
     _HUD_DB["fsm"] = dict(_HUD_FSM_IDLE, slots=dict(_HUD_EMPTY_SLOTS), missing=[], rejected={}, tentative={}, note=note,
-                          month_info=None, stuck_count=0, updated=datetime.now().isoformat(timespec="seconds"))
+                          month_info=None, stuck_count=0, unbound_yes=None, updated=datetime.now().isoformat(timespec="seconds"))
     _hud_db_save()
     return _HUD_DB["fsm"]
 
@@ -1150,6 +1150,13 @@ def _hud_same_record(cur: dict, new: dict) -> bool:
     return _hud_norm_time(a.get("time") or "") == _hud_norm_time(b.get("time") or "")
 
 
+def _hud_recent(ts, seconds: float) -> bool:
+    try:
+        return bool(ts) and (datetime.now() - datetime.fromisoformat(ts)).total_seconds() <= seconds
+    except Exception:
+        return False
+
+
 def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=None):
     """Applica UNA operazione dell'estrattore allo stato (05/09: il modello sceglie l'operazione, il codice calcola).
     Eventi (05/09 sera, l'algebra senza scorciatoie): set(intent?, month?, day?, time?) = valori detti, mai scrive;
@@ -1172,6 +1179,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         _hud_db_save(); return fsm, False   # una prenotazione in attesa di conferma resta in attesa (esce con accept/decline/cancel)
     name = str(call["name"]).lower(); args = dict(call.get("arguments") or {})
     ref = fsm.get("slots") or {}
+    if name not in ("heard", "sigma", "yes"):
+        fsm["unbound_yes"] = None   # (08/09) ogni altro evento del cliente supera un si' rimasto slegato
 
     if name == "cancel":
         note = "REQUEST CANCELLED" if state == "COLLECTING" else ("BOOKING NOT CONFIRMED" if (state == "CONFIRM" and fsm.get("intent") == "book") else "")
@@ -1184,66 +1193,101 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     if name == "yes" and any_said:
         name = "set"   # "yes, at 3 pm" = correzione + nuova conferma: yes non porta valori
     tentative = dict(fsm.get("tentative") or {})
+    _solidified = False; _proposal_confirm = False
     if name in ("heard", "sigma"):
         # secondo orecchio: solo in raccolta, solo campi MANCANTI, mai sopra un valore del cliente; il campo diventa TENTATIVO.
         # Se il turno e' un CLAIM ("19:00 is taken", "confirmed"), i valori sono il soggetto dell'affermazione, non una ripetizione: non entrano.
         # Eccezione (FORCESPEAK-BETAGAMMA, 08/09): una PROPOSTA dell'operatore ("how about April 15th?", "3 pm is free") verificata
         # libera sul DB entra come tentativo marcato "proposal": lo schermo la mostra col punto di domanda e il si' del cliente la
         # consolida. Senza, la proposta accettata a voce non aveva un posto nella macchina (sess_41c874e48161: tre "I've booked" a vuoto).
+        # Revisione (08/09 sera): una proposta puo' sostituire solo una proposta (il cliente risponde all'ultima che ha sentito); il
+        # mese della proposta (claim_month) entra se manca, non entra se contraddice il cliente (rosso in _hud_supervise); una
+        # proposta che COMPLETA una prenotazione va dritta alla conferma (un solo si'); un si' arrivato prima del verdetto la lega.
         if state != "COLLECTING":
             _hud_db_save(); return fsm, False
-        claim = clean(args.get("claim")).lower(); mark = True
+        claim = clean(args.get("claim")).lower(); mark = True; proposal = False
         if claim:
             said = {k: "" for k in said}; mark = "proposal"
             if claim == "slot_free":
-                ct = _hud_norm_time(clean(args.get("claim_time"))); cd = re.sub(r"\D", "", clean(args.get("claim_day")))
-                if cd and ref.get("month") and not ref.get("day") and re.fullmatch(r"([1-9]|[12]\d|3[01])", cd) \
-                        and int(cd) not in (_hud_month_info(ref["month"]) or {}).get("full_days", []):
+                cm = _hud_norm_date(clean(args.get("claim_month"))); ct = _hud_norm_time(clean(args.get("claim_time"))); cd = re.sub(r"\D", "", clean(args.get("claim_day")))
+                month = ref.get("month") or (cm if cm in _MONTHS else "")
+                if cm in _MONTHS and ref.get("month") and cm != ref["month"]:
+                    month = ""   # proposta in un altro mese: contraddice il mese del cliente, non entra
+                if month and not ref.get("month"):
+                    said["month"] = month
+                day_open = not ref.get("day") or tentative.get("day") == "proposal"
+                if cd and month and day_open and re.fullmatch(r"([1-9]|[12]\d|3[01])", cd) and int(cd) not in (_hud_month_info(month) or {}).get("full_days", []):
                     said["day"] = cd
-                day_ref = ref.get("day") or said["day"]
-                if ct and ct != "all-day" and ref.get("month") and day_ref and not ref.get("time") \
-                        and "time" in _HUD_REQUIRED[fsm.get("intent") or "check"] and _hud_time_valid(ct, "book") \
-                        and _hud_lookup(f"{ref['month']} {day_ref}", ct)[0] == "available":
+                day_ref = said["day"] or ref.get("day")
+                time_open = not ref.get("time") or tentative.get("time") == "proposal"
+                if ct and ct != "all-day" and month and day_ref and time_open and "time" in _HUD_REQUIRED[fsm.get("intent") or "check"] \
+                        and _hud_time_valid(ct, "book") and _hud_lookup(f"{month} {day_ref}", ct)[0] == "available":
                     said["time"] = ct
             if not any(said.values()):
                 _hud_db_save(); return fsm, False
+            proposal = True
         slots = dict(_HUD_EMPTY_SLOTS, **ref); filled = []
+        replace = lambda k: proposal and tentative.get(k) == "proposal"   # una proposta sopra una proposta: vale l'ultima sentita
         if said["month"] and not slots.get("month"):
             m = _hud_norm_date(said["month"])
             if m in _MONTHS: slots["month"] = m; filled.append("month")
-        if said["day"] and not slots.get("day"):
+        if said["day"] and (not slots.get("day") or replace("day")):
             d = _hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", said["day"].lower())).replace("the ", "").strip()
             if re.fullmatch(r"([1-9]|[12]\d|3[01])", d): slots["day"] = d; filled.append("day")
-        if said["time"] and not slots.get("time") and "time" in _HUD_REQUIRED[fsm.get("intent") or "check"]:
+        if said["time"] and (not slots.get("time") or replace("time")) and "time" in _HUD_REQUIRED[fsm.get("intent") or "check"]:
             if _hud_time_valid(_hud_norm_time(said["time"]), fsm.get("intent") or "check"): slots["time"] = said["time"]; slots["time_raw"] = said["time"]; filled.append("time")
         if not filled:
             _hud_db_save(); return fsm, False
         for k in filled: tentative[k] = mark   # True = readback dell'operatore; "proposal" = proposta verificata libera
         slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
         missing = [k for k in _HUD_REQUIRED[fsm["intent"]] if not slots.get(k)]
-        return bump(state="COLLECTING", slots=slots, missing=missing, tentative=tentative, rejected={}, status=None, detail="", note="",
-                    month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
-    if state == "COLLECTING" and tentative and name in ("yes", "no") and not any_said:
+        if proposal and _hud_recent(fsm.get("unbound_yes"), 8):
+            # corsa: il si' del cliente era arrivato PRIMA del verdetto di σ sulla proposta -> lo lega adesso (i tentativi diventano solidi)
+            fsm["unbound_yes"] = None; tentative = {}
+            intent = fsm["intent"]; name = "set"; args = {}; said = {k: "" for k in said}; any_said = False; _solidified = True
+        elif proposal and not missing and fsm["intent"] == "book":
+            # la proposta completa la prenotazione: e' l'offerta dello sportello, si va dritti alla conferma (schermo
+            # "APRIL 15, 3 PM / FREE / SHALL I BOOK IT?"): un solo si', che resta l'unico evento che scrive. I marchi restano
+            # sul record cosi' il no toglie i campi proposti invece di azzerare la richiesta.
+            intent = fsm["intent"]; name = "set"; args = {}; said = {k: "" for k in said}; any_said = False; _solidified = True; _proposal_confirm = True
+        else:
+            return bump(state="COLLECTING", slots=slots, missing=missing, tentative=tentative, rejected={}, status=None, detail="", note="",
+                        month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
+    if state == "COLLECTING" and tentative and name in ("yes", "no") and not any_said and not _solidified:
         # conferma a livello di campo dei valori tentativi (CONFIRM: MONTH sullo schermo)
         slots = dict(_HUD_EMPTY_SLOTS, **ref)
         if name == "no":
             for k in list(tentative): slots[k] = ""; slots["time_raw"] = "" if k == "time" else slots.get("time_raw", "")
             slots["date"] = ""
             missing = [k for k in _HUD_REQUIRED[fsm["intent"]] if not slots.get(k)]
-            return bump(state="COLLECTING", slots=slots, missing=missing, tentative={}, rejected={}, status=None, detail="", note="")
+            return bump(state="COLLECTING", slots=slots, missing=missing, tentative={}, rejected={}, status=None, detail="", note="",
+                        month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
         tentative = {}   # yes: i tentativi diventano solidi; si prosegue come dopo un set completo
         intent = fsm["intent"]; name = "set"; args = {}; said = {k: "" for k in said}; any_said = False
         _solidified = True
-    else:
-        _solidified = False
     if name == "no":
         if state == "CONFIRM" and fsm.get("intent") == "book":
+            marks = [k for k, v in (fsm.get("tentative") or {}).items() if v == "proposal"]
+            if marks:
+                # (08/09) offerta dello sportello rifiutata: via i campi proposti, la richiesta del cliente resta in raccolta
+                slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
+                if ref.get("time") and ref.get("time") != "all-day":
+                    slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
+                for k in marks:
+                    slots[k] = ""
+                    if k == "time": slots["time_raw"] = ""
+                slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
+                missing = [k for k in _HUD_REQUIRED["book"] if not slots.get(k)]
+                return bump(state="COLLECTING", intent="book", slots=slots, missing=missing, tentative={}, rejected={}, status=None, detail="", note="", free=None,
+                            month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
             return _hud_fsm_reset(note="BOOKING NOT CONFIRMED"), True
         if state == "CONFIRM":
             return bump(state="DONE")
         _hud_db_save(); return fsm, False
     if name == "yes":
         if state != "CONFIRM":
+            if state == "COLLECTING":
+                fsm["unbound_yes"] = now_s   # (08/09) si' senza domanda aperta: se la proposta di σ arriva subito dopo (corsa), lo lega
             _hud_db_save(); return fsm, False   # nessuna domanda si'/no aperta: il si' non lega a niente
         # l'UNICO evento che scrive: conferma la prenotazione in sospeso o accetta l'offerta (se manca l'ora la si chiede)
         intent = "book"; confirmed = True
@@ -1274,7 +1318,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     # 'any' / 'all' / 'whole' (07/09): il cliente ALLARGA la richiesta ("the whole month", "any time"): il campo si svuota
     for k in ("day", "time"):
         if clean(args.get(k)).lower().replace("-", " ") in ("any", "all", "whole", "every", "any day", "any time", "all day", "whole day", "whole month", "all month"):
-            slots[k] = ""; args[k] = None
+            slots[k] = ""; args[k] = None; tentative.pop(k, None)   # anche una proposta pendente sul campo e' superata
             if k == "time": slots["time_raw"] = ""
     # un solo numero nella battuta non puo' essere insieme giorno E ora ("the 2nd" -> day='the 2nd', time='2')
     if user_text and clean(args.get("day")) and clean(args.get("time")):
@@ -1348,7 +1392,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     # riparte da zero e passa dalla conferma.
     free = None
     new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] == "pending" else "DONE"
-    new = dict(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative={}, status=res["status"], detail=res.get("detail") or "", note="", free=free, month_info=None)
+    new = dict(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative=(tentative if _proposal_confirm and new_state == "CONFIRM" else {}),
+               status=res["status"], detail=res.get("detail") or "", note="", free=free, month_info=None)
     if _hud_same_record(fsm, new):
         _hud_db_save(); return fsm, False   # idempotenza: stesso record = evento nullo (il rosso resta)
     return bump(**new)
@@ -1377,6 +1422,24 @@ def _hud_supervise(fsm, omni_text: str, heard_args: dict):
             return "red", f"{_hud_time_label(ct)} IS FREE"
         if claim == "slot_free" and not free:
             return "red", f"{_hud_time_label(ct)} IS TAKEN"
+    cd = re.sub(r"\D", "", str(h.get("claim_day") or "")); cm = _hud_norm_date(str(h.get("claim_month") or ""))
+    if claim in ("slot_taken", "slot_invalid", "slot_free") and sl.get("month") and re.fullmatch(r"([1-9]|[12]\d|3[01])", cd) \
+            and not (sl.get("date") and _hud_time_valid(ct, "book")):
+        # (revisione 08/09) il GIORNO della proposta verificato come l'ora: mese diverso dal cliente, giorno pieno, giorno libero detto occupato
+        month = sl["month"]
+        if cm in _MONTHS and cm != month:
+            return "red", f"{month.upper()}, NOT {cm.upper()}"
+        mi = _hud_month_info(month) or {}; label = f"{month.upper()} {int(cd)}"
+        if claim == "slot_free" and int(cd) in mi.get("full_days", []):
+            return "red", f"{label} IS FULL"
+        if claim in ("slot_taken", "slot_invalid") and int(cd) not in mi.get("booked_days", []) and not (ct and ct != "all-day"):
+            return "red", f"{label} IS FREE"
+        if _hud_time_valid(ct, "book") and not sl.get("date"):
+            free = _hud_lookup(f"{month} {cd}", ct)[0] == "available"
+            if claim == "slot_free" and not free:
+                return "red", f"{_hud_time_label(ct)} IS TAKEN"
+            if claim in ("slot_taken", "slot_invalid") and free:
+                return "red", f"{_hud_time_label(ct)} IS FREE"
     # GIALLO da σ: l'omni e' bloccato o fuori contesto e serve una mano (l'aiuto va sullo schermo, poi force_speak)
     if (h.get("status") or "").lower() == "stuck":
         return "yellow", (h.get("help") or "Please tell me what you need.").strip()[:90]   # frase per il cliente, cosi' com'e'
@@ -1423,20 +1486,28 @@ async def hud_fsm_omni_turn(request: Request):
     calls = body.get("tool_calls") or []
     reason = body.get("reason") or "turn_end"
     heard_args = next((c.get("arguments") or {} for c in calls if c.get("name") in ("heard", "sigma")), {})
+    if (heard_args.get("claim") or "").lower() == "slot_free" and not heard_args.get("claim_month"):
+        # flash-lite non compila claim_month (misurato 08/09, anche se obbligatorio): il mese NOMINATO nel turno e' un fatto e lo legge il codice
+        named = [m for m in _MONTHS if re.search(rf"\b{m}\b", (body.get("text") or "").lower())]
+        if len(named) == 1:
+            heard_args["claim_month"] = named[0]
     cur = _HUD_DB.get("fsm") or _hud_fsm_reset()
     if body.get("fsm_seq") is not None and int(body["fsm_seq"]) != int(cur.get("seq") or 0):
         # verdetto su uno stato che nel frattempo e' cambiato: non si applica (con force_speak un giallo stantio verrebbe letto, non solo dipinto)
         return JSONResponse(content={"fsm": cur, "changed": False, "level": cur.get("level") or "green", "hint": cur.get("hint") or "", "stale": True})
-    changed = False
+    applied = False   # il verdetto ha cambiato il RECORD (proposta o readback entrati): distinto dal cambio di semaforo
     if calls and reason != "no_reply":
-        _, changed = _hud_fsm_apply(calls, "", body.get("outcome") or "auto", body.get("source") or "heard", body.get("delay_s"))
+        _, applied = _hud_fsm_apply(calls, "", body.get("outcome") or "auto", body.get("source") or "heard", body.get("delay_s"))
+    changed = applied
     fsm = _HUD_DB.get("fsm") or _hud_fsm_reset()
     level, hint = _hud_supervise(fsm, body.get("text") or "", heard_args)
+    if applied and level == "yellow":
+        level, hint = "green", ""   # (08/09) il turno ha prodotto un evento della macchina (proposta o readback entrati): segue lo schermo
     if (fsm.get("level") or "green") != level or (fsm.get("hint") or "") != hint:
         fsm["level"] = level; fsm["hint"] = hint; fsm["seq"] = int(fsm.get("seq") or 0) + 1; fsm["updated"] = datetime.now().isoformat(timespec="seconds")
         changed = True
     _hud_db_save()
-    stuck = (heard_args.get("status") or "").lower() == "stuck"
+    stuck = (heard_args.get("status") or "").lower() == "stuck" and not applied
     capped = False
     if stuck or level == "red":
         # tetto: due aiuti per STATO della macchina (firma senza semaforo); oltre, niente giallo ne' force (mai un ciclo)

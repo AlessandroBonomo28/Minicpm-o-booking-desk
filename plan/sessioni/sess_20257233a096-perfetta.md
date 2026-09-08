@@ -40,5 +40,10 @@ DB: aprile con 1, 2, 3, 15, 20, 25, 28 occupati (parziali), novembre vuoto.
 ## Da annotare
 - 190.1: readback time="any" -> giallo CHECK THE SCREEN (falso allarme): normalizzare 'any'/'all day' nel confronto dei readback.
 - 101.0: "which time are free" in verifica -> set(time pick) senza effetto (in una verifica l'ora non si propone): l'omni ha comunque chiesto l'ora, fine.
-- Una volta la pronuncia e' uscita cinese (audio, non testo: nel registro e nel backend non c'e' un carattere CJK): vedi spiegazione in chat/calendar.
+- **Pronuncia cinese, una volta** (decisione di Alessandro: si annota e ci si convive, gia' rara). Audio, non testo: nel registro e nel
+  backend non c'e' un carattere CJK. Meccanismo: i token di parlato sono una seconda generazione del modello, condizionata dal testo,
+  dalla voce di riferimento e dal contesto acustico, addestrata in prevalenza sul cinese; quando il testo da' poco appiglio (turno di una
+  parola dopo un filler, frammenti tagliati sul confine dell'unita' come "Sha"/"ll", "book"/"ed") e l'audio del cliente non ha lingua
+  ("uhm ehm"), il decoder del parlato scivola verso la lingua dominante. Rimedi possibili, NON applicati: "Speak only English." nel prompt
+  di sistema (il prompt di clonazione voce non nomina mai la lingua); voce di riferimento inglese piu' lunga e pulita.
 - Cifre ancora spezzate nel parlato ("2 8", "3 1st", "Sha ll", "book ed"): tokenizer a cifre + TTS a unita' di 1 s (upstream).

@@ -405,4 +405,5 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 08/09 (sera, 3) — **Run "perfetta" sess_20257233a096** (`plan/sessioni/sess_20257233a096-perfetta.md`): due prenotazioni scritte giuste
   (april 4 15:00, november 15 18:00), "scegli tu" ha proposto il 4 due volte e l'omni l'ha letto, 4 force di σ tutti fondati,
   σ in corsa 1 controllo ok (nessun taglio su un turno sano), nessun turno oltre 12 s, zero rossi. Da annotare: giallo falso su
-  readback time='any'; una pronuncia cinese nell'audio (testo inglese) dopo i filler "uhm".
+  readback time='any'; una pronuncia cinese nell'audio (testo inglese) dopo i filler "uhm": decoder del parlato a prevalenza
+  cinese su testo corto/frammentato, annotato e accettato (Alessandro: "ci conviviamo"), rimedio eventuale "Speak only English." nel prompt.

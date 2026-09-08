@@ -402,3 +402,7 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   come a fine turno, max 3 tagli per battuta. "Pick one" → evento `pick`: la macchina propone il primo giorno / la prima ora libera,
   `no` → il prossimo, sì → solido; una proposta che completa il record va dritta al risultato con i marchi. Replay 59/59, sonde
   20/20 (σ a turno aperto 4/4, pick 4/4), API viva. Predizioni P8–P11 in `plan/sessioni/betagamma-predizioni.md`. Da provare dal vivo.
+- 08/09 (sera, 3) — **Run "perfetta" sess_20257233a096** (`plan/sessioni/sess_20257233a096-perfetta.md`): due prenotazioni scritte giuste
+  (april 4 15:00, november 15 18:00), "scegli tu" ha proposto il 4 due volte e l'omni l'ha letto, 4 force di σ tutti fondati,
+  σ in corsa 1 controllo ok (nessun taglio su un turno sano), nessun turno oltre 12 s, zero rossi. Da annotare: giallo falso su
+  readback time='any'; una pronuncia cinese nell'audio (testo inglese) dopo i filler "uhm".

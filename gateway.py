@@ -1187,8 +1187,26 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     if name in ("heard", "sigma"):
         # secondo orecchio: solo in raccolta, solo campi MANCANTI, mai sopra un valore del cliente; il campo diventa TENTATIVO.
         # Se il turno e' un CLAIM ("19:00 is taken", "confirmed"), i valori sono il soggetto dell'affermazione, non una ripetizione: non entrano.
-        if state != "COLLECTING" or clean(args.get("claim")):
+        # Eccezione (FORCESPEAK-BETAGAMMA, 08/09): una PROPOSTA dell'operatore ("how about April 15th?", "3 pm is free") verificata
+        # libera sul DB entra come tentativo marcato "proposal": lo schermo la mostra col punto di domanda e il si' del cliente la
+        # consolida. Senza, la proposta accettata a voce non aveva un posto nella macchina (sess_41c874e48161: tre "I've booked" a vuoto).
+        if state != "COLLECTING":
             _hud_db_save(); return fsm, False
+        claim = clean(args.get("claim")).lower(); mark = True
+        if claim:
+            said = {k: "" for k in said}; mark = "proposal"
+            if claim == "slot_free":
+                ct = _hud_norm_time(clean(args.get("claim_time"))); cd = re.sub(r"\D", "", clean(args.get("claim_day")))
+                if cd and ref.get("month") and not ref.get("day") and re.fullmatch(r"([1-9]|[12]\d|3[01])", cd) \
+                        and int(cd) not in (_hud_month_info(ref["month"]) or {}).get("full_days", []):
+                    said["day"] = cd
+                day_ref = ref.get("day") or said["day"]
+                if ct and ct != "all-day" and ref.get("month") and day_ref and not ref.get("time") \
+                        and "time" in _HUD_REQUIRED[fsm.get("intent") or "check"] and _hud_time_valid(ct, "book") \
+                        and _hud_lookup(f"{ref['month']} {day_ref}", ct)[0] == "available":
+                    said["time"] = ct
+            if not any(said.values()):
+                _hud_db_save(); return fsm, False
         slots = dict(_HUD_EMPTY_SLOTS, **ref); filled = []
         if said["month"] and not slots.get("month"):
             m = _hud_norm_date(said["month"])
@@ -1200,7 +1218,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
             if _hud_time_valid(_hud_norm_time(said["time"]), fsm.get("intent") or "check"): slots["time"] = said["time"]; slots["time_raw"] = said["time"]; filled.append("time")
         if not filled:
             _hud_db_save(); return fsm, False
-        for k in filled: tentative[k] = True
+        for k in filled: tentative[k] = mark   # True = readback dell'operatore; "proposal" = proposta verificata libera
         slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
         missing = [k for k in _HUD_REQUIRED[fsm["intent"]] if not slots.get(k)]
         return bump(state="COLLECTING", slots=slots, missing=missing, tentative=tentative, rejected={}, status=None, detail="", note="",

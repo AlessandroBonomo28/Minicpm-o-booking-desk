@@ -384,3 +384,10 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
 - 08/09 (00:00) — **FORCESPEAK-GOODTEST** = `forcespeak-stickyctx` @ 8cf0b2a, "la prova migliore fino ad ora in assoluto"
   (sess_f0ab8867fc79): mese, giorno parziale, TAKEN, rosso corretto a voce, prenotazione scritta, 3 forzature di σ tutte
   fondate, zero loop. Architettura documentata in `plan/architettura-forcespeak.md`, sessione in `plan/sessioni/`.
+- 08/09 (pom.) — **Ramo `FORCESPEAK-BETAGAMMA`** (da GOODTEST-2). Causa di sess_41c874e48161: la proposta dell'omni ("How about
+  April 15th?") accettata a voce non aveva un posto nella macchina (i claim non portavano valori), il sì cadeva nel vuoto e i tre
+  "I've booked" erano rossi giusti ma sul sintomo. Riportata da beta-gamma la regola **proposta verificata libera → tentativo
+  `proposal`** (schermo `BOOK: APRIL 15?` / `DOES THAT WORK?`, il sì consolida, il no scarta, il cliente vince); aiuto stantio di σ
+  azzerato quando la macchina cambia col cliente (causa dello stuck falso a 136 s: flash-lite dà la precedenza all'aiuto sullo
+  schermo, misurato); prompt σ: proposta = claim slot_free, ok se libera. Replay locale 22/22 (`tools/fsm_replay_test.py`), sonde
+  10/10 (`tools/sigma_probe.py`). Predizioni in `plan/sessioni/betagamma-predizioni.md`. Da provare dal vivo.

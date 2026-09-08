@@ -91,13 +91,15 @@ function themeFor() {
             const month = (f.slots.month || '').toUpperCase(), day = f.slots.day || '';
             const rejKeys = Object.keys(f.rejected || {});
             const tent = f.tentative || {};
-            const mq = tent.month ? '?' : '', dq = tent.day ? '?' : '';
+            const mq = tent.month ? '?' : '', dq = tent.day ? '?' : '', tq = tent.time ? '?' : '';
             const when = (month || day) ? `${month ? month + mq : ''}${day ? ' ' + day + dq : ''}`.trim() : '';
             const verb = f.intent === 'check' ? 'FREE' : 'BOOK';
-            const line1 = when ? `${verb}: ${when}${f.slots.time && miss !== 'time' ? ', ' + timeLabel(f.slots.time) : ''}` : `${verb}: ?`;
+            const line1 = when ? `${verb}: ${when}${f.slots.time && miss !== 'time' ? ', ' + timeLabel(f.slots.time) + tq : ''}` : `${verb}: ?`;
             const askFor = { month: 'WHICH MONTH?', day: 'WHICH DAY?', time: 'WHAT TIME?' }[miss] || '';
             const tentKeys = Object.keys(tent).filter(k => tent[k]);
-            let line2 = tentKeys.length ? 'IS THAT RIGHT?' : askFor, line3 = '';
+            // tentativo "proposal" (BETAGAMMA 08/09) = proposta dell'operatore verificata libera: la domanda e' la sua ("does that work?")
+            const proposal = tentKeys.some(k => tent[k] === 'proposal');
+            let line2 = tentKeys.length ? (proposal ? 'DOES THAT WORK?' : 'IS THAT RIGHT?') : askFor, line3 = '';
             if (f.intent === 'check' && f.month_info && !f.slots.day) {   // domanda sul mese: la risposta e' del mese
                 const bd = f.month_info.booked_days || [];
                 line2 = bd.length ? `FREE, EXCEPT ${bd.join(', ')}` : 'ALL DAYS FREE'; line3 = askFor;
@@ -260,6 +262,7 @@ async function fsmEvent(toolCalls, userText, source) {
     const d = await r.json();
     if (!r.ok) { hudLog('warn', 'FSM: ' + (d.error || r.status)); return null; }
     const f = d.fsm;
+    if (d.changed && lastHelp) { hudLog('sys', 'aiuto di σ superato: la macchina e\' cambiata con la battuta del cliente'); lastHelp = ''; }   // (08/09) un aiuto vale per lo stato in cui e' nato
     hudLog(d.changed ? 'hud' : 'sys', `FSM → ${f.state}${f.intent ? ' ' + f.intent : ''} ${f.slots.month || '?'} ${f.slots.day || '?'} ${f.slots.time || ''}` +
         ((f.missing || []).length ? ' · manca ' + f.missing.join(', ') : '') +
         (Object.keys(f.rejected || {}).length ? ' · NON CAPITO ' + Object.entries(f.rejected).map(([k, v]) => `${k}="${v}"`).join(' ') : '') + (f.status ? ' · ' + f.status : '') + (f.detail ? ' (' + f.detail + ')' : '') + (f.note ? ' · ' + f.note : '') + (d.changed ? '' : ' · invariato'));

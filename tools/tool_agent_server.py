@@ -111,7 +111,11 @@ SIGMA_PROMPT = ("You are the SUPERVISOR of a voice booking desk. A small speech 
                 "request, a value, or a direct address ('are you there?', 'hello?', 'so?'), it is stuck (kind silent) and help says what to "
                 "answer from the SCREEN; only a filler ('um', 'hmm', 'ok', 'yeah') with nothing to answer is ok. "
                 "month/day/time: ONLY values the operator repeats as the customer's own in its last turn (a readback), never questions, "
-                "proposals or examples.")
+                "proposals or examples. A proposal by the operator ('how about April 15th?', '3 pm is free, shall I book it?') is claim "
+                "slot_free with claim_day / claim_time, and it is ok when the SCREEN does not show that day or time as booked; the SCREEN "
+                "then shows the proposal with a question mark ('BOOK: APRIL 15?' / 'DOES THAT WORK?') until the customer answers. "
+                "If the operator's last turn asks the question on the SCREEN's last line or reads the fact the SCREEN shows, it is ok, "
+                "even if brief or reworded.")
 
 
 def decide_sigma(operator_text, fsm, transcript, screen, reason, timing, previous_help=""):
@@ -218,7 +222,12 @@ def fsm_line_v2(fsm):
     if st == "CONFIRM":
         return today + f'STATE: the desk said "{when} is free" and asked: "Would you like to book it?" Open yes/no question (yes = book that slot; no = decline; another date/time = set).'
     if st == "COLLECTING" and (fsm.get("tentative") or {}):
-        tk = [f"{k}={sl.get(k)}" for k in ("month", "day", "time") if (fsm.get("tentative") or {}).get(k)]
+        tent = fsm.get("tentative") or {}
+        tk = [f"{k}={sl.get(k)}" for k in ("month", "day", "time") if tent.get(k)]
+        if any(v == "proposal" for v in tent.values()):
+            # FORCESPEAK-BETAGAMMA (08/09): proposta dell'operatore verificata libera, sullo schermo col punto di domanda
+            return today + (f"STATE: a {fsm.get('intent')} request is in progress; the desk PROPOSED {', '.join(tk)} and asked the customer "
+                            "whether that works. Open yes/no question (yes = the customer accepts the proposal; no = declines; another value = set).")
         return today + (f"STATE: a {fsm.get('intent')} request is in progress; the desk asked the customer to confirm what it understood: {', '.join(tk)}. "
                         "Open yes/no question (yes = correct; no = wrong; a corrected value = set).")
     if st == "COLLECTING":

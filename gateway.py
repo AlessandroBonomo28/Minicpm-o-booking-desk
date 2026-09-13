@@ -1466,7 +1466,85 @@ _PROPOSE_TIME = re.compile(r"(?:\b(?:how about|what about|we have|available at|t
                            r"|\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|o'clock)?\s+(?:is|are|looks|would be)\s+(?:still\s+)?(?:available|free|open))", re.I)
 
 
+def _hud_ordinal(d) -> str:
+    d = str(d or "").lstrip("0")
+    if not d:
+        return ""
+    return d + ("th" if d in ("11", "12", "13") else {"1": "st", "2": "nd", "3": "rd"}.get(d[-1:], "th"))
+
+
+def _hud_time_12h(tm: str) -> str:
+    """'15:00' -> '3 PM', '10:30' -> '10:30 AM' (frasi da dire: l'omni legge male le 24 ore)."""
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", str(tm or ""))
+    if not m:
+        return str(tm or "")
+    h, mi = int(m.group(1)), m.group(2); suf = "AM" if h < 12 else "PM"; h12 = h % 12 or 12
+    return f"{h12}:{mi} {suf}" if mi != "00" else f"{h12} {suf}"
+
+
+def _hud_when(sl) -> str:
+    """'May 5th at 3 PM' / 'May 5th' / 'May' dallo slot corrente, pronunciabile."""
+    sl = sl or {}
+    when = f"{(sl.get('month') or '').capitalize()} {_hud_ordinal(sl.get('day'))}".strip()
+    tm = _hud_norm_time(sl.get("time"))
+    return when + (f" at {_hud_time_12h(tm)}" if tm and tm != "all-day" and when else "")
+
+
+def _hud_screen_question(fsm) -> str:
+    """La domanda che lo schermo sta facendo al cliente, come frase: chiude la correzione e rimette l'omni sul passo giusto."""
+    st = fsm.get("state"); sl = fsm.get("slots") or {}; tent = fsm.get("tentative") or {}
+    M = (sl.get("month") or "").capitalize(); when = _hud_when(sl)
+    if st == "COLLECTING":
+        if any(tent.get(k) == "proposal" for k in ("month", "day", "time")) and when:
+            return f"Does {when} work for you?"
+        miss = (fsm.get("missing") or [None])[0]
+        if miss == "month":
+            return "Which month would you like?"
+        if miss == "day":
+            return f"Which day in {M} would you like?" if M else "Which day would you like?"
+        if miss == "time":
+            return f"What time on {when}?"
+        return "What would you like to book?"
+    if st == "CONFIRM":
+        if fsm.get("intent") == "book":
+            return f"Shall I book {when}?"
+        tm = _hud_norm_time(sl.get("time"))
+        return f"What time on {when}?" if (not tm or tm == "all-day") else f"Shall I book {when}?"
+    if st == "DONE":
+        return "Would you like another time?" if fsm.get("status") in ("taken", "booked") else "Anything else?"
+    return "What would you like to book?"
+
+
+def _hud_red_sentence(code: str, fsm) -> str:
+    """(13/09) Il rosso come FRASE che l'omni puo' dire, non come etichetta: 'NOTHING BOOKED YET' letto 0 volte su 5 nelle run,
+    'Sorry, nothing is booked yet. What time on May 5th?' seguito 2 volte su 2. Il codice resta quello di _hud_supervise_code."""
+    q = _hud_screen_question(fsm)
+    code = re.sub(r"\b(\d{1,2}:\d{2})\b", lambda m: _hud_time_12h(m.group(1)), code or "")   # '15:00 IS TAKEN' -> '3 PM IS TAKEN'
+    day_label = lambda x: (f"{x.split()[0].capitalize()} {_hud_ordinal(x.split()[1])}" if re.fullmatch(r"[A-Z]+ \d{1,2}", x) else x)
+    if code == "NOTHING BOOKED YET":
+        return f"Sorry, nothing is booked yet. {q}"
+    m = re.fullmatch(r"(.+) IS TAKEN", code)
+    if m:
+        return f"Sorry, {day_label(m.group(1))} is taken. What other time would you like?"
+    m = re.fullmatch(r"(.+) IS FULL", code)
+    if m:
+        return f"Sorry, {day_label(m.group(1))} is full. Which other day would you like?"
+    m = re.fullmatch(r"(.+) IS FREE", code)
+    if m:
+        return f"Sorry, {day_label(m.group(1))} is actually free. {q}"
+    m = re.fullmatch(r"(\w+), NOT (\w+)", code)
+    if m:
+        return f"Sorry, I mean {m.group(1).capitalize()}, not {m.group(2).capitalize()}. {q}"
+    return f"Sorry. {q}"
+
+
 def _hud_supervise(fsm, omni_text: str, heard_args: dict):
+    """(level, hint) per lo schermo: i rossi di _hud_supervise_code diventano frasi pronunciabili (_hud_red_sentence)."""
+    level, hint = _hud_supervise_code(fsm, omni_text, heard_args)
+    return (level, _hud_red_sentence(hint, fsm)) if level == "red" else (level, hint)
+
+
+def _hud_supervise_code(fsm, omni_text: str, heard_args: dict):
     """Ritorna (level, hint). Il modello cloud (heard) traduce il turno dell'omni in un CLAIM canonico; qui si verifica il claim
     contro record e DB. Nessuna regex sul linguaggio: le forme le copre il modello, i fatti li controlla il codice."""
     st = fsm.get("state"); sl = fsm.get("slots") or {}; tent = fsm.get("tentative") or {}

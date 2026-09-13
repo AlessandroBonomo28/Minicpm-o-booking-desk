@@ -50,7 +50,7 @@ check("proposta libera -> giorno 15 tentativo 'proposal'", f["slots"]["day"] == 
 check("schermo: manca solo l'ora", f["missing"] == ["time"], f["missing"])
 check("semaforo verde sulla proposta", lvl == "green", (lvl, hint))
 f, ch, lvl, hint = sigma(claim="booking_confirmed", claim_day="15")                   # omni: "Great! I'll go ahead and book April 15th"
-check("annuncio di prenotazione -> rosso NOTHING BOOKED YET", lvl == "red" and hint == "NOTHING BOOKED YET" and f["tentative"].get("day") == "proposal", (lvl, hint))
+check("annuncio di prenotazione -> rosso NOTHING BOOKED YET", lvl == "red" and "nothing is booked yet" in hint.lower() and f["tentative"].get("day") == "proposal", (lvl, hint))
 f, ch = ev("yes", "Uh, yes.")                                                        # il cliente accetta la proposta
 check("yes consolida il giorno (COLLECTING, manca l'ora)", ch and f["state"] == "COLLECTING" and f["slots"]["day"] == "15" and not f["tentative"] and f["missing"] == ["time"], f)
 f, ch = ev("set", "at 15", time="15:00")
@@ -118,16 +118,16 @@ check("readback (senza claim) -> tentativo True, IS THAT RIGHT?", f["slots"]["da
 # --- 6. (revisione 08/09) giorno pieno proposto -> rosso; mese diverso -> rosso; mese mancante -> entra come proposta --------
 seed(); ev("set", intent="book", month="april")
 f, ch, lvl, hint = sigma(claim="slot_free", claim_day="1")
-check("proposta di un giorno pieno -> non entra e ROSSO 'APRIL 1 IS FULL'", not ch and lvl == "red" and hint == "APRIL 1 IS FULL", (lvl, hint))
+check("proposta di un giorno pieno -> non entra e ROSSO 'APRIL 1 IS FULL'", not ch and lvl == "red" and "april 1st is full" in hint.lower(), (lvl, hint))
 f, ch, lvl, hint = sigma(claim="slot_free", claim_day="1", claim_time="16:00")
-check("giorno pieno con un'ora -> non entra, rosso sul giorno", not ch and lvl == "red" and hint == "APRIL 1 IS FULL", (lvl, hint))
+check("giorno pieno con un'ora -> non entra, rosso sul giorno", not ch and lvl == "red" and "april 1st is full" in hint.lower(), (lvl, hint))
 f, ch, lvl, hint = sigma(claim="slot_free", claim_day="20", claim_time="15:00")     # "How about the 20th at 3 pm?": il 20 e' libero come giorno, le 15 no
-check("giorno libero + ora occupata -> entra solo il giorno (proposta), rosso sull'ora", ch and f["slots"]["day"] == "20" and not f["slots"]["time"] and f["tentative"] == {"day": "proposal"} and lvl == "red" and "IS TAKEN" in hint, (lvl, hint, f["slots"]))
+check("giorno libero + ora occupata -> entra solo il giorno (proposta), rosso sull'ora", ch and f["slots"]["day"] == "20" and not f["slots"]["time"] and f["tentative"] == {"day": "proposal"} and lvl == "red" and "is taken" in hint.lower(), (lvl, hint, f["slots"]))
 seed(); ev("set", intent="book", month="april")
 f, ch, lvl, hint = sigma(claim="slot_taken", claim_day="9")
-check("'il 9 e' occupato' (libero) -> rosso 'APRIL 9 IS FREE'", not ch and lvl == "red" and hint == "APRIL 9 IS FREE", (lvl, hint))
+check("'il 9 e' occupato' (libero) -> rosso 'APRIL 9 IS FREE'", not ch and lvl == "red" and "april 9th is actually free" in hint.lower(), (lvl, hint))
 f, ch, lvl, hint = sigma(claim="slot_free", claim_day="15", claim_month="may")
-check("proposta in un altro mese -> non entra, rosso 'APRIL, NOT MAY'", not ch and not f["slots"]["day"] and lvl == "red" and hint == "APRIL, NOT MAY", (lvl, hint, f["slots"]))
+check("proposta in un altro mese -> non entra, rosso 'APRIL, NOT MAY'", not ch and not f["slots"]["day"] and lvl == "red" and "i mean april, not may" in hint.lower(), (lvl, hint, f["slots"]))
 f, ch, lvl, hint = sigma(claim="slot_free", claim_day="15", claim_month="april")
 check("proposta con il mese giusto detto -> entra, verde", ch and f["slots"]["day"] == "15" and lvl == "green", (lvl, hint, f["slots"]))
 seed(); ev("set", intent="book")

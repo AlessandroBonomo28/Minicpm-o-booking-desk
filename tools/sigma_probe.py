@@ -20,6 +20,10 @@ def post(path, body):
     return d, time.time() - t0
 
 SIGMA = [  # (nome, schermo, fsm, conversazione, turno operatore, reason, timing, previous_help, atteso)
+    ("'I've cancelled your booking' con lo schermo CANCEL IT? -> claim booking_cancelled", "APRIL 20, 3 PM | BOOKED | CANCEL IT?",
+     {"state": "CONFIRM", "intent": "unbook", "status": "pending_cancel", "slots": SL("april", "20", "15:00"), "missing": [], "tentative": {}},
+     [U("Cancel my booking of April 20 at 3 pm.")], "Okay, I've cancelled your booking on April 20th at 3 PM.", "turn_end", {"since_user_s": 2.0, "since_omni_s": 0, "omni_speaking": False}, "",
+     {"claim": "booking_cancelled"}),
     ("proposta = claim slot_free giorno 15, ok", "BOOK: APRIL | WHICH DAY?", COLL_APR, BASE,
      "Okay, let's pick a random day. How about April 15th? Does that work?", "turn_end", {"since_user_s": 2.1, "since_omni_s": 0, "omni_speaking": False}, "",
      {"status": "ok", "claim": "slot_free", "claim_day": "15"}),   # claim_month: flash-lite non lo compila, lo ricava il gateway dal testo
@@ -78,6 +82,11 @@ SIGMA = [  # (nome, schermo, fsm, conversazione, turno operatore, reason, timing
      {"status": "ok", "day": "15", "time": "15:00"}),
 ]
 EXTRACT = [  # (nome, fsm, conversazione, funzione attesa, argomenti attesi)
+    ("'Please cancel the booking of March 20 at 15' -> set intent unbook march 20 15:00 (CANCELING)", {"state": "IDLE", "intent": None, "slots": SL(), "missing": [], "tentative": {}},
+     [U("Please cancel the booking of March 20 at 15.")], "set", {"intent": "unbook", "month": "march", "day": "20", "time": "15:00"}),
+    ("'never mind' in raccolta -> cancel (rinuncia), non unbook", COLL_APR, BASE[:-1] + [U("Never mind, forget it.")], "cancel", {}),
+    ("'remove my appointment on April 15' dopo BOOKED -> unbook", {"state": "DONE", "intent": "book", "status": "confirmed", "slots": SL("april", "15", "15:00"), "missing": [], "tentative": {}},
+     [A("Booked, April 15th at 3 PM. Anything else?"), U("Actually, remove my appointment on April 15 at 3 pm.")], "set", {"intent": "unbook", "day": "15"}),
     ("si' alla proposta -> yes", COLL_PROP, BASE + [A("How about April 15th? Does that work?"), U("Uh, yes.")], "yes", {}),
     ("'now confirm the booking' alla proposta -> yes", COLL_PROP, BASE + [A("How about April 15th? Does that work?"), U("Now confirm the booking.")], "yes", {}),
     ("'no, the 17th' alla proposta -> set day 17", COLL_PROP, BASE + [A("How about April 15th? Does that work?"), U("No, the 17th.")], "set", {"day": "17"}),

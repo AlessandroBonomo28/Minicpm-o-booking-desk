@@ -60,11 +60,11 @@ def _fn(name, desc, props=None, required=None):
             "parameters": {"type": "object", "properties": props or {}, "required": required or []}}}
 TOOL_DEFS = {
     "set": _fn("set", "The customer states or changes something about a request: what they want (intent: book = reserve / make an appointment; check = ask whether a date or time is free) and/or a month, a day, a time, exactly as said. Use it for new requests, for answers to the desk's questions ('the 20th', 'at 3 pm', 'April') and for corrections ('no, the 3rd', 'at 5 pm instead'). Pass only what was said.",
-                {"intent": {"type": ["string", "null"], "enum": ["book", "check", None], "description": "book or check if the customer expressed it in this sentence; null otherwise"}, **_FIELDS}),
+                {"intent": {"type": ["string", "null"], "enum": ["book", "check", "unbook", None], "description": "book, check or unbook if the customer expressed it in this sentence; unbook = asks to cancel / remove / delete an appointment ALREADY MADE ('cancel my booking on March 20 at 3 pm', 'remove that appointment'); null otherwise"}, **_FIELDS}),
     "yes": _fn("yes", "The customer answers YES to the desk's open yes/no question (confirming a booking or accepting an offered slot): 'yes', 'ok', 'sure', 'go ahead', 'book it', 'that's fine'. Only when the sentence is a plain acceptance. NOT yes: a sentence that asks something back ('yeah, so did you check?', 'yes, but is it really free?', 'which one?') or that starts with yes and then changes a value (use set).",
                {"accepts": {"type": "string", "description": "the customer's own words that accept the offer, quoted (e.g. 'book it'); if the sentence contains no acceptance, do not call yes"}}, ["accepts"]),
     "no": _fn("no", "The customer answers NO to the desk's open yes/no question: 'no', 'no thanks', 'not that one', 'I'll think about it'."),
-    "cancel": _fn("cancel", "The customer gives up the request in progress: 'never mind', 'forget it', 'cancel', 'stop'."),
+    "cancel": _fn("cancel", "The customer gives up the request IN PROGRESS: 'never mind', 'forget it', 'stop', 'cancel that' without naming a booking. NOT for cancelling an appointment already made: that is set with intent unbook."),
 }
 def tools_for_state(fsm):
     return [TOOL_DEFS[n] for n in ("set", "yes", "no", "cancel")]
@@ -86,8 +86,8 @@ HEARD_PROMPT = ("You read what the OPERATOR of a voice booking desk just said to
 #      Sostituisce heard: nella stessa chiamata riporta anche readback e claim.
 SIGMA_TOOL = _fn("verdict", "Your verdict on the OPERATOR's situation right now.",
                  {**_FIELDS,
-                  "claim": {"type": ["string", "null"], "enum": ["slot_taken", "slot_free", "slot_invalid", "booking_confirmed", None],
-                            "description": "what the operator STATES about the booking system in its last turn, true or not: slot_taken, slot_free (also a proposal), slot_invalid, booking_confirmed; null if it states nothing"},
+                  "claim": {"type": ["string", "null"], "enum": ["slot_taken", "slot_free", "slot_invalid", "booking_confirmed", "booking_cancelled", None],
+                            "description": "what the operator STATES about the booking system in its last turn, true or not: slot_taken, slot_free (also a proposal), slot_invalid, booking_confirmed, booking_cancelled (says the booking has been cancelled / removed); null if it states nothing"},
                   "claim_time": {"type": ["string", "null"], "description": "the time the claim is about, 24h HH:MM; null if none"},
                   "claim_day": {"type": ["string", "null"], "description": "the day of the month the claim is about, as a number; null if none"},
                   "claim_month": {"type": ["string", "null"], "description": "the month named in the claim, English lowercase: 'How about April 15th?' -> 'april', even when it is the customer's own month; null only if the operator names no month"},
@@ -100,7 +100,8 @@ SIGMA_TOOL = _fn("verdict", "Your verdict on the OPERATOR's situation right now.
 SIGMA_CAPABILITIES = ("CAPABILITIES of the booking system (the SCREEN is its state): it can tell whether ONE day or ONE time slot is free; "
                       "it can show which days of a month are booked (when the month is known and the day is missing); it can book ONE slot "
                       "(month + day + time) only after the customer says yes; it can choose a free day or a free time itself when the customer asks the "
-                      "desk to pick (the SCREEN then shows the proposal with a question mark); it can cancel the request. It CANNOT: book several slots or "
+                      "desk to pick (the SCREEN then shows the proposal with a question mark); it can drop the request in progress; it can CANCEL an existing "
+                      "booking (month + day + time) only after the SCREEN asks CANCEL IT? and the customer says yes. It CANNOT: book several slots or "
                       "recurring bookings, search across months, handle names, rooms, services, prices or payments, or anything outside "
                       "this booking. The operator must never announce an action the system is not doing: the SCREEN shows what it does.")
 SIGMA_PROMPT = ("You are the SUPERVISOR of a voice booking desk. A small speech model, the OPERATOR, talks with the CUSTOMER and reads "
@@ -211,7 +212,9 @@ PROMPT_API_V2 = ("You are the request extractor of a voice booking desk (OPERATO
                  "what the question offers; a question, a doubt, a request to verify ('did you check?', 'is it really free?', 'which one?') "
                  "or a comment is NOT a yes and NOT a value: no function. If the customer answers yes but also changes a value ('yes, at 3 pm'), "
                  "call set with the value.\n"
-                 "cancel = the customer gives up the request. Greeting, thanks, hesitation, off-topic: no function, answer NO ACTION.")
+                 "cancel = the customer gives up the request in progress ('never mind', 'forget it'). Cancelling an appointment ALREADY MADE "
+                 "('cancel the booking of March 20 at 3 pm', 'remove my appointment', 'delete the reservation') is set with intent unbook and the "
+                 "month / day / time named. Greeting, thanks, hesitation, off-topic: no function, answer NO ACTION.")
 HARNESS = "v2"   # v2 | legacy (--harness)
 
 
@@ -228,6 +231,16 @@ def fsm_line_v2(fsm):
     sl = (fsm or {}).get("slots") or {} if isinstance(fsm, dict) else {}
     tm = sl.get("time") or ""
     when = _hl_date(sl) + (f" at {tm}" if tm and tm != "all-day" else "")
+    if st == "CONFIRM" and fsm.get("intent") == "unbook":
+        return today + f'STATE: the desk found the booking of {when} and asked: "Shall I cancel it?" Open yes/no question (yes = cancel that booking; no = keep it; a corrected value = set).'
+    if st == "COLLECTING" and fsm.get("intent") == "unbook":
+        got = [k for k in ("month", "day", "time") if sl.get(k)]
+        miss = [k for k in (fsm.get("missing") or []) if k in ("month", "day", "time")]
+        return today + (f"STATE: a CANCELLATION of an existing booking is in progress; collected: {', '.join(got) or 'nothing'}; missing: "
+                        f"{', '.join(miss) or 'nothing'}. The desk is asking for the {(miss[0] if miss else 'nothing').upper()} of the booking to cancel. No yes/no question is open.")
+    if st == "DONE" and fsm.get("intent") == "unbook":
+        return today + (f"STATE: the booking of {when} has just been CANCELLED. No open question; a new request = set." if fsm.get("status") == "cancelled"
+                        else f"STATE: the desk told the customer there is NO booking for {when}. No open question; a new request = set.")
     if st == "CONFIRM" and fsm.get("intent") == "book":
         return today + f'STATE: the desk asked the customer: "Shall I book {when}?" Open yes/no question (yes = book exactly that; no = do not; a corrected value = set).'
     if st == "CONFIRM":

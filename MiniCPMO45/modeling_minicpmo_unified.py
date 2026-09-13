@@ -3969,6 +3969,8 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
         audio_waveform: Optional[np.ndarray] = None,
         frame_list: Optional[List] = None,
         max_slice_nums: int = 1,
+        screen_text: Optional[str] = None,
+        screen_text_wrap: str = "plain",
     ):
         """预填充用户输入（透传到 self.duplex.streaming_prefill）
         
@@ -3986,6 +3988,8 @@ class MiniCPMO(MiniCPMOPreTrainedModel):
             audio_waveform=audio_waveform,
             frame_list=frame_list,
             max_slice_nums=max_slice_nums,
+            screen_text=screen_text,
+            screen_text_wrap=screen_text_wrap,
         )
     
     def duplex_generate(
@@ -4634,8 +4638,13 @@ class DuplexCapability:
         frame_list: Optional[list] = None,
         max_slice_nums: Union[int, List[int]] = 1,
         batch_vision_feed: bool = False,
+        screen_text: Optional[str] = None,
+        screen_text_wrap: str = "plain",
     ):
         """Streaming prefill - called once per second, processing audio/video data
+        (ramo BETAGAMMA-2, 13/09: canale TESTUALE dello schermo) screen_text = il testo dell'HUD, alimentato come token di testo
+        nello slot della visione (dopo <unit>, prima dell'audio) al posto dei frame; screen_text_wrap='image' lo chiude tra
+        <image>...</image>, 'plain' lo mette nudo. Il nervo ottico resta staccato: nessun frame, nessun VPM.
 
         Args:
             audio_waveform: audio waveform data
@@ -4682,6 +4691,7 @@ class DuplexCapability:
             "input_vision_tokens": 0,
         }
         n_vision_slices = 0
+        n_text_tokens = 0
 
         def _make_result(success, reasons=""):
             reason = reasons
@@ -4699,6 +4709,7 @@ class DuplexCapability:
                 "cost_audio_feed": cost_audio_feed,
                 "cost_all": time.time() - start_time,
                 "n_vision_slices": n_vision_slices,
+                "n_text_tokens": n_text_tokens,
                 "usage": dict(usage_delta) if success else {
                     "input_text_tokens": 0,
                     "input_audio_tokens": 0,
@@ -4714,6 +4725,7 @@ class DuplexCapability:
 
         has_frames = frame_list is not None and len(frame_list) > 0
         has_audio = audio_waveform is not None and len(audio_waveform) > 0
+        has_text = bool(screen_text and str(screen_text).strip())
 
         if has_frames and has_audio:
             mode = "OMNI"
@@ -4728,10 +4740,11 @@ class DuplexCapability:
 
         # 滑窗：记录 unit 开始位置
         logger.info(
-            "[Duplex] streaming_prefill: mode=%s, has_frames=%s, has_audio=%s, starting unit",
+            "[Duplex] streaming_prefill: mode=%s, has_frames=%s, has_audio=%s, has_text=%s, starting unit",
             mode,
             has_frames,
             has_audio,
+            has_text,
         )
         self.decoder.register_unit_start()
 
@@ -4742,6 +4755,19 @@ class DuplexCapability:
         self.decoder.feed(self.decoder.embed_token(self.unit_token_id))
         self._current_unit_prefill_tokens.append(self.unit_token_id)
         usage_delta["input_text_tokens"] += 1
+
+        # Step 1b (canale testuale): il testo dello schermo nello slot della visione, prima dell'audio
+        if has_text:
+            t0 = time.time()
+            _txt_ids = self.tokenizer.encode(str(screen_text).strip(), add_special_tokens=False)[:160]
+            if screen_text_wrap == "image":
+                _txt_ids = [self.image_start_token_id] + _txt_ids + [self.image_end_token_id]
+            if _txt_ids:
+                self.decoder.feed(self.decoder.embed_tokens(_txt_ids))
+                self._current_unit_prefill_tokens.extend(_txt_ids)
+                usage_delta["input_text_tokens"] += len(_txt_ids)
+                n_text_tokens = len(_txt_ids)
+            cost_vision_feed = time.time() - t0
 
         # Step 2: process image
         if has_frames:

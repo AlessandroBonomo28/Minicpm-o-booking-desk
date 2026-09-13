@@ -615,7 +615,7 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
         }
         const { ok, status, d, dt } = res;
         if (!ok) { hudLog('warn', `estrattore: ${d.error || status}`); return; }
-        if (d.user_text) { lastUserTurnAt = now(); forcesSinceUser = 0; cutsSinceUser = 0; lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 40) dialog.shift(); }
+        if (d.user_text) { lastUserTurnAt = now(); forcesSinceUser = 0; cutsSinceUser = 0; userTurns++; lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 40) dialog.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s${d.asr_model ? ' (' + d.asr_model + ')' : ''} + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
@@ -820,6 +820,7 @@ $('btnCue').onclick = async () => {
 //      ultimo passaggio (con l'evento che l'ha causato); accanto i meccanismi: semaforo, risultato dovuto, σ, force (cooldown e tetti),
 //      cliente, omni. Si aggiorna a ogni evento e ogni mezzo secondo (contatori).
 const dbg = { prev: null, edge: null, event: null, sigma: null, verdict: null, force: null };
+let userTurns = 0;   // (grafo) battute del cliente contate qui: su questo ramo il gateway non le riceve
 const dbgEsc = (x) => String(x ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const dbgAgo = (t) => `${Math.max(0, now() - t).toFixed(1)} s fa`;
 const dbgCut = (x, n) => { x = String(x || ''); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
@@ -906,7 +907,7 @@ function renderGraph() {
     const rows = [];
     rows.push(['Semaforo', chip(lvl.toUpperCase(), LIGHT[lvl] || '#2e7d32') + ' ' + dbgEsc(f.hint || (lvl === 'green' ? 'OK' : '')) + ` <span class="mute">· seq ${f.seq || 0}</span>`]);
     const ro = f.result_owed;
-    rows.push(['Risultato dovuto', ro ? (ro.forced ? chip('FORZATO 1 volta', '#f9a825') + ' <span class="mute">per questo schermo, poi tocca a σ</span>'
+    if (ro !== undefined) rows.push(['Risultato dovuto', ro ? (ro.forced ? chip('FORZATO 1 volta', '#f9a825') + ' <span class="mute">per questo schermo, poi tocca a σ</span>'
                                              : chip('DOVUTO', '#1a237e') + ' <span class="mute">il prossimo turno deve dirlo (lo giudica σ: screen_said)</span>')
                                      : '<span class="mute">nessuno: detto, oppure schermo senza risultato</span>']);
     const sg = dbg.sigma, a = sg && sg.a;

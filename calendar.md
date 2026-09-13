@@ -413,3 +413,10 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   freccia arancione sull'ultimo passaggio con l'evento che l'ha causato. Accanto: semaforo, risultato dovuto, ultimo verdetto di σ
   (stuck/ok, aiuto, claim, screen_said), esito del turno, force (cooldown, aiuti per battuta, tetto per stato, tagli), cliente, omni.
   Nessun effetto su frame, canale testuale o FSM. Verificato con screenshot headless (Firefox dal lato Windows).
+- 14/09 — **Ramo `FORCESPEAK-BETAGAMMA-CANCELING`**: tool call per CANCELLARE una prenotazione scritta, con conferma. Nella run
+  sess_a48b68c49335 "Please cancel the booking of March 20 at 15" diventava set(book, march 20 15:00) → TAKEN. Ora: intento `unbook`
+  nell'estrattore (distinto da `cancel` = rinuncia alla richiesta in corso) → macchina COLLECTING unbook (CANCEL: MARCH 20 | WHAT TIME?; se il
+  giorno ha una sola prenotazione l'ora è dedotta) → CONFIRM unbook (MARCH 20, 3 PM | BOOKED | CANCEL IT?) → il sì, unico evento che scrive,
+  toglie la prenotazione dal DB → DONE (CANCELLED | ANYTHING ELSE?); no o rinuncia → BOOKING KEPT; slot non prenotato → NO BOOKING. σ: claim
+  `booking_cancelled` verificato ("I've cancelled it" prima del sì → "Sorry, nothing is cancelled yet. Shall I cancel the booking of…").
+  Replay 71/71 (12 casi), estrattore 4/4 sulla frase vera, API viva.

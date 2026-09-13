@@ -93,7 +93,7 @@ function themeFor() {
             const tent = f.tentative || {};
             const mq = tent.month ? '?' : '', dq = tent.day ? '?' : '', tq = tent.time ? '?' : '';
             const when = (month || day) ? `${month ? month + mq : ''}${day ? ' ' + day + dq : ''}`.trim() : '';
-            const verb = f.intent === 'check' ? 'FREE' : 'BOOK';
+            const verb = f.intent === 'check' ? 'FREE' : (f.intent === 'unbook' ? 'CANCEL' : 'BOOK');
             const line1 = when ? `${verb}: ${when}${f.slots.time && miss !== 'time' ? ', ' + timeLabel(f.slots.time) + tq : ''}` : `${verb}: ?`;
             const askFor = { month: 'WHICH MONTH?', day: 'WHICH DAY?', time: 'WHAT TIME?' }[miss] || '';
             const tentKeys = Object.keys(tent).filter(k => tent[k]);
@@ -119,6 +119,11 @@ function themeFor() {
             // (08/09, GOODTEST-2) risultato = riga 1 lo slot, riga 2 un FATTO (FREE / TAKEN / BOOKED, mai YES/NO che si confonde
             // con il si' del cliente), riga 3 la domanda che l'operatore fa al cliente per il passo successivo.
             const slot = slotLine(f);
+            if (f.intent === 'unbook') {   // (CANCELING) cancellazione di una prenotazione scritta: chiede conferma, poi CANCELLED
+                if (s === 'pending_cancel') return { bg: '#6d4c41', fg: '#ffffff', title: '', line1: slot, line2: 'BOOKED', line3: hud.screen === 'CONFIRM' ? 'CANCEL IT?' : '' };
+                if (s === 'cancelled') return { bg: '#6d4c41', fg: '#ffffff', title: '', line1: slot, line2: 'CANCELLED', line3: 'ANYTHING ELSE?' };
+                if (s === 'not_found') return { bg: '#c62828', fg: '#ffffff', title: '', line1: slot, line2: 'NO BOOKING', line3: 'ANYTHING ELSE?' };
+            }
             if (f.intent === 'book') {
                 if (s === 'pending') return { bg: '#2e7d32', fg: '#ffffff', title: '', line1: slot, line2: 'FREE', line3: hud.screen === 'CONFIRM' ? 'SHALL I BOOK IT?' : '' };
                 if (s === 'confirmed') return { bg: '#2e7d32', fg: '#ffffff', title: '', line1: slot, line2: 'BOOKED', line3: 'ANYTHING ELSE?' };
@@ -159,7 +164,7 @@ function actFor() {
             return miss ? `ASK: ${miss.toUpperCase()}` : '';   // il perche' (15:00 TAKEN) sta nello stato, non nell'atto
         }
         case 'CHECKING': return 'SAY: CHECKING';
-        case 'CONFIRM': return f.intent === 'book' ? 'ASK: CONFIRM BOOKING' : 'SAY: AVAILABLE';
+        case 'CONFIRM': return f.intent === 'book' ? 'ASK: CONFIRM BOOKING' : (f.intent === 'unbook' ? 'ASK: CONFIRM CANCEL' : 'SAY: AVAILABLE');
         case 'DONE':
             if (s === 'error') return 'SAY: ERROR';
             if (f.intent === 'book') return s === 'confirmed' ? 'SAY: BOOKED' : 'SAY: SLOT TAKEN';
@@ -228,7 +233,7 @@ function screenLabel() {
     const f = hud.fsm;
     if (hud.screen !== 'CONFIRM' && hud.screen !== 'DONE') return hud.screen;
     if (f.status === 'error') return 'ERR';
-    if (f.status === 'available' || f.status === 'confirmed' || f.status === 'pending') return 'OK';
+    if (f.status === 'available' || f.status === 'confirmed' || f.status === 'pending' || f.status === 'pending_cancel' || f.status === 'cancelled') return 'OK';
     if (f.status === 'partial') return 'PARTIAL';
     return 'NO';
 }
@@ -889,10 +894,10 @@ function dbgNodeLines(st, f, cur) {
     const when = [(sl.month || '').toUpperCase(), sl.day || ''].filter(Boolean).join(' ') + (sl.time && sl.time !== 'all-day' ? ', ' + timeLabel(sl.time) : (sl.time === 'all-day' && sl.day ? ', ALL DAY' : ''));
     const marks = Object.keys(tent).filter(k => tent[k]).map(k => k + (tent[k] === 'proposal' ? '?' : '~')).join(' ');
     if (st === 'IDLE') return ['IDLE', 'BOOKING DESK', f.note || ''];
-    if (st === 'COLLECTING') return ['COLLECTING', (f.intent === 'check' ? 'FREE: ' : 'BOOK: ') + (when || '?'),
+    if (st === 'COLLECTING') return ['COLLECTING', (f.intent === 'check' ? 'FREE: ' : (f.intent === 'unbook' ? 'CANCEL: ' : 'BOOK: ')) + (when || '?'),
         [(f.month_info ? 'lista del mese' : ''), ((f.missing || []).length ? 'manca ' + f.missing.join(', ') : ''), marks ? 'tentativi ' + marks : '', (f.pick || []).length ? 'pick ' + f.pick.join(',') : ''].filter(Boolean).join(' · ')];
-    if (st === 'CONFIRM') return ['CONFIRM', when || '?', (f.intent === 'book' ? 'FREE · SHALL I BOOK IT?' : (f.status === 'partial' ? 'FREE, EXCEPT ' + takenList(f.detail).join(', ') : 'FREE · ' + (sl.time && sl.time !== 'all-day' ? 'SHALL I BOOK IT?' : 'WHAT TIME?'))) + (marks ? ' · ' + marks : '')];
-    const stl = f.status === 'confirmed' ? 'BOOKED' : ((f.status === 'taken' || f.status === 'booked') ? 'TAKEN' : (f.status === 'error' ? 'ERROR' : 'chiusa'));
+    if (st === 'CONFIRM') return ['CONFIRM', when || '?', (f.intent === 'unbook' ? 'BOOKED · CANCEL IT?' : f.intent === 'book' ? 'FREE · SHALL I BOOK IT?' : (f.status === 'partial' ? 'FREE, EXCEPT ' + takenList(f.detail).join(', ') : 'FREE · ' + (sl.time && sl.time !== 'all-day' ? 'SHALL I BOOK IT?' : 'WHAT TIME?'))) + (marks ? ' · ' + marks : '')];
+    const stl = f.status === 'confirmed' ? 'BOOKED' : ((f.status === 'taken' || f.status === 'booked') ? 'TAKEN' : (f.status === 'cancelled' ? 'CANCELLED' : (f.status === 'not_found' ? 'NO BOOKING' : (f.status === 'error' ? 'ERROR' : 'chiusa'))));
     return ['DONE · ' + stl, when || '?', f.status === 'confirmed' ? 'ANYTHING ELSE?' : ((f.status === 'taken' || f.status === 'booked') ? 'ANOTHER TIME?' : (f.status || ''))];
 }
 function renderGraph() {

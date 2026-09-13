@@ -90,7 +90,7 @@
     <div class="card" style="margin-top:14px">
       <h2>Richiesta manuale (senza voce) ed esito della FSM</h2>
       <div class="row"><label>Richiesta</label>
-        <select id="qIntent"><option value="check" selected>check (è libero?)</option><option value="book">book (prenota)</option><option value="yes">yes (sì alla domanda aperta)</option><option value="no">no</option><option value="cancel">cancel (rinuncia)</option></select>
+        <select id="qIntent"><option value="check" selected>check (è libero?)</option><option value="book">book (prenota)</option><option value="unbook">unbook (cancella una prenotazione)</option><option value="yes">yes (sì alla domanda aperta)</option><option value="no">no</option><option value="cancel">cancel (rinuncia)</option></select>
         <input type="text" id="qDate" value="MARCH 31" placeholder="data (vuota = manca)" style="width:130px"> <input type="text" id="qTime" value="15:00" placeholder="ora (vuota = manca / giornata)" style="width:170px"></div>
       <div class="row"><label>Esito</label>
         <select id="qOutcome"><option value="auto" selected>dal gestionale (prenotazioni inserite in db.html)</option><option value="ok">forza AVAILABLE</option><option value="no">forza BOOKED</option><option value="err">simula ERROR / TIMEOUT</option></select>

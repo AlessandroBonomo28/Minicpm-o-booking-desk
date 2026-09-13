@@ -44,6 +44,13 @@
   svg#fsmGraph .last { stroke:#fb8c00; stroke-width:3; fill:none; stroke-dasharray:8 6; animation:dash 1s linear infinite; }
   svg#fsmGraph .lastlab { font-size:11px; font-weight:700; fill:#e65100; paint-order:stroke; stroke:#fafbfc; stroke-width:3px; }
   @keyframes dash { to { stroke-dashoffset:-28; } }
+  /* orchestratore: due riquadri (HUD -> modello, LLM esterno -> macchina/semaforo) */
+  .box { border:1px solid var(--line); border-radius:6px; padding:8px; background:#fafbfc; }
+  .boxhead { font-weight:700; font-size:12px; color:var(--accent); margin-bottom:6px; }
+  .trace { height:240px; overflow:auto; font-size:11.5px; line-height:1.35; }
+  .trace .row2 { padding:3px 0; border-bottom:1px dashed #e3e7eb; }
+  .trace .tt { color:#9aa3ad; font-variant-numeric:tabular-nums; margin-right:5px; }
+  .trace .io { display:block; padding-left:14px; color:#37474f; }
 </style>
 </head>
 <body>
@@ -60,6 +67,14 @@
     <div style="display:grid; grid-template-columns:640px 1fr; gap:14px; align-items:start; margin-top:8px">
       <svg id="fsmGraph" viewBox="0 0 640 300"></svg>
       <div class="mech" id="mech"></div>
+    </div>
+  </details>
+  <details class="card" id="orchCard" open style="grid-column:1 / -1">
+    <summary><h2 style="display:inline">Orchestratore — HUD e LLM esterno: attivazioni, ingressi, uscite (debug)</h2>
+      <span class="small"> · ogni riga è un'attivazione: quando, con che ingresso, che uscita, verso chi · i comandi al modello (force_speak, force_listen) viaggiano col chunk audio · più recente in alto</span></summary>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:8px">
+      <div class="box"><div class="boxhead">HUD → modello: schermo e comandi <span class="small" id="orchHudNow">—</span></div><div class="trace" id="orchHud"></div></div>
+      <div class="box"><div class="boxhead">LLM esterno (estrattore, σ) → macchina / semaforo <span class="small" id="orchLlmNow">—</span></div><div class="trace" id="orchLlm"></div></div>
     </div>
   </details>
   <div>

@@ -285,7 +285,8 @@ function manualRequest() {
     const intent = $('qIntent').value, date = $('qDate').value.trim(), time = $('qTime').value.trim();
     const args = {}; if (!['yes', 'no', 'cancel'].includes(intent)) { if (date) args.date = date; if (time) args.time = time; }
     hudLog('sys', `richiesta manuale: ${intent}(${JSON.stringify(args)})`);
-    fsmEvent([{ name: intent, arguments: args }], '', 'manuale').catch(e => hudLog('warn', 'FSM errore: ' + e.message));
+    const orec = orchPush('llm', { who: 'richiesta manuale (pannello, senza LLM)', input: `${intent} ${JSON.stringify(args)}`, output: `${intent}${JSON.stringify(args)}`, to: 'macchina (evento)' });
+    fsmEvent([{ name: intent, arguments: args }], '', 'manuale').then(() => orchPatch('llm', r => r === orec, { to: `macchina → ${hud.fsm.state}${hud.fsm.intent ? ' ' + hud.fsm.intent : ''} ${[hud.fsm.slots.month, hud.fsm.slots.day, hud.fsm.slots.time].filter(Boolean).join(' ')}${hud.fsm.status ? ' · ' + hud.fsm.status : ''} → schermo` })).catch(e => hudLog('warn', 'FSM errore: ' + e.message));
 }
 
 // ------------------------------------------------------------------ microfono + VAD
@@ -409,6 +410,7 @@ async function startSessionInner() {
     $('conv').innerHTML = ''; $('hudLog').innerHTML = '';
     hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false;
     hud.lastContent = null; hud.pendingIsEvent = false; pendingContext = false; instructionActive = ''; clearTimeout(instructionTimer);
+    orch.hud.length = 0; orch.llm.length = 0; renderOrch();
     omniTurnOpen = false; lastUserTurnAt = -1; lastForceAt = -100; forceCount = {}; forceLatched = false; holdActive = false; clearTimeout(silenceTimer);
     lastOmniEndAt = -1; clearTimeout(noReplyTimer); sigmaBusy = false; lastHelp = ''; forcesSinceUser = 0; clearTimeout(midTurnTimer); cutChunksLeft = 0; cutVerdict = null; cutsSinceUser = 0;
     await fsmReset();                                // ogni sessione parte da IDLE (le prenotazioni in db.html restano)
@@ -465,7 +467,7 @@ async function startSessionInner() {
             }
         }
     };
-    session.onForceListenChange = (a) => { $('btnForceListen').style.background = a ? '#ffe0b2' : '#fff'; };
+    session.onForceListenChange = (a) => { $('btnForceListen').style.background = a ? '#ffe0b2' : '#fff'; orchPush('hud', { what: a ? 'force_listen MANUALE acceso (bottone)' : 'force_listen manuale spento', flags: [a ? 'force_listen (manuale, ogni chunk)' : 'listen libero'] }); };
 
     const preparePayload = { config: { length_penalty: parseFloat($('lengthPenalty').value) || 1.0,
                                        text_repetition_penalty: parseFloat($('textRepPenalty').value) || 1.0,
@@ -490,6 +492,7 @@ async function startSessionInner() {
                     audioF32 = mixed; hudLog('warn', `STIMOLO AUDIO inviato con il chunk #${sess.chunksSent + 1}`);
                 }
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
+                let cutNow = false, holdNow = false;
                 if (pendingContext) {
                     pendingContext = false; msg.context_text = composeContext();
                     if ($('slidingWindow').value !== 'context') hudLog('warn', 'regione sticky ignorata dal modello: serve la finestra in modo context');
@@ -497,7 +500,7 @@ async function startSessionInner() {
                 }
                 // hold (opzione): dalla pausa alla decisione l'omni ascolta (force_listen), al massimo HOLD_MAX_CHUNKS chunk
                 if (holdActive) {
-                    if (holdChunks < HOLD_MAX_CHUNKS) { msg.force_listen = true; holdChunks++; hudLog('sys', `HOLD: force_listen sul chunk #${sess.chunksSent + 1}`); }
+                    if (holdChunks < HOLD_MAX_CHUNKS) { msg.force_listen = true; holdChunks++; holdNow = true; hudLog('sys', `HOLD: force_listen sul chunk #${sess.chunksSent + 1}`); }
                     else { holdActive = false; forceLatched = true; latchReason = 'hold scaduto'; hudLog('warn', 'HOLD scaduto: force armato'); }
                 }
                 // lampeggio: costante (un frame per chunk, banner alternato) oppure solo 4 frame al cambio di livello
@@ -513,7 +516,7 @@ async function startSessionInner() {
                 }
                 // TAGLIO (σ in corsa): force_listen per un chunk, audio fermato subito
                 if (cutChunksLeft > 0) {
-                    cutChunksLeft--; msg.force_listen = true;
+                    cutChunksLeft--; msg.force_listen = true; cutNow = true;
                     try { sess.audioPlayer.stopAll(); } catch (_) {}
                     hudLog('warn', `TAGLIO: force_listen sul chunk #${sess.chunksSent + 1} (il modello chiude il turno con <|turn_eos|>)`);
                 }
@@ -538,6 +541,14 @@ async function startSessionInner() {
                     dbg.force = { t: sentAt, why, chunk: chunkNo, screen: hud.lastText || '' }; renderGraph();
                     if (pendingContext) { pendingContext = false; msg.context_text = composeContext(); hudLog('hud', `CONTEXT → regione di sistema (chunk #${chunkNo}): "${msg.context_text.replace(/\n/g, ' ⏎ ')}"`); }
                     setTimeout(() => hudLog(omniSpokeAt > sentAt ? 'hud' : 'warn', `FORCE_SPEAK #${chunkNo} → ${omniSpokeAt > sentAt ? 'turno aperto a +' + (omniSpokeAt - sentAt).toFixed(1) + ' s' : 'NESSUN TESTO entro 3 s (turno vuoto o ignorato)'}`), 3000);
+                }
+                {   // orchestratore: cosa parte col chunk verso il modello
+                    const fl = [];
+                    if (msg.force_speak) fl.push('force_speak' + (why ? ' (' + why + ')' : ''));
+                    if (msg.force_listen) fl.push('force_listen' + (cutNow ? ' (taglio σ, 1 chunk)' : (holdNow ? ' (hold)' : '')));
+                    if (msg.inject_text) fl.push('inject_text');
+                    if (msg.context_text) fl.push('context (regione di sistema)');
+                    if (msg.frame_base64_list || fl.length) orchPush('hud', { what: msg.frame_base64_list ? (isEvent ? 'frame EVENTO (schermo cambiato)' : 'frame (lampeggio / ridisegno)') : 'solo comando, nessun frame', chunk: sess.chunksSent + 1, screen: msg.frame_base64_list ? (hud.lastText || '') : '', flags: fl });
                 }
                 sess.sendChunk(msg);
                 $('chunks').textContent = sess.chunksSent;
@@ -618,9 +629,12 @@ async function onUserTurnEnd(utterance, speechMs, ctxSec = 0) {
         if (d.user_text) { lastUserTurnAt = now(); forcesSinceUser = 0; cutsSinceUser = 0; userTurns++; lastUserWords = d.user_text.trim().split(/\s+/).length; conv('sys', 'TU (ASR): ' + d.user_text); userLines.push(d.user_text); if (userLines.length > 4) userLines.shift(); dialog.push({ role: 'user', text: d.user_text }); if (dialog.length > 40) dialog.shift(); }
         const calls = d.tool_calls || [];
         const tim = `ASR ${d.asr_s ?? '?'} s${d.asr_model ? ' (' + d.asr_model + ')' : ''} + LLM ${d.llm_s ?? '?'} s = ${dt} s${d.backend ? ' · ' + d.backend : ''}`;
+        const orec = orchPush('llm', { who: 'estrattore', dt, input: `la tua battuta (ASR) "${d.user_text || ''}" + stato della macchina ${hud.fsm.state}${hud.fsm.intent ? ' ' + hud.fsm.intent : ''}`,
+                                       output: calls.length ? calls.map(c => c.name + JSON.stringify(c.arguments)).join(' ') : 'nessuna azione (none)', to: calls.length ? 'macchina (evento)' : 'nessuno: la macchina non cambia' });
         if (!calls.length) { hudLog('sys', `estrattore (${tim}): nessuna azione — "${(d.raw || '').slice(0, 70)}"`); return; }
         for (const c of calls) hudLog('hud', `ESTRATTORE (${tim}): ${c.name}(${JSON.stringify(c.arguments)})`);
         await fsmEvent(calls, d.user_text, 'estrattore (turno utente)');
+        orchPatch('llm', r => r === orec, { to: `macchina → ${hud.fsm.state}${hud.fsm.intent ? ' ' + hud.fsm.intent : ''} ${[hud.fsm.slots.month, hud.fsm.slots.day, hud.fsm.slots.time].filter(Boolean).join(' ')}${(hud.fsm.missing || []).length ? ' · manca ' + hud.fsm.missing.join(', ') : ''}${hud.fsm.status ? ' · ' + hud.fsm.status : ''} → schermo` });
         conv('sys', stateLine(`dopo la tua battuta: ${calls.map(c => c.name + JSON.stringify(c.arguments)).join(' ')}`));
     } catch (e) { hudLog('warn', 'estrattore errore: ' + e.message); }
     finally {
@@ -684,6 +698,8 @@ async function midTurnCheck() {
         if (!r.ok) { hudLog('warn', `σ in corsa: ${d.error || r.status}`); armMidTurnCheck(MID_TURN_EVERY_S); return; }
         const a = ((d.tool_calls || [])[0] || {}).arguments || null;
         dbg.sigma = { t: now(), reason: 'mid_turn', a: a ? Object.assign({}, a) : null, text: partial, turnS }; renderGraph();
+        orchPush('llm', { who: 'σ in corsa', dt, reason: `turno aperto da ${turnS} s`, input: `testo parziale dell'omni "…${partial.slice(-90)}" + schermo + stato`, output: a ? (a.status === 'stuck' ? 'STUCK ' + (a.kind || '') + (a.help ? ' → "' + a.help + '"' : '') : 'ok, lascia parlare') : 'nessun verdetto',
+            to: (a && a.status === 'stuck') ? (cutsSinceUser >= MAX_CUTS_PER_USER_TURN ? 'stuck ma tetto dei tagli raggiunto: niente' : 'TAGLIO: force_listen col prossimo chunk, poi il verdetto va al semaforo') : 'nessuno' });
         if (!omniTurnOpen) { hudLog('sys', `σ in corsa (${dt} s, turno di ${turnS} s): il turno si e' chiuso da solo nel frattempo`); return; }
         if (a && a.status === 'stuck') {
             if (cutsSinceUser >= MAX_CUTS_PER_USER_TURN) { hudLog('warn', `σ in corsa (${dt} s, turno di ${turnS} s): STUCK ${a.kind || ''} ma tetto di ${MAX_CUTS_PER_USER_TURN} tagli per battuta raggiunto: tocca al cliente`); return; }
@@ -732,6 +748,8 @@ async function onOperatorTurnEnd(text, forced = false, reason = 'turn_end', pres
                     `${a.claim ? ' · claim ' + a.claim + (a.claim_time ? ' ' + a.claim_time : '') + (a.claim_day ? ' giorno ' + a.claim_day : '') : ''}` +
                     `${(a.month || a.day || a.time) ? ' · readback ' + JSON.stringify({ month: a.month, day: a.day, time: a.time }) : ''}`);
                 else hudLog('sys', `σ (${dt} s): nessun verdetto`);
+                orchPush('llm', { who: 'σ', dt, reason, input: (reason === 'no_reply' ? '(silenzio dopo la tua battuta)' : `turno dell'omni "${(text || '').slice(0, 90)}"`) + ` + schermo "${hud.lastText || ''}" + stato ${hud.fsm.state} + conversazione`,
+                    output: a ? ((a.status === 'stuck' ? 'STUCK ' + (a.kind || '') + (a.help ? ' → "' + a.help + '"' : '') : 'ok') + (a.claim ? ' · claim ' + a.claim + (a.claim_time ? ' ' + a.claim_time : '') + (a.claim_day ? ' giorno ' + a.claim_day : '') : '') + ((a.month || a.day || a.time) ? ' · readback ' + [a.month, a.day, a.time].filter(Boolean).join(' ') : '')) : 'nessun verdetto', to: 'semaforo (gateway)' });
             } else hudLog('warn', `σ: ${d.error || r.status}`);
         } else if (reason === 'no_reply') return;
         dbg.sigma = { t: now(), reason, a: calls.length ? Object.assign({}, calls[0].arguments || {}) : null, text: text || '' }; renderGraph();
@@ -746,11 +764,13 @@ async function onOperatorTurnEnd(text, forced = false, reason = 'turn_end', pres
         conv('sys', stateLine(`turno omni giudicato: ${d2.level}${d2.hint ? ' ' + d2.hint : ''}`));
         if (d2.capped) hudLog('warn', 'σ: tetto di due aiuti per stato raggiunto, nessun altro force finche\' lo stato non cambia');
         lastHelp = (d2.stuck && d2.hint) ? d2.hint : (d2.level === 'red' ? d2.hint : '');
+        let forceOutcome = '';
         if (d2.force && !omniTurnOpen) {
-            if (forcesSinceUser >= 1) hudLog('sys', `σ chiede aiuto (${d2.kind || d2.level}) ma un aiuto e' gia' stato dato: tocca al cliente`);
-            else if (now() - lastForceAt < 6) hudLog('sys', 'σ chiede aiuto ma l\'ultimo force e\' di meno di 6 s fa: niente');
-            else { forceSpeakOnce = true; forcesSinceUser++; lastForceAt = now(); hudLog('warn', `σ chiede aiuto (${d2.kind || d2.level}): force_speak col prossimo chunk, che porta lo schermo nuovo`); }
-        }
+            if (forcesSinceUser >= 1) { forceOutcome = 'force negato: un aiuto gia\' dato in questa battuta'; hudLog('sys', `σ chiede aiuto (${d2.kind || d2.level}) ma un aiuto e' gia' stato dato: tocca al cliente`); }
+            else if (now() - lastForceAt < 6) { forceOutcome = 'force negato: cooldown 6 s'; hudLog('sys', 'σ chiede aiuto ma l\'ultimo force e\' di meno di 6 s fa: niente'); }
+            else { forceSpeakOnce = true; forcesSinceUser++; lastForceAt = now(); forceOutcome = 'FORCE_SPEAK armato: parte col prossimo chunk'; hudLog('warn', `σ chiede aiuto (${d2.kind || d2.level}): force_speak col prossimo chunk, che porta lo schermo nuovo`); }
+        } else if (d2.force) forceOutcome = 'force negato: l\'omni sta parlando';
+        orchPatch('llm', r => (r.who === 'σ' || r.who === 'σ in corsa') && !r.done, { done: true, to: `semaforo → ${d2.level.toUpperCase()}${d2.hint ? ' "' + d2.hint + '"' : ''}${d2.capped ? ' · tetto di due aiuti per stato' : ''}${forceOutcome ? ' · ' + forceOutcome : ''}` });
     } catch (e) { sigmaBusy = false; hudLog('warn', 'turno omni errore: ' + e.message); }
 }
 
@@ -814,6 +834,25 @@ $('btnCue').onclick = async () => {
     }
     cueOnce = true; hudLog('warn', 'STIMOLO AUDIO richiesto: parte col prossimo chunk al posto del microfono');
 };
+// ---- ORCHESTRATORE (Alessandro, 14/09): due riquadri, "HUD -> modello" (ogni schermo mandato e i comandi force_speak / force_listen
+//      che viaggiano col chunk) e "LLM esterno" (ogni chiamata all'estrattore e a σ: ingresso, uscita, verso chi, cosa ne ha fatto la
+//      macchina o il semaforo). Solo visualizzazione: registra quello che il client gia' fa.
+const orch = { hud: [], llm: [] };
+function orchPush(lane, rec) { rec.t = rec.t ?? now(); orch[lane].unshift(rec); if (orch[lane].length > 40) orch[lane].pop(); renderOrch(); return rec; }
+function orchPatch(lane, pred, patch) { const r = orch[lane].find(pred); if (r) { Object.assign(r, patch); renderOrch(); } return r; }
+function renderOrch() {
+    const h = $('orchHud'), l = $('orchLlm'); if (!h || !l) return;
+    const fmt = (t) => `${(t || 0).toFixed(1)}s`;
+    h.innerHTML = orch.hud.map(r => `<div class="row2"><span class="tt">${fmt(r.t)}</span><b>${dbgEsc(r.what)}</b>${r.chunk ? ' · chunk #' + r.chunk : ''}` +
+        ((r.flags || []).length ? ' ' + r.flags.map(f => `<span class="chip" style="background:${f.startsWith('force_speak') ? '#fb8c00' : (f.startsWith('force_listen') ? '#6d4c41' : '#607d8b')}">${dbgEsc(f)}</span>`).join(' ') : '') +
+        (r.screen ? `<span class="io">→ modello: “${dbgEsc(dbgCut(r.screen, 120))}”</span>` : '') + (r.note ? `<span class="io mute">${dbgEsc(r.note)}</span>` : '') + `</div>`).join('') || '<span class="mute">nessuna attivazione</span>';
+    l.innerHTML = orch.llm.map(r => `<div class="row2"><span class="tt">${fmt(r.t)}</span><b>${dbgEsc(r.who)}</b>${r.dt ? ` <span class="mute">${dbgEsc(String(r.dt))} s</span>` : ''}${r.reason ? ` <span class="mute">(${dbgEsc(r.reason)})</span>` : ''}` +
+        (r.input ? `<span class="io">← ingresso: ${dbgEsc(dbgCut(r.input, 140))}</span>` : '') + (r.output ? `<span class="io">→ uscita: ${dbgEsc(dbgCut(r.output, 160))}</span>` : '') + (r.to ? `<span class="io">↳ ${dbgEsc(dbgCut(r.to, 160))}</span>` : '') + `</div>`).join('') || '<span class="mute">nessuna attivazione</span>';
+    const lh = orch.hud[0], ll = orch.llm[0];
+    $('orchHudNow').textContent = lh ? `ultimo: ${lh.what} a ${fmt(lh.t)} · ${orch.hud.length} attivazioni` : '—';
+    $('orchLlmNow').textContent = ll ? `ultimo: ${ll.who} a ${fmt(ll.t)} · ${orch.llm.length} chiamate` : '—';
+}
+
 // ---- GRAFO DELLA MACCHINA (13/09, Alessandro: "una sezione che mi mostri graficamente lo stato in cui ci troviamo, con grafi e frecce").
 //      Solo visualizzazione: legge lo stato che il client ha gia' (hud.fsm, verdetti di σ, esiti del semaforo, force, tempi). Nessun
 //      effetto sul frame, sul canale testuale o sulla FSM. Nodo colorato = stato attuale col colore del semaforo; freccia arancione =
@@ -941,5 +980,6 @@ $('btnReset').onclick = fsmReset;
 $('btnFrame').onclick = () => hudSync(true);
 drawHud();
 renderGraph();   // grafo di debug: disegnato subito, poi a ogni evento
+renderOrch();
 checkToolAgent();
 fetch('/api/hud_fsm').then(r => r.json()).then(f => applyFsm(f, 0)).catch(() => {});   // stato corrente della FSM (db.html lo vede uguale)

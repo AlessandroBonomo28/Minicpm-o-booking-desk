@@ -1044,7 +1044,28 @@ async def hud_db_check(request: Request):
 # ---- FSM della prenotazione (plan/ramo-hud.md, 04/09): la macchina a stati la fa il codice, il modello estrae soltanto
 # Campi della richiesta, INDIPENDENTI dall'ordine (Alessandro, 04/09 sera): mese, giorno, ora arrivano in qualunque
 # ordine e in qualunque combinazione; la FSM tiene quelli validi e chiede il primo mancante in quest'ordine.
-_HUD_REQUIRED = {"check": ["month", "day"], "book": ["month", "day", "time"]}
+def _hud_exec_unbook(date: str, tm: str, outcome: str, source: str, confirmed: bool):
+    """(CANCELING, 14/09) Cancellazione di una prenotazione SCRITTA. Non confermata: cerca la prenotazione -> pending_cancel (lo schermo
+    chiede 'CANCEL IT?') oppure not_found. Confermata (yes in CONFIRM unbook, l'unico evento che scrive): la toglie dal DB -> cancelled."""
+    key = f"{date} {tm}"; db = _HUD_DB["slots"]
+    hit = key if (db.get(key) or {}).get("status") == "booked" else next(
+        (k for k, v in db.items() if v.get("date") == date and v.get("status") == "booked" and _hud_norm_time(v.get("time")) == tm), None)
+    if outcome == "err":
+        status = "error"
+    elif not hit:
+        status = "not_found"
+    elif confirmed:
+        db.pop(hit, None); status = "cancelled"
+    else:
+        status = "pending_cancel"
+    _HUD_DB["log"].append({"ts": datetime.now().isoformat(timespec="seconds"), "intent": "unbook", "date": date, "time": tm, "result": status,
+                           "detail": "", "source": source or "?", "delay_s": None, "mode": outcome})
+    _HUD_DB["log"] = _HUD_DB["log"][-200:]
+    _hud_db_save()
+    return {"date": date, "time": tm, "status": status, "detail": ""}
+
+
+_HUD_REQUIRED = {"check": ["month", "day"], "book": ["month", "day", "time"], "unbook": ["month", "day", "time"]}   # unbook (CANCELING): cancella una prenotazione scritta, con conferma
 _HUD_EMPTY_SLOTS = {"month": "", "day": "", "time": "", "time_raw": "", "date": ""}
 
 
@@ -1211,13 +1232,15 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         fsm["unbound_yes"] = None   # (08/09) ogni altro evento del cliente supera un si' rimasto slegato
 
     if name == "cancel":
+        if fsm.get("intent") == "unbook" and state in ("COLLECTING", "CONFIRM"):
+            return _hud_fsm_reset(note="BOOKING KEPT"), True   # (CANCELING) rinuncia alla cancellazione: la prenotazione resta
         note = "REQUEST CANCELLED" if state == "COLLECTING" else ("BOOKING NOT CONFIRMED" if (state == "CONFIRM" and fsm.get("intent") == "book") else "")
         return _hud_fsm_reset(note=note), True
     said = {k: clean(args.get(k)) for k in ("date", "month", "day", "time")}
     any_said = any(said.values())
     said_intent = clean(args.get("intent")).lower()
-    if name in ("book", "check", "check_availability"):   # compat
-        said_intent = "book" if name == "book" else "check"; name = "set"
+    if name in ("book", "check", "check_availability", "unbook"):   # compat (pannello manuale)
+        said_intent = {"book": "book", "unbook": "unbook"}.get(name, "check"); name = "set"
     if name == "yes" and any_said:
         name = "set"   # "yes, at 3 pm" = correzione + nuova conferma: yes non porta valori
     tentative = dict(fsm.get("tentative") or {})
@@ -1232,8 +1255,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         # Revisione (08/09 sera): una proposta puo' sostituire solo una proposta (il cliente risponde all'ultima che ha sentito); il
         # mese della proposta (claim_month) entra se manca, non entra se contraddice il cliente (rosso in _hud_supervise); una
         # proposta che COMPLETA una prenotazione va dritta alla conferma (un solo si'); un si' arrivato prima del verdetto la lega.
-        if state != "COLLECTING":
-            _hud_db_save(); return fsm, False
+        if state != "COLLECTING" or fsm.get("intent") == "unbook":
+            _hud_db_save(); return fsm, False   # (CANCELING) in una cancellazione niente proposte: si cancella solo cio' che il cliente nomina
         claim = clean(args.get("claim")).lower(); mark = True; proposal = False
         if claim:
             said = {k: "" for k in said}; mark = "proposal"
@@ -1325,6 +1348,8 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
                                 pick=pick, pick_skip=pick_skip, month_info=_hud_month_info(slots["month"]) if slots["month"] and not slots["day"] else None)
             elif fsm.get("intent") == "book":
                 return _hud_fsm_reset(note="BOOKING NOT CONFIRMED"), True
+            elif fsm.get("intent") == "unbook":
+                return _hud_fsm_reset(note="BOOKING KEPT"), True   # (CANCELING) no alla domanda CANCEL IT?: resta prenotato
             else:
                 return bump(state="DONE")
         else:
@@ -1334,28 +1359,29 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
             if state == "COLLECTING":
                 fsm["unbound_yes"] = now_s   # (08/09) si' senza domanda aperta: se la proposta di σ arriva subito dopo (corsa), lo lega
             _hud_db_save(); return fsm, False   # nessuna domanda si'/no aperta: il si' non lega a niente
-        # l'UNICO evento che scrive: conferma la prenotazione in sospeso o accetta l'offerta (se manca l'ora la si chiede)
-        intent = "book"; confirmed = True
+        # l'UNICO evento che scrive: conferma la prenotazione in sospeso o accetta l'offerta (se manca l'ora la si chiede);
+        # (CANCELING) oppure conferma la cancellazione se la domanda aperta e' CANCEL IT?
+        intent = "unbook" if fsm.get("intent") == "unbook" else "book"; confirmed = True
         pick = [k for k in pick if not (fsm.get("tentative") or {}).get(k)]   # il campo proposto e accettato non e' piu' delegato
         slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
         if ref.get("time") and ref.get("time") != "all-day":
             slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
     elif name == "set":
-        if not any_said and said_intent not in ("book", "check") and not _solidified:
+        if not any_said and said_intent not in ("book", "check", "unbook") and not _solidified:
             _hud_db_save(); return fsm, False   # set senza campi = evento nullo
         if _solidified:
             pass   # slots e intent gia' impostati sopra
         elif state == "COLLECTING":
-            intent = said_intent if said_intent in ("book", "check") else fsm["intent"]   # merge sempre; l'intento detto e' una correzione
+            intent = said_intent if said_intent in ("book", "check", "unbook") else fsm["intent"]   # merge sempre; l'intento detto e' una correzione
             slots = dict(_HUD_EMPTY_SLOTS, **ref)
         elif state == "CONFIRM":
             # correzione sull'offerta / sulla prenotazione in sospeso: eredita, applica, si torna in conferma (mai si scrive)
-            intent = said_intent if said_intent in ("book", "check") else (fsm.get("intent") or "check")
+            intent = said_intent if said_intent in ("book", "check", "unbook") else (fsm.get("intent") or "check")
             slots = dict(_HUD_EMPTY_SLOTS, month=ref.get("month", ""), day=ref.get("day", ""))
             if ref.get("time") and ref.get("time") != "all-day":
                 slots["time"] = ref["time"]; slots["time_raw"] = ref.get("time_raw") or ref["time"]
         else:
-            intent = said_intent if said_intent in ("book", "check") else "check"   # richiesta nuova; un valore senza intento = verifica
+            intent = said_intent if said_intent in ("book", "check", "unbook") else "check"   # richiesta nuova; un valore senza intento = verifica
             slots = dict(_HUD_EMPTY_SLOTS); pick = []; pick_skip = {}
     else:
         _hud_db_save(); return fsm, False
@@ -1416,8 +1442,13 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     if state == "COLLECTING" and not any_said and user_text:
         _route_bare_number(user_text)   # il modello non ha estratto nulla ma la battuta era un numero secco
     slots["date"] = f"{slots['month']} {slots['day']}" if slots["month"] and slots["day"] else ""
+    if intent == "unbook" and slots.get("month") and slots.get("day") and not slots.get("time"):
+        # (CANCELING) "cancel my booking on April 20" senza ora: se quel giorno ha UNA sola prenotazione, e' quella
+        _day = [v for v in _HUD_DB["slots"].values() if v.get("date") == f"{slots['month']} {slots['day']}" and v.get("status") == "booked"]
+        if len(_day) == 1:
+            slots["time"] = _day[0].get("time") or ""; slots["time_raw"] = _day[0].get("time_raw") or slots["time"]
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
-    if pick and not rejected and state != "CONFIRM":
+    if pick and not rejected and state != "CONFIRM" and intent != "unbook":
         picked = _hud_pick_fill(intent, slots, pick, pick_skip)   # "scegli tu": la macchina propone (tentativo "proposal")
         for k in picked: tentative[k] = "proposal"
         missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
@@ -1433,7 +1464,9 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
             _hud_db_save(); return fsm, False   # idempotenza: stesso record = evento nullo
         return bump(**new)
     date = slots["date"]; tm = _hud_norm_time(slots.get("time"))
-    if intent == "check":
+    if intent == "unbook":
+        res = _hud_exec_unbook(date, tm, outcome or "auto", source, confirmed)   # (CANCELING) pending_cancel -> CONFIRM; cancelled / not_found -> DONE
+    elif intent == "check":
         res = _hud_exec_check(date, tm, outcome or "auto", source, delay_s)
     elif confirmed:
         res = _hud_exec_book(date, tm, slots.get("time_raw") or "", outcome or "auto", source, delay_s)
@@ -1450,7 +1483,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     # non conosceva, e una `book` vuota su "No, time is..." e' finita scritta senza una conferma vera. Una richiesta nuova
     # riparte da zero e passa dalla conferma.
     free = None
-    new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] == "pending" else "DONE"
+    new_state = "CONFIRM" if (intent == "check" and res["status"] in ("available", "partial")) or res["status"] in ("pending", "pending_cancel") else "DONE"
     new = dict(state=new_state, intent=intent, slots=shown, missing=[], rejected={}, tentative=(tentative if _proposal_confirm and new_state == "CONFIRM" else {}),
                status=res["status"], detail=res.get("detail") or "", note="", free=free, month_info=None, pick=pick, pick_skip=pick_skip)
     if _hud_same_record(fsm, new):
@@ -1506,6 +1539,8 @@ def _hud_screen_question(fsm) -> str:
             return f"What time on {when}?"
         return "What would you like to book?"
     if st == "CONFIRM":
+        if fsm.get("intent") == "unbook":
+            return f"Shall I cancel the booking of {when}?"
         if fsm.get("intent") == "book":
             return f"Shall I book {when}?"
         tm = _hud_norm_time(sl.get("time"))
@@ -1523,6 +1558,8 @@ def _hud_red_sentence(code: str, fsm) -> str:
     day_label = lambda x: (f"{x.split()[0].capitalize()} {_hud_ordinal(x.split()[1])}" if re.fullmatch(r"[A-Z]+ \d{1,2}", x) else x)
     if code == "NOTHING BOOKED YET":
         return f"Sorry, nothing is booked yet. {q}"
+    if code == "NOTHING CANCELLED YET":
+        return f"Sorry, nothing is cancelled yet. {q}"
     m = re.fullmatch(r"(.+) IS TAKEN", code)
     if m:
         return f"Sorry, {day_label(m.group(1))} is taken. What other time would you like?"
@@ -1553,6 +1590,8 @@ def _hud_supervise_code(fsm, omni_text: str, heard_args: dict):
     booked_now = (st == "DONE" and fsm.get("status") == "confirmed")
     if claim == "booking_confirmed" and not booked_now:
         return "red", "NOTHING BOOKED YET"
+    if claim == "booking_cancelled" and not (st == "DONE" and fsm.get("intent") == "unbook" and fsm.get("status") == "cancelled"):
+        return "red", "NOTHING CANCELLED YET"   # (CANCELING) "I've cancelled it" prima del si': correzione
     if claim in ("slot_taken", "slot_invalid", "slot_free") and sl.get("date") and _hud_time_valid(ct, "book"):
         free = _hud_lookup(sl["date"], ct)[0] == "available"
         if claim in ("slot_taken", "slot_invalid") and free:

@@ -407,3 +407,9 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   σ in corsa 1 controllo ok (nessun taglio su un turno sano), nessun turno oltre 12 s, zero rossi. Da annotare: giallo falso su
   readback time='any'; una pronuncia cinese nell'audio (testo inglese) dopo i filler "uhm": decoder del parlato a prevalenza
   cinese su testo corto/frammentato, annotato e accettato (Alessandro: "ci conviviamo"), rimedio eventuale "Speak only English." nel prompt.
+- 13/09 (notte, 6, portato su FORCESPEAK-BETAGAMMA) — **Grafo della macchina nell'HUD** (Alessandro: "una sezione che mi mostri graficamente lo stato in cui ci troviamo"):
+  in cima alla pagina, solo visualizzazione. SVG con IDLE, COLLECTING, CONFIRM, DONE e le frecce della macchina (set, completo, yes che
+  scrive, no, slot occupato, nuova richiesta, cancel, cicli di readback/proposta/pick); nodo attuale colorato col semaforo e con il record;
+  freccia arancione sull'ultimo passaggio con l'evento che l'ha causato. Accanto: semaforo, risultato dovuto, ultimo verdetto di σ
+  (stuck/ok, aiuto, claim, screen_said), esito del turno, force (cooldown, aiuti per battuta, tetto per stato, tagli), cliente, omni.
+  Nessun effetto su frame, canale testuale o FSM. Verificato con screenshot headless (Firefox dal lato Windows).

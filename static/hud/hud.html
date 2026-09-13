@@ -28,6 +28,22 @@
   .lamp { display:inline-block; width:10px; height:10px; border-radius:50%; background:#9e9e9e; margin-right:6px; }
   .lamp.on { background:#43a047; } .lamp.speak { background:#fb8c00; }
   .small { font-size:12px; color:var(--mute); }
+  /* grafo della macchina (debug, 13/09) */
+  details.card summary { cursor:pointer; list-style:none; }
+  details.card summary::-webkit-details-marker { display:none; }
+  .mech { display:grid; grid-template-columns:130px 1fr; gap:5px 10px; font-size:12px; align-content:start; line-height:1.4; }
+  .mech .mk { color:var(--mute); text-align:right; }
+  .mech .mv { word-break:break-word; }
+  .chip { display:inline-block; color:#fff; border-radius:10px; padding:1px 7px; font-size:11px; font-weight:600; vertical-align:middle; }
+  .mute { color:var(--mute); }
+  svg#fsmGraph { width:640px; height:300px; background:#fafbfc; border:1px solid var(--line); border-radius:6px; display:block; }
+  svg#fsmGraph text { font-family:system-ui, sans-serif; }
+  svg#fsmGraph .lab { font-size:10px; fill:#546e7a; paint-order:stroke; stroke:#fafbfc; stroke-width:3px; }
+  svg#fsmGraph .edge { stroke:#90a4ae; stroke-width:1.5; fill:none; }
+  svg#fsmGraph .edge.dash { stroke-dasharray:5 4; }
+  svg#fsmGraph .last { stroke:#fb8c00; stroke-width:3; fill:none; stroke-dasharray:8 6; animation:dash 1s linear infinite; }
+  svg#fsmGraph .lastlab { font-size:11px; font-weight:700; fill:#e65100; paint-order:stroke; stroke:#fafbfc; stroke-width:3px; }
+  @keyframes dash { to { stroke-dashoffset:-28; } }
 </style>
 </head>
 <body>
@@ -38,6 +54,14 @@
 </header>
 
 <div class="wrap">
+  <details class="card" id="graphCard" open style="grid-column:1 / -1">
+    <summary><h2 style="display:inline">Macchina degli stati e meccanismi — solo visualizzazione (debug)</h2>
+      <span class="small"> · nessun effetto su frame, canale testuale o FSM · nodo colorato = stato attuale col semaforo · freccia arancione = ultimo passaggio · clic per chiudere</span></summary>
+    <div style="display:grid; grid-template-columns:640px 1fr; gap:14px; align-items:start; margin-top:8px">
+      <svg id="fsmGraph" viewBox="0 0 640 300"></svg>
+      <div class="mech" id="mech"></div>
+    </div>
+  </details>
   <div>
     <div class="card">
       <h2>Schermo dell'operatore (quello che il modello vede)</h2>

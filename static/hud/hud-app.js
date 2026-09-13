@@ -246,7 +246,8 @@ function applyFsm(fsm, delay = 0) {
     fsm = Object.assign(IDLE_FSM(), fsm || {}); fsm.slots = Object.assign({ month: '', day: '', time: '', date: '' }, fsm.slots || {});
     const changed = JSON.stringify(fsm) !== JSON.stringify(hud.fsm);
     if ((fsm.level || 'green') !== lastLevelSeen) { lastLevelSeen = fsm.level || 'green'; blinkLeft = 4; blinkPhase = 0; }   // lampeggio: 4 frame alternati
-    hud.fsm = fsm;
+    const prevFsm = hud.fsm; hud.fsm = fsm;
+    dbgFsm(prevFsm, fsm);   // grafo di debug: ultimo passaggio
     if ((fsm.state === 'CONFIRM' || fsm.state === 'DONE') && delay > 0 && changed && hud.screen !== 'CONFIRM' && hud.screen !== 'DONE') {
         hud.screen = 'CHECKING'; syncScreen();
         queryTimer = setTimeout(() => { hud.screen = fsm.state; syncScreen(); hudLog('sys', `esito mostrato dopo ${delay}s: ${fsm.status}${fsm.detail ? ' (' + fsm.detail + ')' : ''}`); }, delay * 1000);
@@ -262,6 +263,7 @@ async function fsmEvent(toolCalls, userText, source) {
     const d = await r.json();
     if (!r.ok) { hudLog('warn', 'FSM: ' + (d.error || r.status)); return null; }
     const f = d.fsm;
+    dbg.event = { t: now(), calls: toolCalls, text: userText || '', changed: !!d.changed, source };
     if (d.changed && lastHelp) { hudLog('sys', 'aiuto di σ superato: la macchina e\' cambiata con la battuta del cliente'); lastHelp = ''; }   // (08/09) un aiuto vale per lo stato in cui e' nato
     hudLog(d.changed ? 'hud' : 'sys', `FSM → ${f.state}${f.intent ? ' ' + f.intent : ''} ${f.slots.month || '?'} ${f.slots.day || '?'} ${f.slots.time || ''}` +
         ((f.missing || []).length ? ' · manca ' + f.missing.join(', ') : '') +
@@ -533,6 +535,7 @@ async function startSessionInner() {
                     if (inj && mode === 'system') { instructionActive = inj; pendingContext = true; clearTimeout(instructionTimer); instructionTimer = setTimeout(() => clearInstruction('timeout 8 s'), 8000); }
                     const chunkNo = sess.chunksSent + 1, sentAt = forceSpeakSentAt;
                     hudLog('warn', `FORCE_SPEAK (${why}) con il chunk #${chunkNo} (schermo: ${hud.lastText || ''})${inj ? ' · ' + (mode === 'system' ? 'ISTRUZIONE in regione di sistema' : 'INIETTATO nello slot di uscita') + ': "' + inj + '"' : ''}`);
+                    dbg.force = { t: sentAt, why, chunk: chunkNo, screen: hud.lastText || '' }; renderGraph();
                     if (pendingContext) { pendingContext = false; msg.context_text = composeContext(); hudLog('hud', `CONTEXT → regione di sistema (chunk #${chunkNo}): "${msg.context_text.replace(/\n/g, ' ⏎ ')}"`); }
                     setTimeout(() => hudLog(omniSpokeAt > sentAt ? 'hud' : 'warn', `FORCE_SPEAK #${chunkNo} → ${omniSpokeAt > sentAt ? 'turno aperto a +' + (omniSpokeAt - sentAt).toFixed(1) + ' s' : 'NESSUN TESTO entro 3 s (turno vuoto o ignorato)'}`), 3000);
                 }
@@ -680,6 +683,7 @@ async function midTurnCheck() {
         const dt = ((performance.now() - t0) / 1000).toFixed(2);
         if (!r.ok) { hudLog('warn', `σ in corsa: ${d.error || r.status}`); armMidTurnCheck(MID_TURN_EVERY_S); return; }
         const a = ((d.tool_calls || [])[0] || {}).arguments || null;
+        dbg.sigma = { t: now(), reason: 'mid_turn', a: a ? Object.assign({}, a) : null, text: partial, turnS }; renderGraph();
         if (!omniTurnOpen) { hudLog('sys', `σ in corsa (${dt} s, turno di ${turnS} s): il turno si e' chiuso da solo nel frattempo`); return; }
         if (a && a.status === 'stuck') {
             if (cutsSinceUser >= MAX_CUTS_PER_USER_TURN) { hudLog('warn', `σ in corsa (${dt} s, turno di ${turnS} s): STUCK ${a.kind || ''} ma tetto di ${MAX_CUTS_PER_USER_TURN} tagli per battuta raggiunto: tocca al cliente`); return; }
@@ -730,11 +734,13 @@ async function onOperatorTurnEnd(text, forced = false, reason = 'turn_end', pres
                 else hudLog('sys', `σ (${dt} s): nessun verdetto`);
             } else hudLog('warn', `σ: ${d.error || r.status}`);
         } else if (reason === 'no_reply') return;
+        dbg.sigma = { t: now(), reason, a: calls.length ? Object.assign({}, calls[0].arguments || {}) : null, text: text || '' }; renderGraph();
         const r2 = await fetch('/api/hud_fsm/omni_turn', { method: 'POST', headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ text, tool_calls: calls, outcome: $('qOutcome').value, source: 'σ (turno omni)', fsm_seq: seqSeen, reason }) });
         const d2 = await r2.json();
         if (!r2.ok) { hudLog('warn', `semaforo: ${d2.error || r2.status}`); return; }
         if (d2.stale) { hudLog('sys', 'σ: verdetto stantio scartato (la FSM e\' cambiata durante il giudizio)'); return; }
+        dbg.verdict = { t: now(), reason, level: d2.level, hint: d2.hint || '', stuck: !!d2.stuck, kind: d2.kind || '', owed: d2.owed || '', capped: !!d2.capped, force: !!d2.force };
         hudLog(d2.level === 'green' ? 'sys' : 'warn', `SEMAFORO ${d2.level.toUpperCase()}${d2.hint ? ' · ' + d2.hint : ''} — "${(text || '(silenzio)').slice(0, 60)}"`);
         applyFsm(d2.fsm, 0);
         conv('sys', stateLine(`turno omni giudicato: ${d2.level}${d2.hint ? ' ' + d2.hint : ''}`));
@@ -808,9 +814,131 @@ $('btnCue').onclick = async () => {
     }
     cueOnce = true; hudLog('warn', 'STIMOLO AUDIO richiesto: parte col prossimo chunk al posto del microfono');
 };
+// ---- GRAFO DELLA MACCHINA (13/09, Alessandro: "una sezione che mi mostri graficamente lo stato in cui ci troviamo, con grafi e frecce").
+//      Solo visualizzazione: legge lo stato che il client ha gia' (hud.fsm, verdetti di σ, esiti del semaforo, force, tempi). Nessun
+//      effetto sul frame, sul canale testuale o sulla FSM. Nodo colorato = stato attuale col colore del semaforo; freccia arancione =
+//      ultimo passaggio (con l'evento che l'ha causato); accanto i meccanismi: semaforo, risultato dovuto, σ, force (cooldown e tetti),
+//      cliente, omni. Si aggiorna a ogni evento e ogni mezzo secondo (contatori).
+const dbg = { prev: null, edge: null, event: null, sigma: null, verdict: null, force: null };
+const dbgEsc = (x) => String(x ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const dbgAgo = (t) => `${Math.max(0, now() - t).toFixed(1)} s fa`;
+const dbgCut = (x, n) => { x = String(x || ''); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
+function dbgEdgeLabel() {
+    const t = now();
+    if (dbg.event && t - dbg.event.t < 4) return dbg.event.calls.map(c => c.name + (Object.keys(c.arguments || {}).length ? '(' + Object.entries(c.arguments).map(([k, v]) => `${k}=${v}`).join(', ') + ')' : '')).join(' ');
+    if (dbg.sigma && t - dbg.sigma.t < 4 && dbg.sigma.a) { const a = dbg.sigma.a; return a.claim ? `σ: ${a.claim}${a.claim_day ? ' g.' + a.claim_day : ''}${a.claim_time ? ' ' + a.claim_time : ''}` : 'σ'; }
+    return '';
+}
+function dbgFsm(prev, cur) {
+    if (!dbg.booted) { dbg.booted = true; renderGraph(); return; }   // primo stato letto al caricamento: non e' un passaggio
+    if (prev && ((prev.seq || 0) !== (cur.seq || 0) || prev.state !== cur.state || prev.status !== cur.status)) {
+        dbg.prev = prev; dbg.edge = { from: prev.state, to: cur.state, t: now(), label: dbgEdgeLabel() };
+    }
+    renderGraph();
+}
+const GN = { IDLE: { x: 6, y: 88, w: 90, h: 84 }, COLLECTING: { x: 160, y: 80, w: 140, h: 100 }, CONFIRM: { x: 368, y: 80, w: 130, h: 100 }, DONE: { x: 560, y: 88, w: 74, h: 84 } };
+const NODE_FILL = { green: ['#e8f5e9', '#2e7d32'], yellow: ['#fff8e1', '#f9a825'], red: ['#ffebee', '#c62828'] };
+function dbgAnchor(r, tx, ty) {
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2, dx = tx - cx, dy = ty - cy;
+    const sx = Math.abs(dx) > 1e-6 ? (r.w / 2) / Math.abs(dx) : Infinity, sy = Math.abs(dy) > 1e-6 ? (r.h / 2) / Math.abs(dy) : Infinity;
+    const k = Math.min(sx, sy, 1); return [cx + dx * k, cy + dy * k];
+}
+function dbgNodeLines(st, f, cur) {
+    if (!cur) return [st, '', { IDLE: 'BOOKING DESK', COLLECTING: 'raccolta: cosa manca', CONFIRM: 'domanda sì / no aperta', DONE: 'BOOKED / TAKEN' }[st] || ''];
+    const sl = f.slots || {}, tent = f.tentative || {};
+    const when = [(sl.month || '').toUpperCase(), sl.day || ''].filter(Boolean).join(' ') + (sl.time && sl.time !== 'all-day' ? ', ' + timeLabel(sl.time) : (sl.time === 'all-day' && sl.day ? ', ALL DAY' : ''));
+    const marks = Object.keys(tent).filter(k => tent[k]).map(k => k + (tent[k] === 'proposal' ? '?' : '~')).join(' ');
+    if (st === 'IDLE') return ['IDLE', 'BOOKING DESK', f.note || ''];
+    if (st === 'COLLECTING') return ['COLLECTING', (f.intent === 'check' ? 'FREE: ' : 'BOOK: ') + (when || '?'),
+        [(f.month_info ? 'lista del mese' : ''), ((f.missing || []).length ? 'manca ' + f.missing.join(', ') : ''), marks ? 'tentativi ' + marks : '', (f.pick || []).length ? 'pick ' + f.pick.join(',') : ''].filter(Boolean).join(' · ')];
+    if (st === 'CONFIRM') return ['CONFIRM', when || '?', (f.intent === 'book' ? 'FREE · SHALL I BOOK IT?' : (f.status === 'partial' ? 'FREE, EXCEPT ' + takenList(f.detail).join(', ') : 'FREE · ' + (sl.time && sl.time !== 'all-day' ? 'SHALL I BOOK IT?' : 'WHAT TIME?'))) + (marks ? ' · ' + marks : '')];
+    const stl = f.status === 'confirmed' ? 'BOOKED' : ((f.status === 'taken' || f.status === 'booked') ? 'TAKEN' : (f.status === 'error' ? 'ERROR' : 'chiusa'));
+    return ['DONE · ' + stl, when || '?', f.status === 'confirmed' ? 'ANYTHING ELSE?' : ((f.status === 'taken' || f.status === 'booked') ? 'ANOTHER TIME?' : (f.status || ''))];
+}
+function renderGraph() {
+    const svg = $('fsmGraph'), mech = $('mech'); if (!svg || !mech) return;
+    const f = hud.fsm, t = now(), lvl = f.level || 'green', cur = f.state || 'IDLE';
+    const showEdge = dbg.edge && t - dbg.edge.t < 20;
+    const out = [`<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#90a4ae"/></marker>` +
+                 `<marker id="arrO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#fb8c00"/></marker></defs>`];
+    const labels = [];
+    const lab = (x, y, s, cls = 'lab') => labels.push(`<text class="${cls}" x="${x}" y="${y}" text-anchor="middle">${dbgEsc(s)}</text>`);
+    const line = (x1, y1, x2, y2, s, dy = -6) => { out.push(`<path class="edge" d="M${x1},${y1} L${x2},${y2}" marker-end="url(#arr)"/>`); if (s) lab((x1 + x2) / 2, Math.min(y1, y2) + dy, s); };
+    const curve = (x1, y1, x2, y2, depth, s, dash = false) => { const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2 + depth * 2; out.push(`<path class="edge${dash ? ' dash' : ''}" d="M${x1},${y1} Q${cx},${cy} ${x2},${y2}" marker-end="url(#arr)"/>`); if (s) lab(cx, (y1 + y2) / 2 + depth + (depth > 0 ? 12 : -6), s); };
+    const loop = (r, s) => { const cx = r.x + r.w / 2, y = r.y; out.push(`<path class="edge" d="M${cx - 16},${y} C${cx - 34},${y - 46} ${cx + 34},${y - 46} ${cx + 16},${y}" marker-end="url(#arr)"/>`); lab(cx, y - 44, s); };
+    const I = GN.IDLE, C = GN.COLLECTING, K = GN.CONFIRM, D = GN.DONE, mid = (r) => r.y + r.h / 2;
+    // frecce fisse (la macchina: gateway.py _hud_fsm_apply)
+    line(I.x + I.w, mid(I) - 4, C.x, mid(C) - 4, 'set');
+    line(C.x + C.w, mid(C) - 4, K.x, mid(K) - 4, 'completo');
+    line(K.x + K.w, mid(K) - 4, D.x, mid(D) - 4, 'yes: scrive');
+    curve(K.x + 30, K.y + K.h, C.x + C.w - 30, C.y + C.h, 40, 'no · valore nuovo → si torna a chiedere');
+    curve(C.x + C.w / 2, C.y + C.h, D.x + D.w / 2 - 10, D.y + D.h, 75, 'set completo su uno slot occupato → TAKEN');
+    curve(D.x + D.w / 2 + 14, D.y + D.h, C.x + 30, C.y + C.h, 100, 'nuova richiesta (set) → raccolta');
+    curve(C.x + 30, C.y, I.x + I.w / 2 + 10, I.y, -30, 'cancel → IDLE', true);
+    loop(C, 'set · readback · proposta · pick');
+    loop(K, 'no con pick → prossimo libero');
+    lab(D.x + D.w / 2, D.y + D.h + 14, 'cancel: ignorato');
+    // nodi
+    for (const st of ['IDLE', 'COLLECTING', 'CONFIRM', 'DONE']) {
+        const r = GN[st], isCur = st === cur, isPrev = showEdge && dbg.edge.from === st && !isCur;
+        const [fill, stroke] = isCur ? NODE_FILL[lvl] || NODE_FILL.green : ['#fff', isPrev ? '#78909c' : '#cfd8dc'];
+        out.push(`<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="${isCur ? 3 : 1.5}"${isPrev ? ' stroke-dasharray="4 3"' : ''}/>`);
+        const [l1, l2, l3] = dbgNodeLines(st, f, isCur), cx = r.x + r.w / 2, maxc = Math.floor(r.w / 6.2);
+        out.push(`<text x="${cx}" y="${r.y + 22}" text-anchor="middle" font-size="13" font-weight="700" fill="${isCur ? '#1f2933' : '#607d8b'}">${dbgEsc(l1)}</text>`);
+        if (l2) out.push(`<text x="${cx}" y="${r.y + 44}" text-anchor="middle" font-size="12" fill="#1f2933">${dbgEsc(dbgCut(l2, maxc))}</text>`);
+        if (l3) out.push(`<text x="${cx}" y="${r.y + 63}" text-anchor="middle" font-size="10" fill="#546e7a">${dbgEsc(dbgCut(l3, Math.floor(r.w / 5.2)))}</text>`);
+    }
+    // ultimo passaggio
+    if (showEdge) {
+        const a = GN[dbg.edge.from] || GN.IDLE, b = GN[dbg.edge.to] || GN.IDLE;
+        if (dbg.edge.from === dbg.edge.to) {
+            out.push(`<rect class="last" x="${b.x - 6}" y="${b.y - 6}" width="${b.w + 12}" height="${b.h + 12}" rx="14"/>`);
+            lab(320, 13, dbgCut(`ultimo passaggio: ${dbg.edge.to} aggiornato ↻${dbg.edge.label ? ' · ' + dbg.edge.label : ''}`, 90), 'lastlab');
+        } else {
+            const [x1, y1] = dbgAnchor(a, b.x + b.w / 2, b.y + b.h / 2), [x2, y2] = dbgAnchor(b, a.x + a.w / 2, a.y + a.h / 2);
+            out.push(`<path class="last" d="M${x1},${y1} L${x2},${y2}" marker-end="url(#arrO)"/>`);
+            lab(320, 13, dbgCut(`ultimo passaggio: ${dbg.edge.from} → ${dbg.edge.to}${dbg.edge.label ? ' · ' + dbg.edge.label : ''}`, 90), 'lastlab');
+        }
+    }
+    svg.innerHTML = out.concat(labels).join('');
+    // meccanismi
+    const chip = (txt, col) => `<span class="chip" style="background:${col}">${dbgEsc(txt)}</span>`;
+    const rows = [];
+    rows.push(['Semaforo', chip(lvl.toUpperCase(), LIGHT[lvl] || '#2e7d32') + ' ' + dbgEsc(f.hint || (lvl === 'green' ? 'OK' : '')) + ` <span class="mute">· seq ${f.seq || 0}</span>`]);
+    const ro = f.result_owed;
+    rows.push(['Risultato dovuto', ro ? (ro.forced ? chip('FORZATO 1 volta', '#f9a825') + ' <span class="mute">per questo schermo, poi tocca a σ</span>'
+                                             : chip('DOVUTO', '#1a237e') + ' <span class="mute">il prossimo turno deve dirlo (lo giudica σ: screen_said)</span>')
+                                     : '<span class="mute">nessuno: detto, oppure schermo senza risultato</span>']);
+    const sg = dbg.sigma, a = sg && sg.a;
+    rows.push(['σ (ultimo verdetto)', sg ? `<span class="mute">${dbgAgo(sg.t)} · ${dbgEsc(sg.reason)}${sg.turnS ? ' a ' + sg.turnS + ' s' : ''}</span> ` +
+        (a ? ((a.status === 'stuck' ? chip('STUCK ' + (a.kind || ''), '#c62828') + (a.help ? ' “' + dbgEsc(a.help) + '”' : '') : chip('ok', '#2e7d32')) +
+              (a.claim ? ` · claim ${dbgEsc(a.claim)}${a.claim_time ? ' ' + dbgEsc(a.claim_time) : ''}${a.claim_day ? ' g.' + dbgEsc(a.claim_day) : ''}` : '') +
+              (a.screen_said ? ` · risultato detto <b>${dbgEsc(a.screen_said)}</b>` : '') +
+              ((a.month || a.day || a.time) ? ` · readback ${dbgEsc([a.month, a.day, a.time].filter(Boolean).join(' '))}` : ''))
+           : '<span class="mute">nessun verdetto</span>') + (sigmaBusy ? ' ' + chip('sta giudicando…', '#6b7280') : '') : '<span class="mute">—</span>' + (sigmaBusy ? ' ' + chip('sta giudicando…', '#6b7280') : '')]);
+    const v = dbg.verdict;
+    rows.push(['Esito del turno', v ? `<span class="mute">${dbgAgo(v.t)}</span> ` + chip(v.level.toUpperCase(), LIGHT[v.level] || '#2e7d32') + (v.hint ? ' ' + dbgEsc(v.hint) : '') +
+        (v.owed ? ' ' + chip('RISULTATO NON DETTO', '#f9a825') : '') + (v.stuck ? ' · stuck ' + dbgEsc(v.kind) : '') + (v.capped ? ' ' + chip('TETTO', '#6b7280') : '') +
+        (v.force ? ' → <b>force</b>' : ' → nessun force') : '<span class="mute">—</span>']);
+    const cd = Math.max(0, 6 - (t - lastForceAt)), fo = dbg.force;
+    rows.push(['Force', (fo ? `<span class="mute">${dbgAgo(fo.t)}</span> ${dbgEsc(fo.why)} · chunk #${fo.chunk}` : '<span class="mute">nessuno</span>') +
+        ` · cooldown ${cd > 0 ? chip(cd.toFixed(1) + ' s', '#6b7280') : 'libero'} · aiuti dopo la tua battuta <b>${forcesSinceUser}</b>/1 · tetto per stato <b>${f.stuck_count || 0}</b>/2 · tagli <b>${cutsSinceUser}</b>/${MAX_CUTS_PER_USER_TURN}` +
+        (omniTurnOpen ? ' · <span class="mute">turno aperto: nessun force</span>' : '')]);
+    const e = dbg.event;
+    rows.push(['Cliente', `battute <b>${userTurns}</b>` + (lastUserTurnAt >= 0 ? ` <span class="mute">(ultima ${dbgAgo(lastUserTurnAt)})</span>` : '') +
+        (userLines.length ? ` · ASR “${dbgEsc(dbgCut(userLines[userLines.length - 1], 70))}”` : '') +
+        (e ? ` · evento ${dbgEsc(e.calls.map(c => c.name + JSON.stringify(c.arguments || {})).join(' '))} ${e.changed ? chip('macchina cambiata', '#2e7d32') : chip('invariata', '#6b7280')}` : '')]);
+    rows.push(['Omni', (omniTurnOpen ? chip('TURNO APERTO ' + Math.max(0, t - omniSpokeAt).toFixed(0) + ' s', '#fb8c00') : chip('in ascolto', '#6b7280')) +
+        (lastOmniEndAt >= 0 && !omniTurnOpen ? ` <span class="mute">ultimo turno chiuso ${dbgAgo(lastOmniEndAt)}</span>` : '') +
+        (currentAiText ? ` · “…${dbgEsc(currentAiText.slice(-80))}”` : '')]);
+    mech.innerHTML = rows.map(([k, val]) => `<div class="mk">${k}</div><div class="mv">${val}</div>`).join('');
+}
+setInterval(() => { try { renderGraph(); } catch (_) { /* il grafo non deve mai rompere la pagina */ } }, 500);
+
 $('btnQuery').onclick = manualRequest;
 $('btnReset').onclick = fsmReset;
 $('btnFrame').onclick = () => hudSync(true);
 drawHud();
+renderGraph();   // grafo di debug: disegnato subito, poi a ogni evento
 checkToolAgent();
 fetch('/api/hud_fsm').then(r => r.json()).then(f => applyFsm(f, 0)).catch(() => {});   // stato corrente della FSM (db.html lo vede uguale)

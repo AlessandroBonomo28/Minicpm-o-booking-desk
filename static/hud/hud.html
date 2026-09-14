@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>HUD — segnale visivo asincrono (ramo sperimentale)</title>
+<title>Booking desk — operator screen (HUD)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root { --bg:#f6f7f9; --panel:#fff; --line:#dfe3e8; --ink:#1f2933; --mute:#6b7280; --accent:#1a237e; }
@@ -28,7 +28,7 @@
   .lamp { display:inline-block; width:10px; height:10px; border-radius:50%; background:#9e9e9e; margin-right:6px; }
   .lamp.on { background:#43a047; } .lamp.speak { background:#fb8c00; }
   .small { font-size:12px; color:var(--mute); }
-  /* grafo della macchina (debug, 13/09) */
+  /* state graph (debug view) */
   details.card summary { cursor:pointer; list-style:none; }
   details.card summary::-webkit-details-marker { display:none; }
   .mech { display:grid; grid-template-columns:130px 1fr; gap:5px 10px; font-size:12px; align-content:start; line-height:1.4; }
@@ -44,7 +44,7 @@
   svg#fsmGraph .last { stroke:#fb8c00; stroke-width:3; fill:none; stroke-dasharray:8 6; animation:dash 1s linear infinite; }
   svg#fsmGraph .lastlab { font-size:11px; font-weight:700; fill:#e65100; paint-order:stroke; stroke:#fafbfc; stroke-width:3px; }
   @keyframes dash { to { stroke-dashoffset:-28; } }
-  /* orchestratore: due riquadri (HUD -> modello, LLM esterno -> macchina/semaforo) */
+  /* orchestrator: two boxes (HUD -> model, external LLM -> machine / traffic light) */
   .box { border:1px solid var(--line); border-radius:6px; padding:8px; background:#fafbfc; }
   .boxhead { font-weight:700; font-size:12px; color:var(--accent); margin-bottom:6px; }
   .trace { height:240px; overflow:auto; font-size:11.5px; line-height:1.35; }
@@ -55,123 +55,92 @@
 </head>
 <body>
 <header>
-  <h1>HUD — segnale visivo asincrono</h1>
-  <span class="sub">ramo sperimentale · il frame è un <b>clock</b>, non uno store · modello: quello del backend in esecuzione (usare il BASE)</span>
-  <span style="margin-left:auto" class="small"><span class="lamp" id="lamp"></span><span id="stateText">disconnesso</span></span>
+  <h1>Booking desk — operator screen (HUD)</h1>
+  <span class="sub">full-duplex voice agent on MiniCPM-o 4.5 · the model listens to the customer and reads the operator screen · the booking state machine and the database live in the gateway</span>
+  <span style="margin-left:auto" class="small"><span class="lamp" id="lamp"></span><span id="stateText">disconnected</span></span>
 </header>
 
 <div class="wrap">
   <details class="card" id="graphCard" open style="grid-column:1 / -1">
-    <summary><h2 style="display:inline">Macchina degli stati e meccanismi — solo visualizzazione (debug)</h2>
-      <span class="small"> · nessun effetto su frame, canale testuale o FSM · nodo colorato = stato attuale col semaforo · freccia arancione = ultimo passaggio · clic per chiudere</span></summary>
+    <summary><h2 style="display:inline">State machine and mechanisms — view only (debug)</h2>
+      <span class="small"> · no effect on the frames or the machine · coloured node = current state with the traffic-light colour · orange arrow = last transition · click to collapse</span></summary>
     <div style="display:grid; grid-template-columns:640px 1fr; gap:14px; align-items:start; margin-top:8px">
       <svg id="fsmGraph" viewBox="0 0 640 300"></svg>
       <div class="mech" id="mech"></div>
     </div>
   </details>
   <details class="card" id="orchCard" open style="grid-column:1 / -1">
-    <summary><h2 style="display:inline">Orchestratore — HUD e LLM esterno: attivazioni, ingressi, uscite (debug)</h2>
-      <span class="small"> · ogni riga è un'attivazione: quando, con che ingresso, che uscita, verso chi · i comandi al modello (force_speak, force_listen) viaggiano col chunk audio · più recente in alto</span></summary>
+    <summary><h2 style="display:inline">Orchestrator — HUD and external LLM: activations, inputs, outputs (debug)</h2>
+      <span class="small"> · one row per activation: when, with which input, which output, to whom · the commands to the model (force_speak, force_listen) travel with the audio chunk · newest first</span></summary>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:8px">
-      <div class="box"><div class="boxhead">HUD → modello: schermo e comandi <span class="small" id="orchHudNow">—</span></div><div class="trace" id="orchHud"></div></div>
-      <div class="box"><div class="boxhead">LLM esterno (estrattore, σ) → macchina / semaforo <span class="small" id="orchLlmNow">—</span></div><div class="trace" id="orchLlm"></div></div>
+      <div class="box"><div class="boxhead">HUD → model: screen and commands <span class="small" id="orchHudNow">—</span></div><div class="trace" id="orchHud"></div></div>
+      <div class="box"><div class="boxhead">External LLM (extractor, σ) → machine / traffic light <span class="small" id="orchLlmNow">—</span></div><div class="trace" id="orchLlm"></div></div>
     </div>
   </details>
   <div>
     <div class="card">
-      <h2>Schermo dell'operatore (quello che il modello vede)</h2>
+      <h2>Operator screen (what the model sees)</h2>
       <canvas id="hud" width="448" height="448"></canvas>
       <div class="row" style="margin-top:8px">
-        <label>Stato HUD</label><b id="hudState">IDLE</b>
-        <span class="small" id="frameInfo">nessun frame inviato</span>
+        <label>Screen state</label><b id="hudState">IDLE</b>
+        <span class="small" id="frameInfo">no frame sent yet</span>
       </div>
     </div>
 
     <div class="card" style="margin-top:14px">
-      <h2>Richiesta manuale (senza voce) ed esito della FSM</h2>
-      <div class="row"><label>Richiesta</label>
-        <select id="qIntent"><option value="check" selected>check (è libero?)</option><option value="book">book (prenota)</option><option value="unbook">unbook (cancella una prenotazione)</option><option value="yes">yes (sì alla domanda aperta)</option><option value="no">no</option><option value="cancel">cancel (rinuncia)</option></select>
-        <input type="text" id="qDate" value="MARCH 31" placeholder="data (vuota = manca)" style="width:130px"> <input type="text" id="qTime" value="15:00" placeholder="ora (vuota = manca / giornata)" style="width:170px"></div>
-      <div class="row"><label>Esito</label>
-        <select id="qOutcome"><option value="auto" selected>dal gestionale (prenotazioni inserite in db.html)</option><option value="ok">forza AVAILABLE</option><option value="no">forza BOOKED</option><option value="err">simula ERROR / TIMEOUT</option></select>
-        <label style="min-width:auto">ritardo</label><input type="number" id="qDelay" value="0" min="0" max="60" style="width:60px"> s <span class="small">(0 = RESULT diretto; &gt;0 = passa da CHECKING)</span></div>
+      <h2>Manual request (no voice) and machine outcome</h2>
+      <div class="row"><label>Request</label>
+        <select id="qIntent"><option value="check" selected>check (is it free?)</option><option value="book">book (reserve)</option><option value="unbook">unbook (cancel a booking)</option><option value="yes">yes (to the open question)</option><option value="no">no</option><option value="cancel">cancel (drop the request)</option></select>
+        <input type="text" id="qDate" value="MARCH 31" placeholder="date (empty = missing)" style="width:130px"> <input type="text" id="qTime" value="15:00" placeholder="time (empty = missing / all day)" style="width:170px"></div>
       <div class="row">
-        <button class="primary" id="btnQuery">Invia la richiesta alla FSM</button>
-        <button id="btnReset">Reset FSM (IDLE)</button>
+        <button class="primary" id="btnQuery">Send the request to the machine</button>
+        <button id="btnReset">Reset machine (IDLE)</button>
+        <span class="small" id="toolAgentState">extractor: ?</span>
       </div>
-      <div class="row"><label>Trigger</label>
-        <select id="trigMode">
-          <option value="tool" selected>estrattore (Qwen3-1.7B) sul tuo turno → FSM nel gateway</option>
-          <option value="off">solo manuale</option>
-        </select>
-        <span class="small" id="toolAgentState">tool agent: ?</span></div>
+      <div class="row"><label>How it works</label>
+        <span class="small">When you stop speaking (VAD), your line is transcribed (ASR) and the <b>extractor</b> reads ONLY your words plus the machine state and answers <code>set / yes / no / cancel</code> with the values you said. The <b>machine</b> (gateway) merges them, decides what is missing, queries the database and updates the screen. <code>yes</code> is the only event that writes: it books, or cancels an existing booking after the screen asks CANCEL IT?. At the end of each model turn, <b>σ</b> (a cloud LLM) reports readbacks and claims; a claim the database contradicts turns the banner red with a spoken correction; if the model is stuck, σ writes the sentence to say on the banner and the controller opens its turn (force_speak). A turn that drags on is cut (force_listen).</span></div>
       <div class="row"><label>VAD (browser)</label>
-        <span class="small">soglia</span><input type="number" id="vadThr" value="0.02" step="0.005" min="0.005" style="width:70px">
-        <span class="small">silenzio di fine turno</span><input type="number" id="vadSilence" value="600" step="100" min="200" style="width:70px"> ms
-        <span class="small">voce minima</span><input type="number" id="vadMin" value="300" step="100" style="width:70px"> ms
-        <span class="small">livello <b id="vadMeter">0.000</b> · <b id="vadState">silenzio</b></span></div>
-      <div class="row"><label>Modello separato</label>
-        <span class="small">alla FINE DEL TUO TURNO (VAD): ASR della sola battuta (GPU) → l'estrattore vede SOLO le tue parole + lo stato della FSM e risponde <code>book / check / cancel / none</code> con data/ora dette → la FSM (gateway) fa il merge, decide cosa manca (<b>MISSING</b>), esegue sul DB e lo schermo mostra il nuovo stato. Specifica: <code>plan/ramo-hud.md</code>.</span></div>
-      <div class="row"><label>Schermo</label>
-        <select id="screenMode"><option value="act" selected>semaforo: verde = solo stato, giallo/rosso = atto dettato (ramo hud-semaforo)</option><option value="state">solo stato</option></select>
-        <span class="small">con "due metà" aggiungi al prompt: "The top of the screen tells you what to do next; the bottom shows the booking system."</span></div>
-      <div class="row"><label>Orecchio laterale</label>
-        <select id="asrProfile"><option value="turbo">Whisper large-v3-turbo · estrattore cloud senza fallback locale</option><option value="small">Whisper small · estrattore cloud con fallback locale (Qwen3-1.7B)</option></select>
-        <button id="btnAsrProfile">Applica (riavvia ASR ed estrattore, ~1 min)</button>
+        <span class="small">threshold</span><input type="number" id="vadThr" value="0.02" step="0.005" min="0.005" style="width:70px">
+        <span class="small">end-of-turn silence</span><input type="number" id="vadSilence" value="600" step="100" min="200" style="width:70px"> ms
+        <span class="small">min speech</span><input type="number" id="vadMin" value="300" step="100" style="width:70px"> ms
+        <span class="small">level <b id="vadMeter">0.000</b> · <b id="vadState">silence</b></span></div>
+      <div class="row"><label>Speech recognition</label>
+        <select id="asrProfile"><option value="turbo">Whisper large-v3-turbo · cloud extractor, no local fallback</option><option value="small">Whisper small · cloud extractor with local fallback (Qwen3-1.7B)</option></select>
+        <button id="btnAsrProfile">Apply (restarts ASR and extractor, ~1 min)</button>
         <span class="small" id="asrProfileState">—</span></div>
-      <div class="row"><label>Lampeggio</label>
-        <input type="checkbox" id="blinkAlways" checked> <span class="small">banner del semaforo <b>sempre</b> lampeggiante (un frame per chunk, banner pieno/bianco alternati); senza spunta lampeggia solo 4 frame al cambio di livello</span></div>
-      <div class="row"><label>Secondo orecchio</label>
-        <input type="checkbox" id="heardOn" checked> <span class="small"><b>σ stuck detector</b>: a fine turno dell'omni e 3 s dopo una tua battuta senza risposta; vede conversazione, schermo, stato e tempi; readback → tentativi, claim verificati sul DB (rosso); <b>stuck</b> (silenzio, fuori contesto, ripete, ignora lo schermo, annuncio falso) → giallo con l'aiuto sullo schermo + force_speak</span></div>
-      <div class="row"><label>σ in corsa</label>
-        <input type="checkbox" id="midTurnOn" checked> <span class="small"><b>taglio dei turni degenerati</b> (08/09): a 10 s di turno aperto, poi ogni 8 s, σ vede il testo parziale; <b>stuck</b> (ripete, elenca, va avanti da solo) → <code>force_listen</code> per un chunk (il modello chiude il turno con <code>&lt;|turn_eos|&gt;</code>, audio fermato) → aiuto sullo schermo + force_speak come a fine turno; max 3 tagli per battuta del cliente</span></div>
-      <div class="row"><label>Frame iniziale</label>
-        <input type="checkbox" id="sendInitial" checked> <span class="small">invia lo schermo IDLE una volta all'avvio (così il modello sa che c'è uno schermo)</span></div>
-      <div class="row"><label>Frame manuale</label><button id="btnFrame" disabled>Invia il frame corrente ora</button></div>
     </div>
   </div>
 
   <div>
     <div class="card">
-      <h2>Sessione</h2>
-      <div class="row"><label>Prompt di sistema</label></div>
-      <textarea id="systemPrompt">You are in duplex mode, where you can listen and speak at the same time. You are the operator of a booking desk. ALWAYS SPEAK, read the screen to know what to say</textarea>
+      <h2>Session</h2>
+      <div class="row"><label>System prompt</label></div>
+      <textarea id="systemPrompt">You are in duplex mode, where you can listen and speak at the same time. You are the operator of an appointment booking desk. Follow the instructions on the SCREEN, always repeat dates for confirmation</textarea>
       <div class="row">
-        <label>Voce di riferimento</label>
-        <select id="refChoice"><option value="english_call">inglese (preset English Call)</option><option value="italiano">italiano (preset italiano)</option><option value="none">nessuna (default backend)</option></select>
-        <label style="min-width:auto">Delay riproduzione</label><input type="number" id="playbackDelay" value="600" step="50" style="width:70px"> ms
-        <label style="min-width:auto">Length penalty</label><input type="number" id="lengthPenalty" value="1.0" step="0.05" style="width:70px">
-        <label style="min-width:auto" title="penalità sulle PAROLE già generate (finestra 512 token); schema = 1.15; 1.0 = spenta">Text repetition penalty</label><input type="number" id="textRepPenalty" value="1.0" step="0.05" min="1" max="2" style="width:70px">
+        <label>Reference voice</label>
+        <select id="refChoice"><option value="english_call">English (preset English Call)</option><option value="italiano">Italian (preset)</option><option value="none">none (backend default)</option></select>
+        <label style="min-width:auto">Playback delay</label><input type="number" id="playbackDelay" value="600" step="50" style="width:70px"> ms
+        <span class="small" id="kvInfo">KV: — · window: —</span>
       </div>
       <div class="row">
-        <label>Finestra KV</label>
-        <select id="slidingWindow"><option value="basic" selected>basic 4000/3500: un taglio ogni ~7 s col lampeggio (sessioni finora, ramo force-speak)</option><option value="context">context: 45 unità, regione di sistema "previous" + schermo STICKY (serve per il testo nel contesto)</option><option value="off">off: nessun taglio, si ferma a 16k token (~3 min col lampeggio)</option></select>
-        <label style="min-width:auto"><input type="checkbox" id="stickyScreen"> schermo sticky</label> <span class="small">(a ogni cambio di contenuto il testo dello schermo va nella regione di sistema del modello, prima delle unità; richiede modo context)</span>
-        <span class="small" id="kvInfo">KV: — · finestra: —</span>
-      </div>
-      <div class="row">
-        <button class="primary" id="btnStart">Avvia sessione (mic + HUD)</button>
+        <button class="primary" id="btnStart">Start session (mic + screen)</button>
         <button class="danger" id="btnStop" disabled>Stop</button>
-        <button id="btnForceListen" disabled>Force Listen</button>
-        <button id="btnForceSpeak" disabled title="Al prossimo chunk il controllore sostituisce <|listen|> con <|speak|>: l'omni apre un turno e decide lui cosa dire (legge lo schermo)">Parla ora (force_speak)</button>
-        <select id="injectMode" title="dove va il testo col force_speak"><option value="none" selected>solo force, nessun testo (come nel ramo force-speak)</option><option value="system">istruzione nella regione di sistema (sticky, poi rimossa a fine turno; provato 07/09: non la esegue)</option><option value="unit">testo nello slot di uscita dell'unità (07/09: letto come parlato proprio, detta le prime parole)</option></select>
-        <input type="text" id="injectText" value="Read the operator screen aloud to the customer now, in one short sentence." placeholder="testo iniettato col force_speak (vuoto = solo force; {screen} = testo dello schermo)" style="width:520px" title="Context injection: alimentato nel KV dopo l'audio del chunk e prima della decisione parla/ascolta. Vuoto = force_speak nudo.">
-        <label style="min-width:auto"><input type="checkbox" id="autoForce"> τ deterministica</label> <span class="small">(scartata 07/09: force sul frame evento, latch, guardiano a tempo; la decisione ora è di σ)</span>
-        <label style="min-width:auto"><input type="checkbox" id="holdOn"> hold</label> <span class="small">(force_listen dalla pausa alla decisione, max 3 chunk: niente risposta cieca; spento = come misurato finora)</span>
-        <button id="btnCue" disabled title="Al prossimo chunk manda nel canale del cliente il clip static/hud/cues/cue.wav (se c'e') al posto del microfono: stimolo acustico">Stimolo audio</button>
-        <span class="small">chunk inviati: <b id="chunks">0</b> · frame inviati: <b id="framesSent">0</b></span>
+        <button id="btnForceListen" disabled title="Keep the model listening (toggle)">Force listen</button>
+        <button id="btnForceSpeak" disabled title="With the next chunk the controller replaces <|listen|> with <|speak|>: the model opens a turn and decides what to say (it reads the screen)">Speak now (force_speak)</button>
+        <span class="small">chunks sent: <b id="chunks">0</b> · frames sent: <b id="framesSent">0</b></span>
       </div>
+      <div class="small">Use headphones: the VAD listens to the microphone. One page = one session.</div>
     </div>
 
     <div class="card" style="margin-top:14px">
-      <h2>Conversazione</h2>
+      <h2>Conversation</h2>
       <div class="log" id="conv"></div>
     </div>
 
     <div class="card" style="margin-top:14px">
-      <h2>Registro eventi HUD (per misurare la reazione al frame)</h2>
+      <h2>Event log (screen, extractor, σ, forces)</h2>
       <div class="log" id="hudLog" style="height:180px"></div>
-      <div class="small" style="margin-top:6px">"REAZIONE +x s" = primo testo del modello dopo ogni frame. Domande standard D1-D11 in <code>plan/ramo-hud.md</code> (D8 prenotazione senza data → MISSING: DATE; D9 data e ora; D10 annulla; D11 check). Cuffie obbligatorie: il VAD è sul microfono.</div>
+      <div class="small" style="margin-top:6px">"REACTION +x s" = first text of the model after each frame. Times are seconds since the session started; the same times are in the run registry saved by the gateway.</div>
     </div>
   </div>
 </div>

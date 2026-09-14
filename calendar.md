@@ -420,3 +420,10 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   toglie la prenotazione dal DB → DONE (CANCELLED | ANYTHING ELSE?); no o rinuncia → BOOKING KEPT; slot non prenotato → NO BOOKING. σ: claim
   `booking_cancelled` verificato ("I've cancelled it" prima del sì → "Sorry, nothing is cancelled yet. Shall I cancel the booking of…").
   Replay 71/71 (12 casi), estrattore 4/4 sulla frase vera, API viva.
+- 14/09 — **Ramo `FORCESPEAK-BETAGAMMA-CANCEL-POLISH`** (da CANCELING): pulizia per la pubblicazione. Pagina HUD riscritta in inglese
+  senza le manopole dei vecchi esperimenti (τ, hold, sticky/context, testo iniettato, stimolo audio, schermo a due metà, lampeggio,
+  finestra KV, penalità, esito forzato/ritardo del pannello, trigger manuale, frame manuale, interruttori di σ e σ in corsa): i default che
+  funzionano sono nel codice (frame ogni secondo col banner alternato, σ e σ in corsa attivi, finestra basic 4000/3500, schermo iniziale).
+  Restano: prompt, voce, delay, ASR profile, VAD, pannello manuale (check/book/unbook/yes/no/cancel), force listen / speak now, grafo e
+  orchestratore. Log del client in inglese (YOU (ASR), AI (full turn), FRAME SENT, REACTION, EXTRACTOR, TRAFFIC LIGHT, CUT);
+  `hud_run_log.py` legge entrambe le lingue.

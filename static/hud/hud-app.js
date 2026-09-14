@@ -186,7 +186,7 @@ function drawHud() {
     const on = blinkPhase % 2 === 0;   // the banner alternates full / white on every frame: the model notices the change
     ctx.fillStyle = on ? LIGHT[level] : '#ffffff'; ctx.fillRect(0, 0, W, H * 0.16);
     ctx.fillStyle = on ? '#ffffff' : LIGHT[level];
-    const bannerText = level === 'green' ? 'OK' : (level === 'yellow' ? `⚠ ${hint || 'CHECK THE SCREEN'}` : `■ ${hint || 'STOP'}`);
+    const bannerText = level === 'green' ? 'OK' : (level === 'yellow' ? `⚠ ${hint || 'Sorry, one moment.'}` : `■ ${hint || 'Sorry, one moment.'}`);
     if (bannerText.length <= 22) { ctx.font = 'bold 30px system-ui, sans-serif'; ctx.fillText(bannerText, W / 2, H * 0.08); }
     else {   // frase del supervisore: due righe, font ridotto
         ctx.font = 'bold 19px system-ui, sans-serif';
@@ -434,7 +434,7 @@ async function startSessionInner() {
     });
     session.onSystemLog = (t) => conv('sys', t);
     session.onSpeakStart = (text) => {
-        omniSpokeAt = now(); omniTurnOpen = true; armMidTurnCheck(MID_TURN_FIRST_S);
+        omniSpokeAt = now(); omniTurnOpen = true; armMidTurnCheck(midTurnFirstDelay());
         const el = conv('ai', 'AI: ' + (text || ''));
         el.dataset.prefix = 'AI: ';
         onModelText(text || '');
@@ -646,6 +646,11 @@ let lastOmniEndAt = -1, noReplyTimer = null, sigmaBusy = false, lastHelp = '', f
 // verdetto del taglio va al semaforo (reason 'cut': niente readback ne' claim nel record) -> aiuto + force_speak come sempre.
 const MID_TURN_FIRST_S = 10, MID_TURN_EVERY_S = 8, MAX_CUTS_PER_USER_TURN = 3;
 let midTurnTimer = null, cutChunksLeft = 0, cutVerdict = null, cutsSinceUser = 0;
+/** First mid-turn check: 10 s, plus 0.7 s per day listed on the screen (a nine-day list takes ~12 s to read and is not a runaway turn). */
+function midTurnFirstDelay() {
+    const mi = hud.fsm.month_info; const n = (mi && !hud.fsm.slots.day && (mi.booked_days || []).length) || 0;
+    return MID_TURN_FIRST_S + Math.min(8, 0.7 * n);
+}
 function armMidTurnCheck(delayS) {
     clearTimeout(midTurnTimer);
     midTurnTimer = setTimeout(midTurnCheck, delayS * 1000);

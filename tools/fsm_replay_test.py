@@ -242,5 +242,18 @@ check("readback 'all day' (time any) su una giornata intera -> verde, non 'CHECK
 f, ch, lv, hint = sigma(day="6")
 check("readback di un giorno diverso da quello solido -> giallo con la frase 'Sorry, I mean March 5th.'", lv == "yellow" and hint == "Sorry, I mean March 5th.", (lv, hint))
 
+# --- 7. giorno parziale detto libero (sess_da47e13d8a96) ---------------------------------------------------------------------
+seed(); ev("set", intent="check", month="april", day="20")   # april 20: 15, 18, 19, 21 occupate -> partial
+f, ch, lv, hint = sigma(claim="slot_free", claim_day="20", claim_time="any")
+check("'the entire day is free' su un giorno parziale -> rosso 'Sorry, April 20th is free except 3 PM and 6 PM and 7 PM and 9 PM. What time?'", lv == "red" and hint.startswith("Sorry, April 20th is free except 3 PM and 6 PM and 7 PM and 9 PM") and hint.endswith("What time?"), (lv, hint))
+lv2, hint2 = g._hud_supervise(g._HUD_DB["fsm"], "April 20th is free except 3 PM, 6 PM, 7 PM and 9 PM. What time?", {"claim": "slot_free", "claim_day": "20", "claim_time": "any"})
+check("'free except…' detto giusto -> non e' una bugia, verde", lv2 == "green", (lv2, hint2))
+seed(); ev("set", intent="check", month="april", day="6")
+f, ch, lv, hint = sigma(claim="slot_free", claim_day="6", claim_time="any")
+check("'all day free' su un giorno davvero libero -> verde", lv == "green", (lv, hint))
+seed(); ev("set", intent="check", month="april")
+f, ch, lv, hint = sigma(claim="slot_free", claim_day="20")
+check("giorno del claim diverso dal record (solo mese): il giorno parziale e' preso dal claim -> rosso", lv == "red" and "April 20th is free except" in hint, (lv, hint))
+
 print(f"\n{len(FAILS)} FALLITI: {FAILS}" if FAILS else "\nTUTTI PASSATI")
 sys.exit(1 if FAILS else 0)

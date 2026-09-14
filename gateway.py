@@ -1554,12 +1554,17 @@ def _hud_red_sentence(code: str, fsm) -> str:
     """(13/09) Il rosso come FRASE che l'omni puo' dire, non come etichetta: 'NOTHING BOOKED YET' letto 0 volte su 5 nelle run,
     'Sorry, nothing is booked yet. What time on May 5th?' seguito 2 volte su 2. Il codice resta quello di _hud_supervise_code."""
     q = _hud_screen_question(fsm)
-    code = re.sub(r"\b(\d{1,2}:\d{2})\b", lambda m: _hud_time_12h(m.group(1)), code or "")   # '15:00 IS TAKEN' -> '3 PM IS TAKEN'
+    if not re.search(r" PARTLY BOOKED ", code or ""):
+        code = re.sub(r"\b(\d{1,2}:\d{2})\b", lambda m: _hud_time_12h(m.group(1)), code or "")   # '15:00 IS TAKEN' -> '3 PM IS TAKEN'
     day_label = lambda x: (f"{x.split()[0].capitalize()} {_hud_ordinal(x.split()[1])}" if re.fullmatch(r"[A-Z]+ \d{1,2}", x) else x)
     if code == "NOTHING BOOKED YET":
         return f"Sorry, nothing is booked yet. {q}"
     if code == "NOTHING CANCELLED YET":
         return f"Sorry, nothing is cancelled yet. {q}"
+    m = re.fullmatch(r"(.+) PARTLY BOOKED (.*)", code)
+    if m:
+        times = re.findall(r"\d{1,2}:\d{2}", m.group(2))
+        return f"Sorry, {day_label(m.group(1))} is free except {' and '.join(_hud_time_12h(x) for x in times) or 'some hours'}. What time?"
     m = re.fullmatch(r"(.+) IS TAKEN", code)
     if m:
         return f"Sorry, {day_label(m.group(1))} is taken. What other time would you like?"
@@ -1599,6 +1604,15 @@ def _hud_supervise_code(fsm, omni_text: str, heard_args: dict):
         if claim == "slot_free" and not free:
             return "red", f"{_hud_time_label(ct)} IS TAKEN"
     cd = re.sub(r"\D", "", str(h.get("claim_day") or "")); cm = _hud_norm_date(str(h.get("claim_month") or ""))
+    if claim == "slot_free" and (not ct or ct == "all-day") and not re.search(r"\b(except|but|apart|besides|other than)\b", (omni_text or "").lower()):
+        # (14/09, sess_da47e13d8a96) "the entire day is free" su un giorno PARZIALMENTE prenotato: la verifica copriva solo l'ora esatta
+        # e il giorno pieno. Il giorno e' quello del claim se nominato, altrimenti quello del record. Una frase che dice gia'
+        # "free except…" non e' una bugia e non si tocca.
+        day_date = f"{sl['month']} {int(cd)}" if (sl.get("month") and re.fullmatch(r"([1-9]|[12]\d|3[01])", cd)) else (sl.get("date") or "")
+        if day_date:
+            stt, det = _hud_lookup(day_date, "all-day")
+            if stt == "partial":
+                return "red", f"{day_date.upper()} PARTLY BOOKED {det}"
     if claim in ("slot_taken", "slot_invalid", "slot_free") and sl.get("month") and re.fullmatch(r"([1-9]|[12]\d|3[01])", cd) \
             and not (sl.get("date") and _hud_time_valid(ct, "book")):
         # (revisione 08/09) il GIORNO della proposta verificato come l'ora: mese diverso dal cliente, giorno pieno, giorno libero detto occupato
@@ -1678,7 +1692,8 @@ async def hud_fsm_omni_turn(request: Request):
     changed = applied
     fsm = _HUD_DB.get("fsm") or _hud_fsm_reset()
     level, hint = _hud_supervise(fsm, body.get("text") or "", heard_args)
-    if applied and level == "yellow":
+    if applied and level == "yellow" and (heard_args.get("kind") or "").lower() != "false_claim":
+        # (14/09) un readback entrato non spegne un false_claim di σ (sess_da47e13d8a96, 163 s: "March 5th is free" appena prenotato)
         level, hint = "green", ""   # (08/09) il turno ha prodotto un evento della macchina (proposta o readback entrati): segue lo schermo
     if (fsm.get("level") or "green") != level or (fsm.get("hint") or "") != hint:
         fsm["level"] = level; fsm["hint"] = hint; fsm["seq"] = int(fsm.get("seq") or 0) + 1; fsm["updated"] = datetime.now().isoformat(timespec="seconds")

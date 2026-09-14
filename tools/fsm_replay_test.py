@@ -235,17 +235,7 @@ check("unbook detto mentre e' in corso una prenotazione -> l'intento cambia (CON
 f, ch = ev("cancel", "forget it")
 check("BOOKING KEPT dopo la rinuncia", f["state"] == "IDLE" and f["note"] == "BOOKING KEPT", f["note"])
 
-# --- 6. pick + any (sess_ee38f1e821d9, 158.9 s): "Anytime you choose" sopra la proposta del banco non perde il giorno ----------------
-seed(); ev("set", intent="check", month="april"); f, ch = ev("set", "pick one", day="pick")
-check("pick in verifica -> proposta del 4 in CONFIRM", f["state"] == "CONFIRM" and f["slots"]["day"] == "4" and f["tentative"] == {"day": "proposal"}, f["slots"])
-f, ch = ev("set", "anytime you choose", intent="book", month="april", day="pick", time="any")
-check("'anytime you choose' -> prenotazione del 4 alla prima ora libera, in conferma, con i marchi", ch and f["state"] == "CONFIRM" and f["intent"] == "book" and f["slots"]["day"] == "4" and f["slots"]["time"] == "09:00" and f["status"] == "pending" and f["tentative"] == {"day": "proposal", "time": "proposal"}, (f["state"], f["slots"], f.get("tentative")))
-f, ch = ev("yes", "yes")
-check("yes -> BOOKED april 4 09:00", f["state"] == "DONE" and f["status"] == "confirmed" and g._HUD_DB["slots"].get("april 4 09:00", {}).get("status") == "booked", f["state"])
-seed(); ev("set", intent="check", month="april", day="6")
-f, ch = ev("set", "any time", time="any")
-check("'any time' in una VERIFICA resta un allargamento (giornata intera)", f["state"] == "CONFIRM" and f["intent"] == "check" and f["slots"]["time"] in ("", "all-day"), (f["state"], f["slots"]))
-seed(); f, lv, hint = (lambda r: (r[0], r[2], r[3]))(sigma(month="april", day="5", time="any")) if False else (None, None, None)
+# --- 6. readback 'any' e frase del giallo (sess_ee38f1e821d9) ------------------------------------------------------------------
 seed(); ev("set", intent="check", month="march", day="5")
 f, ch, lv, hint = sigma(month="march", time="any")
 check("readback 'all day' (time any) su una giornata intera -> verde, non 'CHECK THE SCREEN'", lv == "green", (lv, hint))

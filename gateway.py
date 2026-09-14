@@ -1386,21 +1386,18 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
     else:
         _hud_db_save(); return fsm, False
 
-    rejected = {}; new_picks = []
+    rejected = {}
     # 'any' / 'all' / 'whole' (07/09): il cliente ALLARGA la richiesta ("the whole month", "any time"): il campo si svuota
     for k in ("day", "time"):
         v = clean(args.get(k)).lower().replace("-", " ")
-        if v in ("any", "all", "whole", "every", "any day", "any time", "all day", "whole day", "whole month", "all month") and not (k == "time" and intent == "book"):
+        if v in ("any", "all", "whole", "every", "any day", "any time", "all day", "whole day", "whole month", "all month"):
             slots[k] = ""; args[k] = None; tentative.pop(k, None); pick = [x for x in pick if x != k]   # anche una proposta pendente sul campo e' superata
             if k == "time": slots["time_raw"] = ""
-        elif v in _HUD_PICK_WORDS or (v in ("any", "any time", "all", "whole day", "all day") and k == "time" and intent == "book"):
-            # "scegli tu" (08/09): il cliente DELEGA la scelta: la macchina propone lei (primo libero). (14/09) In una prenotazione
-            # "any time" e' una delega, non un allargamento: un'ora ci vuole. Se il campo e' gia' una proposta del banco, la delega la TIENE.
-            args[k] = None; pick_skip.pop(k, None)
-            if not (tentative.get(k) == "proposal" and slots.get(k)):
-                slots[k] = ""; tentative.pop(k, None)
-                if k == "time": slots["time_raw"] = ""
-            if k not in pick: pick.append(k); new_picks.append(k)
+        elif v in _HUD_PICK_WORDS:
+            # "scegli tu" (08/09): il cliente DELEGA la scelta: il campo si svuota e la macchina lo propone lei (primo libero)
+            slots[k] = ""; args[k] = None; tentative.pop(k, None); pick_skip.pop(k, None)
+            if k not in pick: pick.append(k)
+            if k == "time": slots["time_raw"] = ""
     # un solo numero nella battuta non puo' essere insieme giorno E ora ("the 2nd" -> day='the 2nd', time='2')
     if user_text and clean(args.get("day")) and clean(args.get("time")):
         nums = re.findall(r"\d+", _hud_words_to_digits(re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", re.sub(r"[^\w\s-]", " ", user_text.lower()))))
@@ -1451,7 +1448,7 @@ def _hud_fsm_apply(calls, user_text: str, outcome: str, source: str, delay_s=Non
         if len(_day) == 1:
             slots["time"] = _day[0].get("time") or ""; slots["time_raw"] = _day[0].get("time_raw") or slots["time"]
     missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]
-    if pick and not rejected and (state != "CONFIRM" or new_picks) and intent != "unbook":
+    if pick and not rejected and state != "CONFIRM" and intent != "unbook":
         picked = _hud_pick_fill(intent, slots, pick, pick_skip)   # "scegli tu": la macchina propone (tentativo "proposal")
         for k in picked: tentative[k] = "proposal"
         missing = [k for k in _HUD_REQUIRED[intent] if not slots.get(k)]

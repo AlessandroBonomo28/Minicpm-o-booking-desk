@@ -510,7 +510,7 @@ async function startSessionInner() {
                 let why = '';
                 if (forceSpeakOnce && !msg.force_listen) { forceSpeakOnce = false; why = forceWhy || 'manual'; forceWhy = ''; }
                 if (why) {
-                    msg.force_speak = true; forceSpeakSentAt = now(); lastForceAt = forceSpeakSentAt; forceCount[hud.fsm.seq || 0] = (forceCount[hud.fsm.seq || 0] || 0) + 1;
+                    msg.force_speak = true; forceSpeakSentAt = now(); lastForceAt = forceSpeakSentAt;
                     const chunkNo = sess.chunksSent + 1, sentAt = forceSpeakSentAt;
                     hudLog('warn', `FORCE_SPEAK (${why}) with chunk #${chunkNo} (screen: ${hud.lastText || ''})`);
                     dbg.force = { t: sentAt, why, chunk: chunkNo, screen: hud.lastText || '' }; renderGraph();

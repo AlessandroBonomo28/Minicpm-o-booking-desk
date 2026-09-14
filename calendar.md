@@ -427,3 +427,7 @@ supera su multi-turno ed e' il candidato corrente). Restano i due assi voce.
   Restano: prompt, voce, delay, ASR profile, VAD, pannello manuale (check/book/unbook/yes/no/cancel), force listen / speak now, grafo e
   orchestratore. Log del client in inglese (YOU (ASR), AI (full turn), FRAME SENT, REACTION, EXTRACTOR, TRAFFIC LIGHT, CUT);
   `hud_run_log.py` legge entrambe le lingue.
+- 14/09 — **Ramo `nervotext-polish`** (da CANCEL-POLISH dopo il revert del punto 4): la vision tolta di mezzo. Il modello riceve lo
+  schermo solo come testo (`SCREEN: …` nello slot della visione a ogni chunk, codice del modello e del backend di NERVOTEXT); il client
+  non produce né manda frame, niente lampeggio; il canvas resta per chi guarda la pagina. Log: `SCREEN TEXT → chunk #n · EVENT`,
+  `REACTION +x s after the screen`, `screens sent`. Strumenti di analisi aggiornati alle righe in inglese.

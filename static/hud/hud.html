@@ -56,14 +56,14 @@
 <body>
 <header>
   <h1>Booking desk — operator screen (HUD)</h1>
-  <span class="sub">full-duplex voice agent on MiniCPM-o 4.5 · the model listens to the customer and reads the operator screen · the booking state machine and the database live in the gateway</span>
+  <span class="sub">full-duplex voice agent on MiniCPM-o 4.5 · the model listens to the customer and reads the operator screen as text (no frames) · the booking state machine and the database live in the gateway</span>
   <span style="margin-left:auto" class="small"><span class="lamp" id="lamp"></span><span id="stateText">disconnected</span></span>
 </header>
 
 <div class="wrap">
   <details class="card" id="graphCard" open style="grid-column:1 / -1">
     <summary><h2 style="display:inline">State machine and mechanisms — view only (debug)</h2>
-      <span class="small"> · no effect on the frames or the machine · coloured node = current state with the traffic-light colour · orange arrow = last transition · click to collapse</span></summary>
+      <span class="small"> · no effect on the screen text or the machine · coloured node = current state with the traffic-light colour · orange arrow = last transition · click to collapse</span></summary>
     <div style="display:grid; grid-template-columns:640px 1fr; gap:14px; align-items:start; margin-top:8px">
       <svg id="fsmGraph" viewBox="0 0 640 300"></svg>
       <div class="mech" id="mech"></div>
@@ -79,11 +79,11 @@
   </details>
   <div>
     <div class="card">
-      <h2>Operator screen (what the model sees)</h2>
+      <h2>Operator screen (what the model reads, as text)</h2>
       <canvas id="hud" width="448" height="448"></canvas>
       <div class="row" style="margin-top:8px">
         <label>Screen state</label><b id="hudState">IDLE</b>
-        <span class="small" id="frameInfo">no frame sent yet</span>
+        <span class="small" id="frameInfo">no screen text sent yet</span>
       </div>
     </div>
 
@@ -127,7 +127,7 @@
         <button class="danger" id="btnStop" disabled>Stop</button>
         <button id="btnForceListen" disabled title="Keep the model listening (toggle)">Force listen</button>
         <button id="btnForceSpeak" disabled title="With the next chunk the controller replaces <|listen|> with <|speak|>: the model opens a turn and decides what to say (it reads the screen)">Speak now (force_speak)</button>
-        <span class="small">chunks sent: <b id="chunks">0</b> · frames sent: <b id="framesSent">0</b></span>
+        <span class="small">chunks sent: <b id="chunks">0</b> · screens sent: <b id="framesSent">0</b></span>
       </div>
       <div class="small">Use headphones: the VAD listens to the microphone. One page = one session.</div>
     </div>
@@ -140,7 +140,7 @@
     <div class="card" style="margin-top:14px">
       <h2>Event log (screen, extractor, σ, forces)</h2>
       <div class="log" id="hudLog" style="height:180px"></div>
-      <div class="small" style="margin-top:6px">"REACTION +x s" = first text of the model after each frame. Times are seconds since the session started; the same times are in the run registry saved by the gateway.</div>
+      <div class="small" style="margin-top:6px">"REACTION +x s" = first text of the model after each screen change. Times are seconds since the session started; the same times are in the run registry saved by the gateway.</div>
     </div>
   </div>
 </div>

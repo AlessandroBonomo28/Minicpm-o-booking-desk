@@ -919,6 +919,8 @@ class DuplexView:
         audio_path: Optional[str] = None,
         frame_list: Optional[List[np.ndarray]] = None,
         max_slice_nums: int = 1,
+        screen_text: Optional[str] = None,
+        screen_text_wrap: str = "plain",
     ) -> dict:
         """预填充用户音频
         
@@ -940,6 +942,8 @@ class DuplexView:
             audio_waveform=audio_waveform,
             frame_list=frame_list,
             max_slice_nums=max_slice_nums,
+            screen_text=screen_text,
+            screen_text_wrap=screen_text_wrap,
         )
         
         return result

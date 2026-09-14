@@ -424,6 +424,8 @@ class BackendProtocolSession:
             context_text = payload.get("context_text", hints.get("context_text"))   # None = invariato; "" = cancella
             context_text = None if context_text is None else str(context_text)[:800]
             max_slice_nums = int(_coalesce(payload.get("max_slice_nums"), hints.get("max_slice_nums"), default=1))
+            screen_text = str(_coalesce(payload.get("screen_text"), hints.get("screen_text"), default="") or "")[:400]   # canale testuale dello schermo
+            screen_text_wrap = str(_coalesce(payload.get("screen_text_wrap"), hints.get("screen_text_wrap"), default="plain") or "plain")
 
             t0 = time.perf_counter()
 
@@ -438,6 +440,8 @@ class BackendProtocolSession:
                     audio_waveform=audio_waveform,
                     frame_list=decoded_frames.frame_list,
                     max_slice_nums=max_slice_nums,
+                    screen_text=screen_text or None,
+                    screen_text_wrap=screen_text_wrap,
                 )
                 prefill_ms = (time.perf_counter() - prefill_t0) * 1000
                 result = self.backend.duplex_generate(force_listen=force_listen, force_speak=force_speak, inject_text=inject_text)
@@ -455,6 +459,8 @@ class BackendProtocolSession:
                 )
                 if n_vision_slices is not None:
                     metrics["vision_slices"] = n_vision_slices
+                if prefill_result.get("n_text_tokens"):
+                    metrics["screen_text_tokens"] = prefill_result.get("n_text_tokens")
                 prefill_usage = prefill_result.get("usage") or {}
                 vision_tokens = prefill_usage.get("input_vision_tokens")
                 if vision_tokens is not None:

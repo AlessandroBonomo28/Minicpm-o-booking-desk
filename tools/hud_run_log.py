@@ -11,7 +11,7 @@ if not os.path.exists(path):
 frames = "--frames" in sys.argv; conv_only = "--conv" in sys.argv
 for ln in open(path):
     if conv_only and "[hud:" in ln: continue
-    if not frames and re.search(r"\] (frame pronto|FRAME INVIATO|frame ready|FRAME SENT)", ln):
+    if not frames and re.search(r"\] (frame pronto|FRAME INVIATO|frame ready|FRAME SENT|screen ready|SCREEN TEXT)", ln):
         # tieni solo i frame il cui schermo cambia testo (frame pronto con 'schermo:' diverso dal precedente)
         m = re.search(r"(?:schermo|screen): (.*)$", ln)
         if not m: continue

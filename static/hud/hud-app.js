@@ -224,8 +224,8 @@ function hudSync(force = false) {
     hud.lastHash = h;
     const content = h.replace(/\|b\d*/, '');   // impronta di CONTENUTO (senza fase del lampeggio)
     if (content !== hud.lastContent) { hud.lastContent = content; hud.pendingIsEvent = true; }
-    hud.pendingFrame = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-    hudLog('hud', `frame ready (${$('hudState').textContent}) → attached to the next audio chunk · screen: ${hud.lastText || ''}`);
+    hud.pendingFrame = null;   // text channel: the canvas is for the human, the model gets hud.lastText
+    hudLog('hud', `screen ready (${$('hudState').textContent}) → goes with the next audio chunk · screen: ${hud.lastText || ''}`);
 }
 
 /** Etichetta per db.html (pill): IDLE / COLLECTING / CHECKING / OK / PARTIAL / NO / ERR. */
@@ -412,7 +412,7 @@ async function startSession() {
 
 async function startSessionInner() {
     $('conv').innerHTML = ''; $('hudLog').innerHTML = '';
-    hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false;
+    hud.lastHash = null; hud.pendingFrame = null; hud.framesSent = 0; hud.lastFrameAt = null; awaitingReaction = false; lastScreenTextSent = null;
     hud.lastContent = null; hud.pendingIsEvent = false;
     orch.hud.length = 0; orch.llm.length = 0; renderOrch();
     omniTurnOpen = false; lastUserTurnAt = -1; lastForceAt = -100; forceWhy = '';
@@ -476,7 +476,7 @@ async function startSessionInner() {
     const preparePayload = { config: { length_penalty: 1.0, text_repetition_penalty: 1.0,
                                        sliding_window_mode: 'basic', sliding_window_high_tokens: 4000, sliding_window_low_tokens: 3500 },
                              use_tts: true, max_slice_nums: 1 };
-    conv('sys', `CONFIG · prompt: "${$('systemPrompt').value}" · voice ${$('refChoice').value} · asr ${$('asrProfile').value} · window basic 4000/3500`);
+    conv('sys', `CONFIG · prompt: "${$('systemPrompt').value}" · voice ${$('refChoice').value} · channel text · asr ${$('asrProfile').value} · window basic 4000/3500`);
     lastWindowEvents = 0; lastMetrics = {}; lastModelState = ''; $('kvInfo').textContent = 'KV: — · window: basic';
     const ref = await loadRefAudio();
     if (ref) preparePayload.ref_audio_base64 = ref;
@@ -484,22 +484,24 @@ async function startSessionInner() {
     const sess = session;   // il microfono spedisce SOLO alla sessione per cui e' stato creato
     try {
         await sess.start($('systemPrompt').value, preparePayload, async () => {
-            hudSync(true);   // the IDLE screen goes with the first chunk, so the model knows there is a screen
+            hudSync(true);   // the IDLE screen text goes with the first chunk, so the model knows there is a screen
             const turns = new TurnDetector((utterance, speechMs, ctxSec) => onUserTurnEnd(utterance, speechMs, ctxSec),
                                            (audio, speechMs, ctxSec) => onUserPause(audio, speechMs, ctxSec), () => { if (speculative) speculative.stale = true; });
             mic = new MicCapture((audioF32) => {
                 const msg = { type: 'audio_chunk', audio_base64: arrayBufferToBase64(audioF32.buffer) };
                 let cutNow = false;
-                // lampeggio: costante (un frame per chunk, banner alternato) oppure solo 4 frame al cambio di livello
-                if (!hud.pendingFrame) { blinkPhase++; if (blinkLeft > 0) blinkLeft--; hudSync(true); }   // one frame per chunk, banner alternating: the model notices the change
-                let isEvent = false;
-                if (hud.pendingFrame) {
-                    msg.frame_base64_list = [hud.pendingFrame];
-                    hud.pendingFrame = null; hud.framesSent++; hud.lastFrameAt = now(); awaitingReaction = true;
+                // TEXT CHANNEL: no frames. The screen text goes into the model's vision slot with every chunk (one line, "SCREEN: ...");
+                // only the speakable lines: the "OK" and the traffic-light symbols are dropped
+                const txt = (hud.lastText || '').replace(/^OK \| /, '').replace(/^[⚠■] /, '');
+                msg.screen_text = 'SCREEN: ' + txt;
+                hud.pendingFrame = null;
+                let isEvent = false, screenChanged = false;
+                if (txt !== lastScreenTextSent) {
+                    lastScreenTextSent = txt; screenChanged = true; hud.framesSent++; hud.lastFrameAt = now(); awaitingReaction = true;
                     isEvent = !!hud.pendingIsEvent; hud.pendingIsEvent = false;
                     $('framesSent').textContent = hud.framesSent;
-                    $('frameInfo').textContent = `last frame sent at ${hud.lastFrameAt.toFixed(1)}s (${$('hudState').textContent})`;
-                    hudLog('hud', `FRAME SENT (${$('hudState').textContent}) with chunk #${sess.chunksSent + 1}${isEvent ? ' · EVENT' : ''}`);
+                    $('frameInfo').textContent = `last screen text sent at ${hud.lastFrameAt.toFixed(1)}s (${$('hudState').textContent})`;
+                    hudLog('hud', `SCREEN TEXT → chunk #${sess.chunksSent + 1}${isEvent ? ' · EVENT' : ''}: "${txt}"`);
                 }
                 // TAGLIO (σ in corsa): force_listen per un chunk, audio fermato subito
                 if (cutChunksLeft > 0) {
@@ -520,7 +522,7 @@ async function startSessionInner() {
                     const fl = [];
                     if (msg.force_speak) fl.push('force_speak' + (why ? ' (' + why + ')' : ''));
                     if (msg.force_listen) fl.push('force_listen' + (cutNow ? ' (σ cut, 1 chunk)' : ''));
-                    if (msg.frame_base64_list || fl.length) orchPush('hud', { what: msg.frame_base64_list ? (isEvent ? 'frame EVENT (screen changed)' : 'frame (blink / redraw)') : 'command only, no frame', chunk: sess.chunksSent + 1, screen: msg.frame_base64_list ? (hud.lastText || '') : '', flags: fl });
+                    if (screenChanged || fl.length) orchPush('hud', { what: screenChanged ? (isEvent ? 'screen text EVENT (screen changed)' : 'screen text (redraw)') : 'command only (screen unchanged)', chunk: sess.chunksSent + 1, screen: screenChanged ? txt : '', flags: fl });
                 }
                 sess.sendChunk(msg);
                 $('chunks').textContent = sess.chunksSent;
@@ -549,7 +551,7 @@ function onModelText(text) {
     currentAiText = text;
     if (awaitingReaction && hud.lastFrameAt !== null) {
         awaitingReaction = false;
-        hudLog('hud', `REACTION +${(now() - hud.lastFrameAt).toFixed(1)}s after the frame (${$('hudState').textContent}): "${text.slice(0, 60)}"`);
+        hudLog('hud', `REACTION +${(now() - hud.lastFrameAt).toFixed(1)}s after the screen (${$('hudState').textContent}): "${text.slice(0, 60)}"`);
     }
 }
 
@@ -760,6 +762,7 @@ $('btnStop').onclick = stopSession;
 $('btnForceListen').onclick = () => session && session.toggleForceListen();
 // ramo force-speak: un turno di parlato a comando. Il flag viene consumato dal prossimo chunk audio (entro 1 s).
 let forceSpeakOnce = false, forceWhy = '', forceSpeakSentAt = -1, omniSpokeAt = -1;
+let lastScreenTextSent = null;   // text channel: last screen text sent (log only the changes)
 let lastUserWords = 0;
 let omniTurnOpen = false, lastUserTurnAt = -1, lastForceAt = -100;
 $('btnForceSpeak').onclick = () => { forceSpeakOnce = true; forceWhy = 'manual'; hudLog('warn', 'FORCE_SPEAK requested: goes with the next chunk'); };

@@ -258,6 +258,10 @@ export class RealtimeSession {
         if (msg.inject_text) {
             newMsg.input.inject_text = String(msg.inject_text).slice(0, 600);   // testo nello slot di uscita (prova del 07/09: e' letto come parlato proprio)
         }
+        if (msg.screen_text !== undefined && msg.screen_text !== null) {
+            newMsg.input.screen_text = String(msg.screen_text).slice(0, 400);   // canale testuale: il testo dello schermo nello slot della visione
+            if (msg.screen_text_wrap) newMsg.input.screen_text_wrap = String(msg.screen_text_wrap);
+        }
         if (msg.context_text !== undefined && msg.context_text !== null) {
             newMsg.input.context_text = String(msg.context_text).slice(0, 800);   // regione sticky di sistema ("" = cancella)
         }

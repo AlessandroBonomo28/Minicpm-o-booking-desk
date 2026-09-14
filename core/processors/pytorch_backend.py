@@ -274,12 +274,16 @@ class PyTorchBackend:
         audio_waveform: Optional[np.ndarray] = None,
         frame_list: Optional[list] = None,
         max_slice_nums: int = 1,
+        screen_text: Optional[str] = None,
+        screen_text_wrap: str = "plain",
     ) -> Dict[str, Any]:
         duplex_view = self.processor.set_duplex_mode()
         return duplex_view.prefill(
             audio_waveform=audio_waveform,
             frame_list=frame_list,
             max_slice_nums=max_slice_nums,
+            screen_text=screen_text,
+            screen_text_wrap=screen_text_wrap,
         )
 
     def duplex_generate(self, force_listen: bool = False, force_speak: bool = False, inject_text: str = "") -> DuplexGenerateResult:

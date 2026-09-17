@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Ricostruisce le conversazioni registrate dal gateway, CON le parole dell'utente
-(trascritte da Whisper sui chunk del microfono) e il testo dell'AI, sulla stessa linea del tempo.
+"""Rebuilds the conversations recorded by the gateway, WITH the customer's words (Whisper on the microphone
+chunks) and the model's text, on the same timeline.
 
-Uso (env cosyvoice2, che ha openai-whisper):
-  /home/alex/miniconda3/envs/cosyvoice2/bin/python tools/transcribe_sessions.py --last 3
-  /home/alex/miniconda3/envs/cosyvoice2/bin/python tools/transcribe_sessions.py sess_73e1b7b68996 [sess_...]
-  opzioni: --sessions-dir DIR (default: data/sessions del ramo italiano; per il ramo puro usare
-           ../MiniCPM-o-Demo-upstream-puro/data/sessions), --model small|medium, --device cuda|cpu
+Usage (needs openai-whisper):
+  python tools/transcribe_sessions.py --last 3
+  python tools/transcribe_sessions.py sess_73e1b7b68996 [sess_...]
+  options: --sessions-dir DIR (default: data/sessions), --model small|medium, --device cuda|cpu
 
-Legenda: TU = utente (Whisper), AI = testo dell'omni, [FRAME] = fotogramma video inviato,
-         [utente parla, non trascritto] = audio con energia ma senza testo riconosciuto.
+Legend: YOU = customer (Whisper), AI = the model's text, [FRAME] = video frame sent,
+        [customer speaking, not transcribed] = audio with energy but no recognised text.
 """
 import argparse, glob, json, os, sys, wave
 import numpy as np
@@ -45,7 +44,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("sessions", nargs="*")
     ap.add_argument("--last", type=int, default=0)
-    ap.add_argument("--sessions-dir", default="/home/alex/progetti/MiniCPM-o-Demo/data/sessions")
+    ap.add_argument("--sessions-dir", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sessions"))
     ap.add_argument("--model", default="small")
     ap.add_argument("--device", default=None)
     a = ap.parse_args()
@@ -75,8 +74,8 @@ def main():
             print(f"   lingua rilevata: {res.get('language')}")
         events.sort(key=lambda e: e[0])
         for t, k, txt in events:
-            if k == "frame": print(f"  {t:6.1f}s  [FRAME → schermo cambiato]")
-            elif k == "user": print(f"  {t:6.1f}s  TU:  {txt}")
+            if k == "frame": print(f"  {t:6.1f}s  [FRAME → screen changed]")
+            elif k == "user": print(f"  {t:6.1f}s  YOU: {txt}")
             elif k == "ai": print(f"  {t:6.1f}s  AI:  {txt}")
     return 0
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Replay locale della macchina degli stati dell'HUD (nessun LLM, nessun servizio): la sequenza di sess_41c874e48161 con la regola
-FORCESPEAK-BETAGAMMA (08/09): una PROPOSTA dell'operatore verificata libera sul DB entra come tentativo "proposal" e il si' del
-cliente la consolida. Il DB e' scritto in una copia temporanea. python3 tools/fsm_replay_test.py [-v]"""
+"""Local replay of the booking state machine (no LLM, no services): the event sequence of session sess_41c874e48161 with the
+proposal rule (an operator's proposal verified free on the DB enters as a tentative "proposal" value and the customer's yes
+consolidates it) plus the regression cases added since. The DB is written to a temporary copy. python3 tools/fsm_replay_test.py [-v]"""
 import os, sys, tempfile, json
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -242,5 +242,5 @@ check("readback 'all day' (time any) su una giornata intera -> verde, non 'CHECK
 f, ch, lv, hint = sigma(day="6")
 check("readback di un giorno diverso da quello solido -> giallo con la frase 'Sorry, I mean March 5th.'", lv == "yellow" and hint == "Sorry, I mean March 5th.", (lv, hint))
 
-print(f"\n{len(FAILS)} FALLITI: {FAILS}" if FAILS else "\nTUTTI PASSATI")
+print(f"\n{len(FAILS)} FAILED: {FAILS}" if FAILS else "\nALL PASSED")
 sys.exit(1 if FAILS else 0)

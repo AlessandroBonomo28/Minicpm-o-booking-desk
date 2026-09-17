@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Confronto A/B tra run dell'HUD (canale FRAME vs TESTO): numeri dal registro logs_demo/hud_runs/<sess>.log.
-Uso: python3 tools/hud_run_compare.py [sess_a [sess_b ...]]   (senza argomenti: le ultime 2 sessioni)
-Per ogni run: canale, durata, battute, turni dell'omni, scritture, force (per fonte), stuck di σ (per tipo), rossi, aggiornamenti dello
-schermo, tempo di reazione al primo turno dopo un aggiornamento EVENTO, scorrimenti della finestra KV al minuto, turni lunghi (>12 s),
-readback: quante volte l'omni ha pronunciato il giorno del record nel turno dopo un cambio di giorno (lettura dello schermo)."""
+"""A/B comparison between desk runs (FRAME channel vs TEXT channel): numbers from the registry logs_demo/hud_runs/<sess>.log.
+Usage: python3 tools/hud_run_compare.py [sess_a [sess_b ...]]   (no arguments: the last 2 sessions)
+Per run: channel, duration, customer lines, model turns, DB writes, forces (by source), sigma stuck verdicts (by kind), reds, screen
+updates, reaction time of the first turn after an EVENT update, KV window scrolls per minute, long turns (>12 s),
+readback: how often the model spoke the record's day in the turn after a day change (screen reading)."""
 import os, re, sys, glob, statistics as st
 
 DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs_demo", "hud_runs")

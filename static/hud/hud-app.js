@@ -1,14 +1,14 @@
 /**
- * HUD — ramo sperimentale: il frame visivo come segnale di evento asincrono.
+ * Operator screen (HUD) of the booking desk: page logic.
  *
- * Idea: il modello (MiniCPM-o 4.5, modalità Omni) riceve il microfono ogni secondo e,
- * SOLO quando lo "schermo dell'operatore" cambia stato, un fotogramma dello schermo.
- * Il fotogramma non trasporta istruzioni per il modello: mostra lo STATO del gestionale.
+ * The speech model (MiniCPM-o 4.5, omni duplex mode) receives the microphone every second and the operator
+ * screen through its vision input: a rendered frame on the vision-booking branch, the same lines as plain
+ * text on the text-booking branch. The screen carries no instructions for the model: it shows the STATE of
+ * the booking record, as lines the model can say to the customer as they are.
  *
- * 04/09: macchina a stati della prenotazione (plan/ramo-hud.md). La FSM vive nel gateway
- * (/api/hud_fsm/*); il modello separato (Qwen3-1.7B) estrae soltanto cio' che l'utente ha
- * detto nella battuta appena chiusa dal VAD; questa pagina disegna lo stato e lo manda come
- * frame con il chunk audio successivo. Nessuna modifica al backend.
+ * The state machine lives in the gateway (gateway.py, the _hud_* functions); a separate LLM
+ * (tools/tool_agent_server.py) extracts what the customer said in the line just closed by the VAD; this page
+ * draws the state, sends it with the next audio chunk and runs the judge (sigma) at the end of each model turn.
  */
 import { RealtimeSession } from '../duplex/lib/realtime-session.js';
 import { arrayBufferToBase64 } from '../duplex/lib/duplex-utils.js';
@@ -80,7 +80,7 @@ function timeLabel(t) {
 const takenList = (d) => String(d || '').replace(/^booked\s*/i, '').split(',').map(x => timeLabel(x.trim().toLowerCase())).filter(Boolean).join(', ');
 const slotLine = (f) => `${(f.slots.date || '').toUpperCase()}${f.slots.time && f.slots.time !== 'all-day' ? ', ' + timeLabel(f.slots.time) : (f.slots.time === 'all-day' ? ', ALL DAY' : '')}`.trim();
 
-/** Tabella "formato del frame per stato" di plan/ramo-hud.md. */
+/** Screen format per state (see docs/WRITEUP.md, section 3.1). */
 function themeFor() {
     // Regola (07/09): lo schermo e' DOMANDA e RISPOSTA, al massimo tre righe, tutte pronunciabili al cliente cosi' come sono.
     // Niente istruzioni per l'operatore, niente elenchi non richiesti: i giorni occupati compaiono solo se la domanda e' sul mese.

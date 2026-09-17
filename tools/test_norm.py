@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batteria di test del normalizzatore/verificatore del gateway (ore, date, giorni). Senza GPU, senza servizi.
+"""Test battery for the gateway's normaliser / validator (times, dates, days). No GPU, no services.
   python3 tools/test_norm.py"""
 import re, sys, os
 src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gateway.py")).read(); ns = {"re": re}
@@ -25,4 +25,4 @@ for x, want in cases_date:
     n += 1; got = D(x)
     if got == want: ok += 1
     else: print(f"  FAIL date {x!r}: atteso {want!r}, ottenuto {got!r}")
-print(f"{ok}/{n} normalizzazioni corrette"); sys.exit(0 if ok == n else 1)
+print(f"{ok}/{n} normalisations correct"); sys.exit(0 if ok == n else 1)

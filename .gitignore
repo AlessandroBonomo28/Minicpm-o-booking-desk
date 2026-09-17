@@ -57,3 +57,15 @@ dev_tools/
 benchmark.json
 .run-logs/
 logs_demo/hud_runs/
+
+# ---- this fork: local runtime, weights and private material (never committed)
+logs_demo/
+logs/
+*.log
+models
+modelli
+training/
+diagnostics/
+data/local_corpus/
+.env
+.claude/

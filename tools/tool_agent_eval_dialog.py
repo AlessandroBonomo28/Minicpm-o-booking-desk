@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Esperimento (05/09): l'estrattore con CONTESTO di dialogo (ultime N righe, operatore compreso) risolve
-'yes' / 'that day' / 'the next day' senza tornare a copiare campi dai turni precedenti?
-Confronta context=0 (contratto attuale) e context=3 sugli stessi casi.
+"""Experiment: does the extractor with dialogue CONTEXT (last N lines, operator included) resolve
+'yes' / 'that day' / 'the next day' without copying fields back from earlier turns?
+Compares context=0 (the contract without context) and context=3 on the same cases.
 
-  python3 tools/tool_agent_eval_dialog.py            # entrambe le modalita'
+  python3 tools/tool_agent_eval_dialog.py            # both modes
   python3 tools/tool_agent_eval_dialog.py -v
 """
 import argparse, json, sys, time, urllib.request, ssl

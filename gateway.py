@@ -747,7 +747,7 @@ async def get_presets():
     return _presets_cache
 
 
-# ============ Ramo HUD: stato del "gestionale" (DB simulato, sola lettura dalla pagina db.html) ============
+# ============ Booking desk: state machine, simulated bookings DB (read-only view: static/hud/db.html), screens and judge ============
 _HUD_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "hud_db.json")
 _HUD_FSM_IDLE: Dict[str, Any] = {"state": "IDLE", "intent": None, "slots": {"month": "", "day": "", "time": "", "time_raw": "", "date": ""}, "missing": [], "rejected": {},
                                  "status": None, "detail": "", "note": "", "last_user_text": "", "updated": None}
@@ -1041,7 +1041,7 @@ async def hud_db_check(request: Request):
     return JSONResponse(content=_hud_exec_check(date, tm, body.get("outcome") or "auto", body.get("source"), body.get("delay_s")))
 
 
-# ---- FSM della prenotazione (plan/ramo-hud.md, 04/09): la macchina a stati la fa il codice, il modello estrae soltanto
+# ---- FSM della prenotazione (4 Sep 2026): la macchina a stati la fa il codice, il modello estrae soltanto
 # Campi della richiesta, INDIPENDENTI dall'ordine (Alessandro, 04/09 sera): mese, giorno, ora arrivano in qualunque
 # ordine e in qualunque combinazione; la FSM tiene quelli validi e chiede il primo mancante in quest'ordine.
 def _hud_exec_unbook(date: str, tm: str, outcome: str, source: str, confirmed: bool):

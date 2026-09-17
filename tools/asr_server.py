@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""ASR di servizio per il tool agent (ramo HUD): trascrive gli ultimi secondi del microfono
-dell'utente, cosi' il modello separato di tool calling legge ANCHE le parole dell'utente
-(l'omni non produce trascrizioni: e' end-to-end).
+"""Side ASR for the extractor: transcribes the last seconds of the customer's microphone, so that the separate
+extractor / judge LLM reads the customer's words too (the speech model is end-to-end and produces no transcript).
 
   POST /transcribe {"audio_b64": <base64 float32 mono 16 kHz>, "language": "en"|null} -> {"text": "..."}
   GET  /health -> "ready"
 
-Avvio (env cosyvoice2, che ha openai-whisper):
-  /home/alex/miniconda3/envs/cosyvoice2/bin/python tools/asr_server.py --port 22710 --model small
+Start (needs openai-whisper):
+  python tools/asr_server.py --port 22710 --model large-v3-turbo --device cuda
 """
 import argparse, base64, json, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

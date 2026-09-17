@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Modello SEPARATO per il tool calling (ramo HUD, 03/09).
+"""Request extractor and judge (sigma) for the booking desk: a separate LLM that reads the TEXT of the conversation.
 
-L'omni (MiniCPM-o 4.5) parla e ascolta; questo servizio legge il TESTO della
-conversazione e decide se chiamare una funzione e con quali argomenti. Modello:
-Qwen3-1.7B (tool calling nativo via chat template, stessa famiglia del cervello
-dell'omni), ~3.4 GB bf16 sulla stessa GPU.
+The speech model (MiniCPM-o 4.5) talks and listens; this service reads the transcript and decides which event to send
+to the state machine (set / yes / no / cancel, with the month / day / time words the customer said) and, on /sigma,
+judges the last turn of the speech model against the screen and the state (ok / stuck, help line, claims, readbacks).
+Backends: --backend cline (OpenAI-compatible cloud endpoint: TA_API_KEY, TA_BASE_URL, TA_MODEL; default model
+google/gemini-3.5-flash-lite), --backend openai (any OpenAI-compatible endpoint: TA_OPENAI_BASE_URL, TA_OPENAI_API_KEY,
+TA_OPENAI_MODEL), --backend local (Qwen3-1.7B on the same GPU, ~3.4 GB bf16; also the fallback of cline unless --no-local).
 
   POST /decide  {"transcript":[{"role":"assistant"|"user","text":"..."}], "user_audio_b64": ..., "language": "en",
-                 "fsm": {stato della macchina dal gateway, opzionale}, "tools":[...opzionale...]}
-                -> {"tool_calls":[{"name": book|check|cancel, "arguments":{...}}], "raw": "...", "user_text", "asr_s", "llm_s"}
-  La FSM (merge dei campi, cosa manca, esecuzione) sta nel gateway: qui si estrae SOLO cio' che l'utente ha detto.
+                 "fsm": {state machine snapshot from the gateway, optional}, "tools":[...optional...]}
+                -> {"tool_calls":[{"name": set|yes|no|cancel, "arguments":{...}}], "raw": "...", "user_text", "asr_s", "llm_s"}
+  POST /sigma   whole conversation + screen + state + timings -> verdict {status: ok|stuck, kind, help, claim, readback}
   GET  /health  -> "ready"
+  The state machine (field merge, what is missing, execution) lives in the gateway: this service only extracts what the
+  customer said and judges what the model said.
 
-Avvio:  conda run -n minicpm python tools/tool_agent_server.py --port 22700
+Start:  python tools/tool_agent_server.py --port 22700 --backend cline --no-local
 """
 from __future__ import annotations
 
@@ -28,7 +32,7 @@ import urllib.request
 ASR_URL = "http://127.0.0.1:22710/transcribe"
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-MODEL_DIR = "/home/alex/progetti/MiniCPM-o-Demo/modelli/Qwen3-1.7B"
+MODEL_DIR = os.environ.get("TA_LOCAL_MODEL_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "Qwen3-1.7B"))
 
 # Contratto nello SCHEMA, prompt minimo, valori VERBATIM (come Rasa: "extract slot values exactly as provided by the user,
 # avoid assumptions or format changes"): le conversioni (ore a parole, ordinali) le fa il gateway, in codice.

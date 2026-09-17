@@ -1,7 +1,0 @@
-id: italiano_nativo
-order: 4
-name: "Italiano (prompt nativo)"
-description: "Prompt di training a 3 parole + una riga per la lingua; voce di riferimento italiana"
-system_prompt: "Streaming Omni Conversation. Parla sempre in italiano."
-ref_audio_path: "assets/ref_audio/ref_it_test1.wav"
-length_penalty: 1.0

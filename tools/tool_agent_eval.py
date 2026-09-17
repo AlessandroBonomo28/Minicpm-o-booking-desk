@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Regressione dell'estrattore (ramo HUD): frase + stato -> chiamata attesa. Misura la "resistenza" del modello
-separato invece di stimarla. Gira contro l'estrattore acceso, via proxy del gateway (o diretto con --direct).
+"""Extractor regression: sentence + state -> expected call. Measures the separate model's robustness instead of
+guessing it. Runs against the live extractor, through the gateway proxy (or directly with --direct).
 
-  python3 tools/tool_agent_eval.py            # tutti i casi, stampa pass/fail e percentuale
-  python3 tools/tool_agent_eval.py -v         # anche i casi passati
+  python3 tools/tool_agent_eval.py            # all cases, prints pass/fail and the percentage
+  python3 tools/tool_agent_eval.py -v         # passed cases too
 
-Ogni caso: (stato FSM, frase, atteso) con atteso = None (nessuna azione) oppure (intent, {campi}) dove i campi
-elencati devono comparire con quel valore (mese/giorno confrontati normalizzati) e i campi assenti in 'atteso'
-NON devono comparire se indicati in 'vietati'. I casi vengono dai test dal vivo del 03-04/09 (plan/ramo-hud.md).
+Each case: (FSM state, sentence, expected) where expected = None (no action) or (intent, {fields}); the listed fields
+must appear with that value (month/day compared normalised) and fields absent from 'expected' must NOT appear when
+listed as forbidden. The cases come from the live tests of 3-4 September 2026.
 """
 import argparse, json, sys, time, urllib.request, ssl
 

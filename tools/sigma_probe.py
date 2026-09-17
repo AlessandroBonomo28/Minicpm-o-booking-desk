@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Sonde di σ (verdict: status/kind/help/claim/claim_day/claim_time/readback) e dell'estrattore sui casi di sess_41c874e48161
-(FORCESPEAK-BETAGAMMA, 08/09): proposta dell'operatore, si' del cliente alla proposta, domanda dello schermo ripetuta, aiuto stantio.
-Gira contro il tool agent acceso (:22700, solo cloud). python3 tools/sigma_probe.py [-v]"""
+"""Probes for the judge sigma (verdict: status/kind/help/claim/claim_day/claim_time/readback) and for the extractor, on the cases
+of session sess_41c874e48161: the operator's proposal, the customer's yes to a proposal, the screen question repeated, a stale help line.
+Runs against the live extractor service (:22700, cloud backend). python3 tools/sigma_probe.py [-v]"""
 import json, sys, time, urllib.request
 V = "-v" in sys.argv
 A = lambda x: {"role": "assistant", "text": x}

@@ -10,9 +10,9 @@ path, and the caller never waits for a turn.
 input. The sister branch [`text-booking`](../../tree/text-booking) sends the same screen as plain text in the vision
 slot, with no image encoding, and behaves the same. The two branches differ only in that channel.
 
-## 1. Demo (3 minutes)
+## 1. Demo (3 minutes) VIDEO
 
-▶ **[Demo video: booking and cancelling with real interruptions, database on screen]** — link to be added.
+▶ **[Demo video: booking and cancelling with real interruptions, database on screen](https://youtu.be/Yx80VoA8Vw4)** — link to be added.
 
 Recorded on one RTX 5090 (32 GB), headset, English, no editing inside a conversation.
 

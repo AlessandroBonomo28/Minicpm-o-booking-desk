@@ -1,5 +1,7 @@
 # MiniCPM-o Booking Desk
 
+<img width="70%" alt="compress" src="https://github.com/user-attachments/assets/eec8f2d2-30d7-4334-8a56-c87fa89a0759" />
+
 A full-duplex voice appointment desk on **MiniCPM-o 4.5, vanilla weights**. The speech model keeps listening and
 talking; a reasoning LLM and a deterministic state machine behind it run the tools (check, book, cancel) and write a
 short **operator screen** that the speech model reads through its vision input, every second, like an operator
@@ -34,10 +36,6 @@ The bookings database is visible on a second page and is written by code only, n
 ## 4. How it works
 
 <img width="70%" alt="Immagine Codex 18 set 2026, 08_01_42(1)" src="https://github.com/user-attachments/assets/daca0f36-c394-4e23-a242-009beb585e14" />
-
-#### State machine:
-
-<img width="70%" alt="compress" src="https://github.com/user-attachments/assets/eec8f2d2-30d7-4334-8a56-c87fa89a0759" />
 
 Three channels, each used for what the model was trained on:
 

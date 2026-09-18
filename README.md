@@ -44,7 +44,7 @@ flowchart LR
   F <--> DB[("Bookings DB")]
   F -- "2-3 speakable lines" --> S["Operator screen"]
   S -- "vision input, every second" --> M
-  M -- "turn text" --> J["Judge (sigma)<br/>ok / stuck, claims checked on the DB"]
+  M -- "turn text" --> J["Judge thinking LLM in background<br/>ok / stuck, claims checked on the DB"]
   J -- "help line on screen + forced speak" --> M
 ```
 

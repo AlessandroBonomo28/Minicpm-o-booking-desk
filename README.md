@@ -120,6 +120,7 @@ The full account is in [docs/WRITEUP.md](docs/WRITEUP.md). The short list:
   You are the operator of an appointment booking desk. Follow the instructions on the SCREEN, always repeat dates for
   confirmation."*
 - Headset required: there is no echo cancellation between the model's voice and the microphone.
+- **Make sure to be at the right distance from the mic: not too close and not too far, based on the mic you have**
 - The extractor and the judge are cloud calls (OpenAI-compatible endpoint); a local Qwen3-1.7B fallback exists and
   scores lower (48/55).
 - Occasional non-English phonemes after fillers on very short turns, from the speech decoder; accepted.

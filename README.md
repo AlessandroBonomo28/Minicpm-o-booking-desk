@@ -1,6 +1,6 @@
 # MiniCPM-o Booking Desk
 
-<img width="70%" alt="titlebooking" src="https://github.com/user-attachments/assets/dc275b45-16cb-45f8-9ded-13a565c39ad9" />
+<img width="70%" alt="Immagine Codex 18 set 2026, 08_01_42(1)" src="https://github.com/user-attachments/assets/daca0f36-c394-4e23-a242-009beb585e14" />
 
 A full-duplex voice appointment desk on **MiniCPM-o 4.5, vanilla weights**. The speech model keeps listening and
 talking; a reasoning LLM and a deterministic state machine behind it run the tools (check, book, cancel) and write a

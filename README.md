@@ -1,6 +1,6 @@
 # MiniCPM-o Booking Desk
 
-<img width="1200" height="648" alt="titlebooking" src="https://github.com/user-attachments/assets/dc275b45-16cb-45f8-9ded-13a565c39ad9" />
+<img width="70%" alt="titlebooking" src="https://github.com/user-attachments/assets/dc275b45-16cb-45f8-9ded-13a565c39ad9" />
 
 A full-duplex voice appointment desk on **MiniCPM-o 4.5, vanilla weights**. The speech model keeps listening and
 talking; a reasoning LLM and a deterministic state machine behind it run the tools (check, book, cancel) and write a
@@ -50,7 +50,7 @@ flowchart LR
 
 #### State machine:
 
-<img width="2786" height="1504" alt="compress" src="https://github.com/user-attachments/assets/7edb1753-01f4-4fdb-b442-b6f58a0fa7b2" />
+<img width="70%" alt="compress" src="https://github.com/user-attachments/assets/eec8f2d2-30d7-4334-8a56-c87fa89a0759" />
 
 Three channels, each used for what the model was trained on:
 

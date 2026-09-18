@@ -49,7 +49,8 @@ flowchart LR
 ```
 
 #### State machine:
-<img width="644" height="314" alt="stati" src="https://github.com/user-attachments/assets/f839c9d9-a96a-46ea-bf47-3bbace840bc9" />
+
+<img width="2786" height="1504" alt="compress" src="https://github.com/user-attachments/assets/7edb1753-01f4-4fdb-b442-b6f58a0fa7b2" />
 
 Three channels, each used for what the model was trained on:
 

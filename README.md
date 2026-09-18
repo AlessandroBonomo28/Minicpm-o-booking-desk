@@ -1,7 +1,5 @@
 # MiniCPM-o Booking Desk
 
-<img width="70%" alt="Immagine Codex 18 set 2026, 08_01_42(1)" src="https://github.com/user-attachments/assets/daca0f36-c394-4e23-a242-009beb585e14" />
-
 A full-duplex voice appointment desk on **MiniCPM-o 4.5, vanilla weights**. The speech model keeps listening and
 talking; a reasoning LLM and a deterministic state machine behind it run the tools (check, book, cancel) and write a
 short **operator screen** that the speech model reads through its vision input, every second, like an operator
@@ -35,18 +33,7 @@ The bookings database is visible on a second page and is written by code only, n
 
 ## 4. How it works
 
-```mermaid
-flowchart LR
-  C((Customer)) -- "mic, 16 kHz" --> M["MiniCPM-o 4.5<br/>full-duplex, listen/speak decision every second"]
-  M -- "speech, 24 kHz" --> C
-  C -. "VAD + Whisper" .-> X["Extractor LLM<br/>set / yes / no / cancel"]
-  X --> F["State machine<br/>IDLE - COLLECTING - CONFIRM - DONE"]
-  F <--> DB[("Bookings DB")]
-  F -- "2-3 speakable lines" --> S["Operator screen"]
-  S -- "vision input, every second" --> M
-  M -- "turn text" --> J["Judge thinking LLM in background<br/>ok / stuck, claims checked on the DB"]
-  J -- "help line on screen + forced speak" --> M
-```
+<img width="70%" alt="Immagine Codex 18 set 2026, 08_01_42(1)" src="https://github.com/user-attachments/assets/daca0f36-c394-4e23-a242-009beb585e14" />
 
 #### State machine:
 

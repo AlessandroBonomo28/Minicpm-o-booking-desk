@@ -48,6 +48,9 @@ flowchart LR
   J -- "help line on screen + forced speak" --> M
 ```
 
+#### State machine:
+<img width="644" height="314" alt="stati" src="https://github.com/user-attachments/assets/f839c9d9-a96a-46ea-bf47-3bbace840bc9" />
+
 Three channels, each used for what the model was trained on:
 
 - **Audio is only the customer.** No synthetic voice, no injected audio. The model's natural trigger to speak is
